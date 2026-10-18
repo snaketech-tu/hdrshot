@@ -1,0 +1,202 @@
+//! PNG output.
+
+use std::io::Write;
+
+use png::{BitDepth, ColorType, Compression, SrgbRenderingIntent};
+use rayon::prelude::*;
+
+use crate::color::{
+    SCRGB_WHITE_NITS, ToneCurve, bt709_to_bt2020, pq_encode, srgb_encode, tone_map_sdr,
+};
+use crate::decode::ScRgbImage;
+use crate::{Result, SdrOptions};
+
+/// Light-level statistics of an image, in nits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LightLevels {
+    /// Brightest channel value of any pixel (MaxCLL).
+    pub max: f32,
+    /// Average of each pixel's brightest channel (MaxFALL).
+    pub average: f32,
+    /// 99.9th percentile of each pixel's brightest channel.
+    pub p999: f32,
+}
+
+pub fn light_levels(image: &ScRgbImage) -> LightLevels {
+    let mut levels: Vec<f32> = image
+        .pixels
+        .par_iter()
+        .map(|p| p[0].max(p[1]).max(p[2]).max(0.0) * SCRGB_WHITE_NITS)
+        .collect();
+    if levels.is_empty() {
+        return LightLevels {
+            max: 0.0,
+            average: 0.0,
+            p999: 0.0,
+        };
+    }
+    let average =
+        (levels.par_iter().map(|&v| f64::from(v)).sum::<f64>() / levels.len() as f64) as f32;
+    let max = levels.par_iter().copied().reduce(|| 0.0, f32::max);
+    let idx = ((levels.len() - 1) as f64 * 0.999) as usize;
+    let (_, p999, _) = levels.select_nth_unstable_by(idx, f32::total_cmp);
+    LightLevels {
+        max,
+        average,
+        p999: *p999,
+    }
+}
+
+/// Write a 16-bit PNG in BT.2020 primaries with the PQ transfer function.
+pub fn write_hdr_png<W: Write>(image: &ScRgbImage, levels: &LightLevels, out: W) -> Result<()> {
+    let mut data = vec![0u8; image.pixels.len() * 6];
+    data.par_chunks_mut(6)
+        .zip(image.pixels.par_iter())
+        .for_each(|(out, &p)| {
+            for (i, c) in bt709_to_bt2020(p).into_iter().enumerate() {
+                let v = (pq_encode(c.max(0.0) * SCRGB_WHITE_NITS) * 65535.0).round() as u16;
+                out[i * 2..i * 2 + 2].copy_from_slice(&v.to_be_bytes());
+            }
+        });
+
+    let mut encoder = png::Encoder::new(out, image.width, image.height);
+    encoder.set_color(ColorType::Rgb);
+    encoder.set_depth(BitDepth::Sixteen);
+    encoder.set_compression(Compression::Fast);
+    let mut writer = encoder.write_header()?;
+
+    // cICP: BT.2020 primaries, PQ transfer, RGB (identity matrix), full range.
+    writer.write_chunk(png::chunk::ChunkType(*b"cICP"), &[9, 16, 0, 1])?;
+    // cLLI: MaxCLL and MaxFALL in units of 0.0001 nits.
+    let mut clli = [0u8; 8];
+    clli[..4].copy_from_slice(&to_clli_units(levels.max).to_be_bytes());
+    clli[4..].copy_from_slice(&to_clli_units(levels.average).to_be_bytes());
+    writer.write_chunk(png::chunk::ChunkType(*b"cLLI"), &clli)?;
+
+    writer.write_image_data(&data)?;
+    writer.finish()?;
+    Ok(())
+}
+
+fn to_clli_units(nits: f32) -> u32 {
+    (f64::from(nits.clamp(0.0, 10_000.0)) * 10_000.0).round() as u32
+}
+
+/// Write a tone-mapped 8-bit sRGB PNG.
+pub fn write_sdr_png<W: Write>(
+    image: &ScRgbImage,
+    levels: &LightLevels,
+    options: &SdrOptions,
+    out: W,
+) -> Result<()> {
+    let white = options.white_nits / SCRGB_WHITE_NITS;
+    let peak = options
+        .peak_nits
+        .unwrap_or(levels.p999)
+        .max(options.white_nits);
+    let curve = ToneCurve::new(peak / options.white_nits);
+    let mut data = vec![0u8; image.pixels.len() * 3];
+    data.par_chunks_mut(3)
+        .zip(image.pixels.par_iter())
+        .for_each(|(out, &p)| {
+            for (o, c) in out.iter_mut().zip(tone_map_sdr(p, white, &curve)) {
+                *o = (srgb_encode(c) * 255.0).round() as u8;
+            }
+        });
+
+    let mut encoder = png::Encoder::new(out, image.width, image.height);
+    encoder.set_color(ColorType::Rgb);
+    encoder.set_depth(BitDepth::Eight);
+    encoder.set_compression(Compression::Fast);
+    encoder.set_source_srgb(SrgbRenderingIntent::Perceptual);
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(&data)?;
+    writer.finish()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image(pixels: Vec<[f32; 3]>, width: u32) -> ScRgbImage {
+        let height = pixels.len() as u32 / width;
+        ScRgbImage {
+            width,
+            height,
+            pixels,
+        }
+    }
+
+    fn read_png(bytes: &[u8]) -> (png::Info<'static>, Vec<u8>) {
+        let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
+            .read_info()
+            .unwrap();
+        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+        let frame = reader.next_frame(&mut buf).unwrap();
+        buf.truncate(frame.buffer_size());
+        (reader.info().clone(), buf)
+    }
+
+    #[test]
+    fn light_levels_use_brightest_channel() {
+        let img = image(vec![[1.0, 0.0, 0.0], [0.0, 0.0, 3.0]], 2);
+        let levels = light_levels(&img);
+        assert_eq!(levels.max, 240.0);
+        assert_eq!(levels.average, 160.0);
+    }
+
+    #[test]
+    fn hdr_png_is_tagged_and_pq_encoded() {
+        // Black, scRGB white (80 nits) and 1000 nits white.
+        let img = image(vec![[0.0; 3], [1.0; 3], [12.5; 3]], 3);
+        let levels = light_levels(&img);
+        let mut bytes = Vec::new();
+        write_hdr_png(&img, &levels, &mut bytes).unwrap();
+
+        let (info, data) = read_png(&bytes);
+        assert_eq!(info.bit_depth, BitDepth::Sixteen);
+        assert_eq!(info.color_type, ColorType::Rgb);
+        let cicp = info.coding_independent_code_points.unwrap();
+        assert_eq!(
+            (
+                cicp.color_primaries,
+                cicp.transfer_function,
+                cicp.matrix_coefficients,
+                cicp.is_video_full_range_image
+            ),
+            (9, 16, 0, true)
+        );
+        let clli = info.content_light_level.unwrap();
+        assert_eq!(clli.max_content_light_level, 10_000_000);
+
+        let sample = |i: usize| u16::from_be_bytes([data[i * 2], data[i * 2 + 1]]);
+        assert_eq!(sample(0), 0);
+        let expect = |nits: f32| (pq_encode(nits) * 65535.0).round() as u16;
+        for c in 0..3 {
+            assert!(sample(3 + c).abs_diff(expect(80.0)) <= 2);
+            assert!(sample(6 + c).abs_diff(expect(1000.0)) <= 2);
+        }
+    }
+
+    #[test]
+    fn sdr_png_maps_reference_white_near_full_scale() {
+        let white = 203.0 / SCRGB_WHITE_NITS;
+        let img = image(vec![[0.0; 3], [white; 3], [white * 10.0; 3]], 3);
+        let levels = light_levels(&img);
+        let mut bytes = Vec::new();
+        let options = SdrOptions {
+            peak_nits: Some(2030.0),
+            ..Default::default()
+        };
+        write_sdr_png(&img, &levels, &options, &mut bytes).unwrap();
+
+        let (info, data) = read_png(&bytes);
+        assert_eq!(info.bit_depth, BitDepth::Eight);
+        assert!(info.srgb.is_some());
+        assert_eq!(&data[0..3], &[0, 0, 0]);
+        // Reference white sits just under the highlight roll-off.
+        assert!(data[3] > 220 && data[3] < 255);
+        assert_eq!(&data[6..9], &[255, 255, 255]);
+    }
+}
