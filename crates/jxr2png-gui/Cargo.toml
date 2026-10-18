@@ -1,0 +1,11 @@
+[package]
+name = "jxr2png-gui"
+description = "Desktop JXR to PNG converter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+eframe = "0.37.0"
+jxr2png-core = { version = "0.1.0", path = "../jxr2png-core" }

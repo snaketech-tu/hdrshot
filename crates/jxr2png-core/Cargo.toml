@@ -1,0 +1,10 @@
+[package]
+name = "jxr2png-core"
+description = "Convert HDR JPEG XR (.jxr) images to HDR and SDR PNG"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror = "2.0.21"
