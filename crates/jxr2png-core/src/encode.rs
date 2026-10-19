@@ -10,7 +10,7 @@ use crate::color::{
     SCRGB_WHITE_NITS, ToneCurve, bt709_to_bt2020, pq_encode, srgb_encode, tone_map_sdr,
 };
 use crate::decode::ScRgbImage;
-use crate::icc::pq_sdr_fallback_profile;
+use crate::icc::pq_profile;
 use crate::{HdrOptions, Result, SdrOptions};
 
 /// Light-level statistics of an image, in nits.
@@ -52,20 +52,12 @@ pub fn light_levels(image: &ScRgbImage) -> LightLevels {
 /// Write a 16-bit PNG in BT.2020 primaries with the PQ transfer function.
 ///
 /// Highlights above `hdr.peak_nits` roll off smoothly so the brightest
-/// pixel lands on that peak. `sdr` sets the tone curve of the embedded ICC
-/// profile, which viewers without HDR support use instead of the `cICP`
-/// chunk.
+/// pixel lands on that peak.
 ///
 /// HDR is signalled both by a PNG `cICP` chunk, which Windows Photos and
 /// HDR image viewers need, and by the profile's `cicp` tag. Discord's
 /// image service mishandles the chunk (see [`for_discord`]).
-pub fn write_hdr_png<W: Write>(
-    image: &ScRgbImage,
-    levels: &LightLevels,
-    hdr: &HdrOptions,
-    sdr: &SdrOptions,
-    out: W,
-) -> Result<()> {
+pub fn write_hdr_png<W: Write>(image: &ScRgbImage, hdr: &HdrOptions, out: W) -> Result<()> {
     // Work in BT.2020 nits; take each pixel's brightest channel for the
     // roll-off so hue is kept, as in the SDR path.
     let to_nits = |p: [f32; 3]| bt709_to_bt2020(p).map(|c| c.max(0.0) * SCRGB_WHITE_NITS);
@@ -107,10 +99,7 @@ pub fn write_hdr_png<W: Write>(
     let mut info = png::Info::with_size(image.width, image.height);
     info.color_type = ColorType::Rgb;
     info.bit_depth = BitDepth::Sixteen;
-    info.icc_profile = Some(Cow::Owned(pq_sdr_fallback_profile(
-        sdr.white_nits,
-        sdr_peak_nits(levels, sdr),
-    )));
+    info.icc_profile = Some(Cow::Owned(pq_profile()));
     let mut encoder = png::Encoder::with_info(out, info)?;
     // 16-bit PQ data compresses poorly with `Fast`; `Balanced` makes the
     // file about a third smaller at no loss. The 8-bit SDR PNG gains little.
@@ -295,16 +284,8 @@ mod tests {
     fn hdr_png_is_tagged_and_pq_encoded() {
         // Black, scRGB white (80 nits) and 1000 nits white.
         let img = image(vec![[0.0; 3], [1.0; 3], [12.5; 3]], 3);
-        let levels = light_levels(&img);
         let mut bytes = Vec::new();
-        write_hdr_png(
-            &img,
-            &levels,
-            &HdrOptions::default(),
-            &SdrOptions::default(),
-            &mut bytes,
-        )
-        .unwrap();
+        write_hdr_png(&img, &HdrOptions::default(), &mut bytes).unwrap();
 
         let (info, data) = read_png(&bytes);
         assert!(info.icc_profile.is_some());
@@ -363,15 +344,12 @@ mod tests {
     fn hdr_highlights_roll_off_to_peak() {
         // 100 nits, 900 nits and a 4000 nit highlight, limited to 1000 nits.
         let img = image(vec![[1.25; 3], [11.25; 3], [50.0; 3]], 3);
-        let levels = light_levels(&img);
         let mut bytes = Vec::new();
         write_hdr_png(
             &img,
-            &levels,
             &HdrOptions {
                 peak_nits: Some(1000.0),
             },
-            &SdrOptions::default(),
             &mut bytes,
         )
         .unwrap();
