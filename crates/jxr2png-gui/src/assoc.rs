@@ -153,11 +153,14 @@ mod imp {
         Ok(Outcome::Done)
     }
 
-    fn desktop_file() -> Option<PathBuf> {
-        let data = std::env::var_os("XDG_DATA_HOME")
+    fn data_home() -> Option<PathBuf> {
+        std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-        Some(data.join("applications").join(DESKTOP_FILE))
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+    }
+
+    fn desktop_file() -> Option<PathBuf> {
+        Some(data_home()?.join("applications").join(DESKTOP_FILE))
     }
 
     fn write_desktop_file() -> std::io::Result<()> {
@@ -171,6 +174,12 @@ mod imp {
             .replace('"', "\\\\\"")
             .replace('`', "\\\\`")
             .replace('$', "\\\\$");
+        // The icon goes where desktops look up `Icon=jxr2png`.
+        if let Some(data) = data_home() {
+            let icons = data.join("icons/hicolor/256x256/apps");
+            std::fs::create_dir_all(&icons)?;
+            std::fs::write(icons.join("jxr2png.png"), crate::ICON_PNG)?;
+        }
         std::fs::create_dir_all(path.parent().expect("has parent"))?;
         std::fs::write(
             &path,
@@ -179,6 +188,7 @@ mod imp {
                  Type=Application\n\
                  Name=jxr2png\n\
                  Comment=Convert HDR JPEG XR screenshots to PNG\n\
+                 Icon=jxr2png\n\
                  Exec=\"{exe}\" %F\n\
                  MimeType={MIME_TYPE};\n\
                  Categories=Graphics;\n\

@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use convert::{Event, Job, SharedClipboard};
 
+/// The app icon, 256 px. Windows also gets `assets/icon.ico` embedded in
+/// the executable by `build.rs`.
+const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -19,7 +23,10 @@ fn main() -> eframe::Result {
             .with_app_id("jxr2png")
             .with_inner_size([560.0, 640.0])
             .with_min_inner_size([420.0, 480.0])
-            .with_drag_and_drop(true),
+            .with_drag_and_drop(true)
+            .with_icon(
+                eframe::icon_data::from_png_bytes(ICON_PNG).expect("bundled icon is a valid PNG"),
+            ),
         ..Default::default()
     };
     eframe::run_native(
