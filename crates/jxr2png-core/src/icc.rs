@@ -11,9 +11,13 @@
 //! same highlight roll-off as the SDR output. Without them they read PQ
 //! values as sRGB and the picture looks grey and washed out. The `A2B0`
 //! table applies the roll-off to each pixel's brightest channel, exactly
-//! like the SDR PNG, so bright saturated lights keep their hue. The
-//! matrix/TRC tags are a simpler per-channel approximation for engines that
-//! ignore lookup tables.
+//! like the SDR PNG, so bright saturated lights keep their hue.
+//!
+//! There are deliberately no per-channel TRC curves. Engines that prefer a
+//! matrix/TRC profile would use them instead of the lookup table, and a
+//! per-channel roll-off turns warm colors yellow. Like libjxl's and Skia's
+//! PQ profiles, this one only has lookup tables (`B2A0` is a placeholder,
+//! since the profile is only ever used as a source).
 
 use crate::color::{ToneCurve, pq_decode, tone_map_sdr};
 
@@ -32,8 +36,6 @@ const BRADFORD_D65_TO_D50: [[f64; 3]; 3] = [
 ];
 
 const D50: [f64; 3] = [0.9642, 1.0, 0.8249];
-
-const TRC_ENTRIES: usize = 4096;
 
 /// Grid points per axis of the `A2B0` lookup table, spaced evenly in PQ.
 const CLUT_POINTS: usize = 33;
@@ -58,14 +60,6 @@ const CICP: [u8; 4] = [9, 16, 0, 1];
 /// white, and highlights roll off up to `peak_nits`.
 pub fn pq_sdr_fallback_profile(white_nits: f32, peak_nits: f32) -> Vec<u8> {
     let curve = ToneCurve::new(peak_nits.max(white_nits) / white_nits);
-    let trc: Vec<u16> = (0..TRC_ENTRIES)
-        .map(|i| {
-            let nits = pq_decode(i as f32 / (TRC_ENTRIES - 1) as f32);
-            let v = curve.apply(nits / white_nits).clamp(0.0, 1.0);
-            (v * 65535.0).round() as u16
-        })
-        .collect();
-
     let colorants = adapted_colorants();
     let a2b0 = lut16(&colorants, &curve, white_nits);
     let tags: Vec<([u8; 4], Vec<u8>)> = vec![
@@ -77,21 +71,16 @@ pub fn pq_sdr_fallback_profile(white_nits: f32, peak_nits: f32) -> Vec<u8> {
         (*b"rXYZ", xyz(colorants[0])),
         (*b"gXYZ", xyz(colorants[1])),
         (*b"bXYZ", xyz(colorants[2])),
-        (*b"rTRC", curv(&trc)),
         (*b"A2B0", a2b0),
+        (*b"B2A0", identity_b2a()),
     ];
-    // gTRC and bTRC share the rTRC data.
-    let tag_count = tags.len() + 2;
+    let tag_count = tags.len();
 
     let mut data = Vec::new();
     let mut table = Vec::new();
     let mut offset = 128 + 4 + 12 * tag_count;
-    let mut trc_entry = (0, 0);
     for (sig, body) in &tags {
         table.push((*sig, offset, body.len()));
-        if sig == b"rTRC" {
-            trc_entry = (offset, body.len());
-        }
         data.extend_from_slice(body);
         offset += body.len();
         while data.len() % 4 != 0 {
@@ -99,8 +88,6 @@ pub fn pq_sdr_fallback_profile(white_nits: f32, peak_nits: f32) -> Vec<u8> {
             offset += 1;
         }
     }
-    table.push((*b"gTRC", trc_entry.0, trc_entry.1));
-    table.push((*b"bTRC", trc_entry.0, trc_entry.1));
 
     let size = 128 + 4 + 12 * tag_count + data.len();
     let mut out = Vec::with_capacity(size);
@@ -208,11 +195,16 @@ fn xyz(v: [f64; 3]) -> Vec<u8> {
     out
 }
 
-fn curv(table: &[u16]) -> Vec<u8> {
-    let mut out = b"curv\0\0\0\0".to_vec();
-    out.extend_from_slice(&(table.len() as u32).to_be_bytes());
-    for v in table {
-        out.extend_from_slice(&v.to_be_bytes());
+/// `lutBToAType` with only identity B curves.
+fn identity_b2a() -> Vec<u8> {
+    let mut out = b"mBA \0\0\0\0".to_vec();
+    out.extend_from_slice(&[3, 3, 0, 0]);
+    out.extend_from_slice(&32u32.to_be_bytes()); // offset of the B curves
+    out.extend_from_slice(&[0; 16]); // no matrix, M curves, CLUT or A curves
+    for _ in 0..3 {
+        out.extend_from_slice(b"para\0\0\0\0");
+        out.extend_from_slice(&[0; 4]); // function type 0, reserved
+        out.extend_from_slice(&s15f16(1.0)); // gamma 1
     }
     out
 }
@@ -258,7 +250,7 @@ mod tests {
         assert_eq!(&p[8..12], &[4, 0x40, 0, 0]);
         assert_eq!(&p[36..40], b"acsp");
         let count = u32::from_be_bytes(p[128..132].try_into().unwrap()) as usize;
-        assert_eq!(count, 12);
+        assert_eq!(count, 10);
         let mut cicp = None;
         for i in 0..count {
             let entry = &p[132 + i * 12..144 + i * 12];
