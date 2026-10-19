@@ -105,7 +105,9 @@ pub fn write_hdr_png<W: Write>(
         sdr_peak_nits(levels, sdr),
     )));
     let mut encoder = png::Encoder::with_info(out, info)?;
-    encoder.set_compression(Compression::Fast);
+    // 16-bit PQ data compresses poorly with `Fast`; `Balanced` makes the
+    // file about a third smaller at no loss. The 8-bit SDR PNG gains little.
+    encoder.set_compression(Compression::Balanced);
     let mut writer = encoder.write_header()?;
 
     // cICP: BT.2020 primaries, PQ transfer, RGB (identity matrix), full range.
