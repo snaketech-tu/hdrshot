@@ -56,8 +56,7 @@ impl Job {
                 let result = jxr2png_core::convert_file(&path, &options);
                 if let Ok(outputs) = &result {
                     // The HDR PNG when there is one: it is the faithful copy.
-                    last = (outputs.hdr.clone().map(|p| (p, true)))
-                        .or_else(|| outputs.sdr.clone().map(|p| (p, false)));
+                    last = Some(outputs.clone());
                 }
                 send(
                     &tx,
@@ -66,7 +65,7 @@ impl Job {
             }
             let copied = clipboard
                 .zip(last)
-                .map(|(clipboard, (path, hdr))| copy(&clipboard, &path, hdr));
+                .map(|(clipboard, outputs)| copy(&clipboard, &outputs));
             send(&tx, Event::Done(copied));
         });
         Self { events, cancel }
@@ -82,11 +81,17 @@ impl Job {
     }
 }
 
-/// Put `path` on the clipboard as a file, so pasting it (into Discord,
-/// a browser or a folder) gives the full PNG, HDR included. An HDR PNG is
-/// copied without its `cICP` chunk so that it also shows right on Discord.
-/// Returns the message for the user.
-fn copy(clipboard: &SharedClipboard, path: &Path, hdr: bool) -> String {
+/// Put one of `outputs` on the clipboard as a file, preferring the HDR PNG,
+/// so pasting it (into Discord, a browser or a folder) gives the full PNG,
+/// HDR included. An HDR PNG is copied without its `cICP` chunk so that it
+/// also shows right on Discord. Returns the message for the user.
+pub fn copy(clipboard: &SharedClipboard, outputs: &Outputs) -> String {
+    // The HDR PNG when there is one: it is the faithful copy.
+    let (path, hdr) = match (&outputs.hdr, &outputs.sdr) {
+        (Some(hdr), _) => (hdr.as_path(), true),
+        (None, Some(sdr)) => (sdr.as_path(), false),
+        (None, None) => return "Nothing to copy".into(),
+    };
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let path = if hdr {
         match discord_copy(path) {
@@ -120,4 +125,18 @@ fn discord_copy(path: &Path) -> std::io::Result<PathBuf> {
     let copy = dir.join(path.file_name().unwrap_or_default());
     std::fs::write(&copy, jxr2png_core::for_discord(&std::fs::read(path)?))?;
     Ok(copy)
+}
+
+/// Run [`copy`] on a background thread (reading and rewriting the PNG takes
+/// a moment) and send its message to `messages`.
+pub fn copy_in_background(
+    clipboard: SharedClipboard,
+    outputs: Outputs,
+    messages: Sender<String>,
+    ctx: egui::Context,
+) {
+    thread::spawn(move || {
+        let _ = messages.send(copy(&clipboard, &outputs));
+        ctx.request_repaint();
+    });
 }

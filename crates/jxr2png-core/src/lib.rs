@@ -14,6 +14,7 @@ pub mod color;
 pub mod decode;
 pub mod encode;
 pub mod icc;
+pub mod resize;
 
 use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode};
@@ -76,6 +77,9 @@ pub struct ConvertOptions {
     pub output_dir: Option<PathBuf>,
     pub hdr: HdrOptions,
     pub sdr: SdrOptions,
+    /// Scale images taller than this down to this height, keeping the
+    /// aspect ratio. `None` (the default) keeps the source resolution.
+    pub max_height: Option<u32>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -117,7 +121,11 @@ pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {
 /// Convert one `.jxr` file according to `options`.
 pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
     let outputs = output_paths(input, options);
-    let image = decode(&std::fs::read(input)?)?;
+    let mut image = decode(&std::fs::read(input)?)?;
+    if let Some(max_height) = options.max_height {
+        let (width, height) = resize::fit_height(image.width, image.height, max_height);
+        image = resize::resize(&image, width, height);
+    }
     let levels = light_levels(&image);
     if let Some(dir) = &options.output_dir {
         std::fs::create_dir_all(dir)?;

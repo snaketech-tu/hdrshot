@@ -5,6 +5,7 @@ mod convert;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
 use jxr2png_core::{ConvertOptions, HdrOptions, OutputMode, Outputs, SdrOptions};
@@ -27,6 +28,12 @@ fn main() -> eframe::Result {
             .with_icon(
                 eframe::icon_data::from_png_bytes(ICON_PNG).expect("bundled icon is a valid PNG"),
             ),
+        // wgpu presents through a DirectX flip-model swap chain, which lets
+        // G-Sync/FreeSync follow the app's frame rate. egui only redraws on
+        // input, so the rate keeps jumping and variable-refresh monitors
+        // flicker. OpenGL goes through the desktop compositor instead.
+        #[cfg(windows)]
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
     eframe::run_native(
@@ -119,6 +126,9 @@ struct Entry {
 struct App {
     settings: Settings,
     tuning: Tuning,
+    /// Largest output height; `None` keeps the source resolution. Not
+    /// remembered, so every session starts at the source resolution.
+    max_height: Option<u32>,
     files: Vec<Entry>,
     job: Option<Job>,
     /// Files finished in the running (or last) batch, and its size.
@@ -126,6 +136,8 @@ struct App {
     notice: Option<String>,
     clipboard: SharedClipboard,
     toast: Option<Toast>,
+    /// Messages from clipboard copies running in the background.
+    copied: (Sender<String>, Receiver<String>),
     /// Whether jxr2png opens `.jxr` files; rechecked when the window
     /// regains focus, since the choice is made in the system's settings.
     is_default_app: bool,
@@ -155,12 +167,14 @@ impl App {
         let mut app = Self {
             settings,
             tuning: Tuning::default(),
+            max_height: None,
             files: Vec::new(),
             job: None,
             progress: (0, 0),
             notice: None,
             clipboard: SharedClipboard::default(),
             toast: None,
+            copied: channel(),
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
         };
@@ -227,6 +241,7 @@ impl App {
                 white_nits: t.sdr_white,
                 peak_nits: t.fixed_sdr_peak.then_some(t.sdr_peak),
             },
+            max_height: self.max_height,
         }
     }
 
@@ -308,6 +323,9 @@ impl App {
     }
 
     fn toast_ui(&mut self, ctx: &egui::Context) {
+        while let Ok(text) = self.copied.1.try_recv() {
+            self.show_toast(text, ctx);
+        }
         let Some(toast) = &self.toast else { return };
         let left = toast.until - ctx.input(|i| i.time);
         if left <= 0.0 {
@@ -454,6 +472,7 @@ impl App {
     fn file_list(&mut self, ui: &mut egui::Ui) {
         let running = self.running();
         let mut remove = None;
+        let mut copy = None;
         let stripe = ui.visuals().faint_bg_color;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -479,6 +498,17 @@ impl App {
                             remove = Some(i);
                         }
                         status_ui(ui, &entry.status);
+                        if let Status::Done(outputs) = &entry.status
+                            && ui
+                                .small_button("Copy for Discord")
+                                .on_hover_text(
+                                    "Copy the PNG (the HDR one if made) to paste into Discord. \
+                                     The copy leaves out the cICP chunk, which Discord turns yellow.",
+                                )
+                                .clicked()
+                        {
+                            copy = Some(outputs.clone());
+                        }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                             let name = entry.path.file_name().unwrap_or_default().to_string_lossy();
                             ui.add(egui::Label::new(name.as_ref()).truncate())
@@ -489,6 +519,14 @@ impl App {
             });
         if let Some(i) = remove {
             self.files.remove(i);
+        }
+        if let Some(outputs) = copy {
+            convert::copy_in_background(
+                self.clipboard.clone(),
+                outputs,
+                self.copied.0.clone(),
+                ui.ctx().clone(),
+            );
         }
     }
 
@@ -536,6 +574,25 @@ impl App {
                         }
                     });
                 });
+                ui.end_row();
+
+                ui.label("Resolution");
+                let label = |h: Option<u32>| match h {
+                    None => "Source".to_owned(),
+                    Some(h) => format!("{h}p"),
+                };
+                egui::ComboBox::from_id_salt("resolution")
+                    .selected_text(label(self.max_height))
+                    .show_ui(ui, |ui| {
+                        for h in [None, Some(2160), Some(1440), Some(1080), Some(720)] {
+                            ui.selectable_value(&mut self.max_height, h, label(h));
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "Scale images taller than this down to this height, keeping the \
+                         aspect ratio. Smaller images are never scaled up.",
+                    );
                 ui.end_row();
 
                 ui.label("Clipboard");

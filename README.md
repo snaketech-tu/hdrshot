@@ -67,7 +67,13 @@ icon, are added to the list. After converting, the last PNG (the HDR one if
 made) is copied to the clipboard as a file, so pasting it into Discord, a
 browser upload or a folder gives the full file. The HDR copy leaves out the
 `cICP` chunk so Discord shows it correctly; the saved file keeps it for
-Windows Photos and HDR viewers. This can be turned off. On Windows and Linux, "Open .jxr files with jxr2png" makes the
+Windows Photos and HDR viewers. This can be turned off. Each converted
+file also gets a "Copy for Discord" button that copies that image the same
+way. Resolution scales the output down to 2160p, 1440p, 1080p or 720p
+(keeping the aspect ratio, never scaling up); it defaults to Source and is
+not remembered between runs. On Windows the app draws with OpenGL, which
+avoids the flicker some variable refresh rate (G-Sync/FreeSync) monitors
+show with the default renderer. On Windows and Linux, "Open .jxr files with jxr2png" makes the
 app open `.jxr` files on double-click; Windows asks you to confirm the
 choice in Settings. The tuning options from the command line are
 under Advanced; they are off by default and reset every time the app
@@ -86,7 +92,8 @@ Everything is automatic by default; these options are only for tuning.
 `--hdr-peak <NITS>` limits the HDR PNG's brightest highlight, rolling off
 anything brighter. `--sdr-white <NITS>` sets which HDR brightness becomes SDR white (lower is
 brighter). `--sdr-peak <NITS>` sets the brightness that maps to full SDR
-white instead of using the 99.9th percentile.
+white instead of using the 99.9th percentile. `--max-height <PIXELS>`
+scales taller images down to that height, averaging in linear light.
 
 ## Testing with real screenshots
 
