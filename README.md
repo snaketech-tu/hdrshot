@@ -71,9 +71,9 @@ Windows Photos and HDR viewers. This can be turned off. Each converted
 file also gets a "Copy for Discord" button that copies that image the same
 way. Resolution scales the output down to 2160p, 1440p, 1080p or 720p
 (keeping the aspect ratio, never scaling up); it defaults to Source and is
-not remembered between runs. On Windows the app draws with OpenGL, which
-avoids the flicker some variable refresh rate (G-Sync/FreeSync) monitors
-show with the default renderer. On Windows and Linux, "Open .jxr files with jxr2png" makes the
+not remembered between runs. While the window is focused it redraws
+at the monitor's refresh rate, so variable refresh rate (G-Sync/FreeSync)
+monitors stay at a steady rate instead of flickering. On Windows and Linux, "Open .jxr files with jxr2png" makes the
 app open `.jxr` files on double-click; Windows asks you to confirm the
 choice in Settings. The tuning options from the command line are
 under Advanced; they are off by default and reset every time the app

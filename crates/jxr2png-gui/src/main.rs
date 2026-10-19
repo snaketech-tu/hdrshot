@@ -28,12 +28,6 @@ fn main() -> eframe::Result {
             .with_icon(
                 eframe::icon_data::from_png_bytes(ICON_PNG).expect("bundled icon is a valid PNG"),
             ),
-        // wgpu presents through a DirectX flip-model swap chain, which lets
-        // G-Sync/FreeSync follow the app's frame rate. egui only redraws on
-        // input, so the rate keeps jumping and variable-refresh monitors
-        // flicker. OpenGL goes through the desktop compositor instead.
-        #[cfg(windows)]
-        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
     eframe::run_native(
@@ -759,6 +753,14 @@ impl eframe::App for App {
             self.is_default_app = assoc::is_default();
         }
         self.was_focused = focused;
+        // With G-Sync/FreeSync on for windowed apps, the focused window sets
+        // the monitor's refresh rate. egui normally redraws only on input, so
+        // the rate keeps jumping between a few Hz and the maximum, which many
+        // panels show as flicker. Redrawing every vsync while focused keeps
+        // the refresh rate steady at the maximum.
+        if focused {
+            ctx.request_repaint();
+        }
         let dropped: Vec<PathBuf> = ui.input(|i| {
             i.raw
                 .dropped_files
