@@ -19,10 +19,12 @@ Windows HDR screenshots store linear scRGB: BT.709 primaries, where 1.0 is
 outside BT.709. Decoding uses [`jxr`](https://crates.io/crates/jxr), a pure
 Rust JPEG XR decoder, so no C toolchain is needed.
 
-- **HDR**: converted to BT.2020, encoded with PQ (absolute nits) and tagged
-  with `cICP` (BT.2020, PQ, full range) and `cLLI` (MaxCLL/MaxFALL).
+- **HDR**: converted to BT.2020 and encoded with PQ (absolute nits), keeping
+  the screenshot's brightness exactly. It's tagged with `cICP` (BT.2020, PQ,
+  full range), plus `mDCV` and `cLLI` describing the content's peak and
+  average brightness so HDR viewers can fit it to the display.
   Chrome, Edge and other HDR-aware apps show it in HDR. It also embeds an
-  ICC profile whose curves apply the SDR tone mapping, so viewers that
+  ICC profile that applies the same SDR tone mapping, so viewers that
   ignore `cICP` but do color management (such as the Windows Photo Viewer)
   show a normal SDR picture instead of a washed-out one.
 - **SDR**: the HDR reference white (203 nits by default, from ITU-R BT.2408)
@@ -53,7 +55,9 @@ jxr2png --sdr -o out/ *.jxr      # SDR only, into out/
 jxr2png --sdr --sdr-white 160 shot.jxr   # brighter SDR result
 ```
 
-`--sdr-white <NITS>` sets which HDR brightness becomes SDR white (lower is
+Everything is automatic by default; these options are only for tuning.
+`--hdr-peak <NITS>` limits the HDR PNG's brightest highlight, rolling off
+anything brighter. `--sdr-white <NITS>` sets which HDR brightness becomes SDR white (lower is
 brighter). `--sdr-peak <NITS>` sets the brightness that maps to full SDR
 white instead of using the 99.9th percentile.
 

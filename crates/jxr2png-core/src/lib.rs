@@ -37,6 +37,16 @@ impl OutputMode {
     }
 }
 
+/// Settings for the HDR output.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct HdrOptions {
+    /// Optional brightest luminance, in nits, to write. Brighter highlights
+    /// roll off smoothly up to this value. `None` (the default) keeps the
+    /// screenshot's brightness exactly and leaves fitting it to the display
+    /// to the viewer, as with the original JXR.
+    pub peak_nits: Option<f32>,
+}
+
 /// Settings for the tone-mapped SDR output.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SdrOptions {
@@ -63,6 +73,7 @@ pub struct ConvertOptions {
     pub mode: OutputMode,
     /// Directory to write into; `None` writes next to the input file.
     pub output_dir: Option<PathBuf>,
+    pub hdr: HdrOptions,
     pub sdr: SdrOptions,
 }
 
@@ -114,6 +125,7 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
         write_hdr_png(
             &image,
             &levels,
+            &options.hdr,
             &options.sdr,
             BufWriter::new(File::create(path)?),
         )?;

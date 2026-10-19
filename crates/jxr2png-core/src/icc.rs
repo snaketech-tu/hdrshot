@@ -7,10 +7,12 @@
 //! output. Without it they read PQ values as sRGB and the picture looks
 //! grey and washed out.
 //!
-//! The profile is ICC v2 with matrix/TRC tags, the form every color
-//! management engine supports, including Windows ICM.
+//! The profile is ICC v2. Its `A2B0` lookup table applies the roll-off to
+//! each pixel's brightest channel, exactly like the SDR PNG, so bright
+//! saturated lights keep their hue. The matrix/TRC tags are a simpler
+//! per-channel approximation for engines that ignore lookup tables.
 
-use crate::color::{ToneCurve, pq_decode};
+use crate::color::{ToneCurve, pq_decode, tone_map_sdr};
 
 /// Linear BT.2020 to CIE XYZ (D65).
 const BT2020_TO_XYZ: [[f64; 3]; 3] = [
@@ -31,6 +33,19 @@ const D65: [f64; 3] = [0.950_455, 1.0, 1.089_058];
 
 const TRC_ENTRIES: usize = 4096;
 
+/// Grid points per axis of the `A2B0` lookup table, spaced evenly in PQ.
+const CLUT_POINTS: usize = 33;
+
+/// Entries in the `A2B0` output curves.
+const LUT_OUTPUT_ENTRIES: usize = 4096;
+
+/// The CLUT stores encoded XYZ raised to this power and the output curves
+/// undo it, which keeps precision in the shadows.
+const LUT_GAMMA: f64 = 2.4;
+
+/// Largest XYZ value a 16-bit ICC v2 PCS can hold (0x8000 is 1.0).
+const PCS_XYZ_MAX: f64 = 1.0 + 32767.0 / 32768.0;
+
 pub const PROFILE_NAME: &str = "BT.2100 PQ with SDR fallback";
 
 /// Build a profile whose curves map PQ to SDR: `white_nits` becomes display
@@ -46,6 +61,7 @@ pub fn pq_sdr_fallback_profile(white_nits: f32, peak_nits: f32) -> Vec<u8> {
         .collect();
 
     let colorants = adapted_colorants();
+    let a2b0 = lut16(&colorants, &curve, white_nits);
     let tags: Vec<([u8; 4], Vec<u8>)> = vec![
         (*b"desc", text_description(PROFILE_NAME)),
         (*b"cprt", text("No copyright, use freely")),
@@ -54,6 +70,7 @@ pub fn pq_sdr_fallback_profile(white_nits: f32, peak_nits: f32) -> Vec<u8> {
         (*b"gXYZ", xyz(colorants[1])),
         (*b"bXYZ", xyz(colorants[2])),
         (*b"rTRC", curv(&trc)),
+        (*b"A2B0", a2b0),
     ];
     // gTRC and bTRC share the rTRC data.
     let tag_count = tags.len() + 2;
@@ -113,6 +130,49 @@ pub fn pq_sdr_fallback_profile(white_nits: f32, peak_nits: f32) -> Vec<u8> {
     out.extend_from_slice(&data);
     debug_assert_eq!(out.len(), size);
     out
+}
+
+/// `lut16Type` mapping PQ BT.2020 RGB to PCS XYZ with the hue-preserving
+/// SDR roll-off of [`crate::color::tone_map_sdr`].
+fn lut16(colorants: &[[f64; 3]; 3], curve: &ToneCurve, white_nits: f32) -> Vec<u8> {
+    let mut out = b"mft2\0\0\0\0".to_vec();
+    out.extend_from_slice(&[3, 3, CLUT_POINTS as u8, 0]);
+    // Identity matrix (only used with XYZ input).
+    for (i, j) in (0..3).flat_map(|i| (0..3).map(move |j| (i, j))) {
+        out.extend_from_slice(&s15f16(if i == j { 1.0 } else { 0.0 }));
+    }
+    out.extend_from_slice(&2u16.to_be_bytes());
+    out.extend_from_slice(&(LUT_OUTPUT_ENTRIES as u16).to_be_bytes());
+    // Identity input curves.
+    for _ in 0..3 {
+        out.extend_from_slice(&0u16.to_be_bytes());
+        out.extend_from_slice(&u16::MAX.to_be_bytes());
+    }
+    let node = |i: usize| pq_decode(i as f32 / (CLUT_POINTS - 1) as f32) / white_nits;
+    for r in 0..CLUT_POINTS {
+        for g in 0..CLUT_POINTS {
+            for b in 0..CLUT_POINTS {
+                let rgb = tone_map_sdr([node(r), node(g), node(b)], 1.0, curve);
+                for row in colorants_rows(colorants) {
+                    let xyz: f64 = (0..3).map(|k| row[k] * f64::from(rgb[k])).sum();
+                    let v = (xyz.max(0.0) / PCS_XYZ_MAX).min(1.0).powf(1.0 / LUT_GAMMA);
+                    out.extend_from_slice(&((v * 65535.0).round() as u16).to_be_bytes());
+                }
+            }
+        }
+    }
+    for _ in 0..3 {
+        for i in 0..LUT_OUTPUT_ENTRIES {
+            let v = (i as f64 / (LUT_OUTPUT_ENTRIES - 1) as f64).powf(LUT_GAMMA);
+            out.extend_from_slice(&((v * 65535.0).round() as u16).to_be_bytes());
+        }
+    }
+    out
+}
+
+/// Rows of the RGB to XYZ matrix whose columns are `colorants`.
+fn colorants_rows(colorants: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    [0, 1, 2].map(|axis| [colorants[0][axis], colorants[1][axis], colorants[2][axis]])
 }
 
 /// BT.2020 primaries in XYZ, adapted to D50, as (red, green, blue).
@@ -184,7 +244,7 @@ mod tests {
         );
         assert_eq!(&p[36..40], b"acsp");
         let count = u32::from_be_bytes(p[128..132].try_into().unwrap()) as usize;
-        assert_eq!(count, 9);
+        assert_eq!(count, 10);
         for i in 0..count {
             let entry = &p[132 + i * 12..144 + i * 12];
             let offset = u32::from_be_bytes(entry[4..8].try_into().unwrap()) as usize;

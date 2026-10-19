@@ -11,7 +11,7 @@ use crate::color::{
 };
 use crate::decode::ScRgbImage;
 use crate::icc::pq_sdr_fallback_profile;
-use crate::{Result, SdrOptions};
+use crate::{HdrOptions, Result, SdrOptions};
 
 /// Light-level statistics of an image, in nits.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,23 +51,51 @@ pub fn light_levels(image: &ScRgbImage) -> LightLevels {
 
 /// Write a 16-bit PNG in BT.2020 primaries with the PQ transfer function.
 ///
-/// `sdr` sets the tone curve of the embedded ICC profile, which viewers
-/// without HDR support use instead of the `cICP` chunk.
+/// Highlights above `hdr.peak_nits` roll off smoothly so the brightest
+/// pixel lands on that peak. `sdr` sets the tone curve of the embedded ICC
+/// profile, which viewers without HDR support use instead of `cICP`.
 pub fn write_hdr_png<W: Write>(
     image: &ScRgbImage,
     levels: &LightLevels,
+    hdr: &HdrOptions,
     sdr: &SdrOptions,
     out: W,
 ) -> Result<()> {
+    // Work in BT.2020 nits; take each pixel's brightest channel for the
+    // roll-off so hue is kept, as in the SDR path.
+    let to_nits = |p: [f32; 3]| bt709_to_bt2020(p).map(|c| c.max(0.0) * SCRGB_WHITE_NITS);
+    let source_peak = image
+        .pixels
+        .par_iter()
+        .map(|&p| to_nits(p).into_iter().fold(0.0, f32::max))
+        .reduce(|| 0.0, f32::max);
+    let roll_off = hdr
+        .peak_nits
+        .filter(|&peak| source_peak > peak)
+        .map(|peak| (peak, ToneCurve::new(source_peak / peak)));
+
     let mut data = vec![0u8; image.pixels.len() * 6];
-    data.par_chunks_mut(6)
+    let (max, sum) = data
+        .par_chunks_mut(6)
         .zip(image.pixels.par_iter())
-        .for_each(|(out, &p)| {
-            for (i, c) in bt709_to_bt2020(p).into_iter().enumerate() {
-                let v = (pq_encode(c.max(0.0) * SCRGB_WHITE_NITS) * 65535.0).round() as u16;
+        .map(|(out, &p)| {
+            let mut rgb = to_nits(p);
+            let brightest = rgb.into_iter().fold(0.0, f32::max);
+            if let Some((peak, curve)) = &roll_off
+                && brightest > 0.0
+            {
+                let scale = curve.apply(brightest / peak) * peak / brightest;
+                rgb = rgb.map(|c| c * scale);
+            }
+            for (i, c) in rgb.into_iter().enumerate() {
+                let v = (pq_encode(c) * 65535.0).round() as u16;
                 out[i * 2..i * 2 + 2].copy_from_slice(&v.to_be_bytes());
             }
-        });
+            let brightest = rgb.into_iter().fold(0.0, f32::max);
+            (brightest, f64::from(brightest))
+        })
+        .reduce(|| (0.0, 0.0), |a, b| (a.0.max(b.0), a.1 + b.1));
+    let average = (sum / image.pixels.len().max(1) as f64) as f32;
 
     let mut info = png::Info::with_size(image.width, image.height);
     info.color_type = ColorType::Rgb;
@@ -82,10 +110,20 @@ pub fn write_hdr_png<W: Write>(
 
     // cICP: BT.2020 primaries, PQ transfer, RGB (identity matrix), full range.
     writer.write_chunk(png::chunk::ChunkType(*b"cICP"), &[9, 16, 0, 1])?;
+    // mDCV: BT.2020 primaries and D65 white in units of 0.00002, then the
+    // display's peak and minimum luminance in units of 0.0001 nits.
+    let mastering_peak = roll_off.map_or(max, |(peak, _)| peak);
+    let mut mdcv = Vec::with_capacity(24);
+    for xy in [0.708, 0.292, 0.170, 0.797, 0.131, 0.046, 0.3127, 0.3290] {
+        mdcv.extend_from_slice(&((xy * 50_000.0f64).round() as u16).to_be_bytes());
+    }
+    mdcv.extend_from_slice(&to_clli_units(mastering_peak).to_be_bytes());
+    mdcv.extend_from_slice(&to_clli_units(0.005).to_be_bytes());
+    writer.write_chunk(png::chunk::ChunkType(*b"mDCV"), &mdcv)?;
     // cLLI: MaxCLL and MaxFALL in units of 0.0001 nits.
     let mut clli = [0u8; 8];
-    clli[..4].copy_from_slice(&to_clli_units(levels.max).to_be_bytes());
-    clli[4..].copy_from_slice(&to_clli_units(levels.average).to_be_bytes());
+    clli[..4].copy_from_slice(&to_clli_units(max).to_be_bytes());
+    clli[4..].copy_from_slice(&to_clli_units(average).to_be_bytes());
     writer.write_chunk(png::chunk::ChunkType(*b"cLLI"), &clli)?;
 
     writer.write_image_data(&data)?;
@@ -171,7 +209,14 @@ mod tests {
         let img = image(vec![[0.0; 3], [1.0; 3], [12.5; 3]], 3);
         let levels = light_levels(&img);
         let mut bytes = Vec::new();
-        write_hdr_png(&img, &levels, &SdrOptions::default(), &mut bytes).unwrap();
+        write_hdr_png(
+            &img,
+            &levels,
+            &HdrOptions::default(),
+            &SdrOptions::default(),
+            &mut bytes,
+        )
+        .unwrap();
 
         let (info, data) = read_png(&bytes);
         assert!(info.icc_profile.is_some());
@@ -197,6 +242,46 @@ mod tests {
             assert!(sample(3 + c).abs_diff(expect(80.0)) <= 2);
             assert!(sample(6 + c).abs_diff(expect(1000.0)) <= 2);
         }
+    }
+
+    #[test]
+    fn hdr_highlights_roll_off_to_peak() {
+        // 100 nits, 900 nits and a 4000 nit highlight, limited to 1000 nits.
+        let img = image(vec![[1.25; 3], [11.25; 3], [50.0; 3]], 3);
+        let levels = light_levels(&img);
+        let mut bytes = Vec::new();
+        write_hdr_png(
+            &img,
+            &levels,
+            &HdrOptions {
+                peak_nits: Some(1000.0),
+            },
+            &SdrOptions::default(),
+            &mut bytes,
+        )
+        .unwrap();
+
+        let (info, data) = read_png(&bytes);
+        let nits = |i: usize| {
+            crate::color::pq_decode(
+                f32::from(u16::from_be_bytes([data[i * 2], data[i * 2 + 1]])) / 65535.0,
+            )
+        };
+        assert!((nits(0) - 100.0).abs() < 1.0, "below the knee is unchanged");
+        assert!(
+            nits(3) > 750.0 && nits(3) < 900.0,
+            "near the peak is compressed"
+        );
+        assert!(
+            (nits(6) - 1000.0).abs() < 5.0,
+            "brightest lands on the peak"
+        );
+
+        let clli = info.content_light_level.unwrap();
+        assert!(clli.max_content_light_level.abs_diff(10_000_000) < 50_000);
+        let mdcv = info.mastering_display_color_volume.unwrap();
+        assert_eq!(mdcv.max_luminance, 10_000_000);
+        assert_eq!(mdcv.chromaticities.red.0.into_scaled(), 70_800);
     }
 
     #[test]

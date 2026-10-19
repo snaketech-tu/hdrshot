@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use jxr2png_core::{ConvertOptions, OutputMode, SdrOptions};
+use jxr2png_core::{ConvertOptions, HdrOptions, OutputMode, SdrOptions};
 
 /// Convert HDR JPEG XR (.jxr) images to HDR and/or SDR PNG files.
 #[derive(Parser, Debug)]
@@ -24,6 +24,11 @@ struct Args {
     #[arg(short, long)]
     output: Option<PathBuf>,
 
+    /// Limit the HDR PNG's brightest highlight to this many nits; brighter
+    /// parts roll off smoothly. By default the original brightness is kept.
+    #[arg(long, value_name = "NITS")]
+    hdr_peak: Option<f32>,
+
     /// HDR brightness, in nits, that becomes white in the SDR PNG.
     #[arg(long, value_name = "NITS", default_value_t = SdrOptions::default().white_nits)]
     sdr_white: f32,
@@ -44,6 +49,9 @@ fn main() -> ExitCode {
     let options = ConvertOptions {
         mode,
         output_dir: args.output,
+        hdr: HdrOptions {
+            peak_nits: args.hdr_peak,
+        },
         sdr: SdrOptions {
             white_nits: args.sdr_white,
             peak_nits: args.sdr_peak,
