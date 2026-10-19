@@ -5,12 +5,23 @@
 //! the tag alone, which keeps Discord copies without the chunk in HDR (see
 //! [`crate::for_discord`]); Windows Photos also needs the chunk.
 //!
-//! Otherwise it is a plain matrix/TRC profile describing the pixels as they
-//! are: BT.2020 primaries and the PQ curve, with 10,000 nits as 1.0. There
-//! is no SDR fallback, so apps that only do SDR color management show the
-//! picture dark.
+//! Viewers that only do SDR color management, such as the Windows Photo
+//! Viewer, use the profile's lookup tables instead, so they bake in the
+//! same highlight roll-off as the SDR output. Without them they read PQ
+//! values as sRGB and the picture looks grey and washed out. The `A2B0`
+//! table applies the roll-off to each pixel's brightest channel, exactly
+//! like the SDR PNG, so bright saturated lights keep their hue.
+//!
+//! There are deliberately no per-channel TRC curves. Engines that prefer a
+//! matrix/TRC profile would use them instead of the lookup table, and a
+//! per-channel roll-off turns warm colors yellow. Like libjxl's and Skia's
+//! PQ profiles, this one only has lookup tables (`B2A0` is a placeholder,
+//! since the profile is only ever used as a source).
+//!
+//! The profile must stay under 32 KiB: Discord's image service drops larger
+//! profiles, and then shows the PQ values as sRGB, washed out and yellow.
 
-use crate::color::pq_decode;
+use crate::color::{ToneCurve, pq_decode, tone_map_sdr};
 
 /// Linear BT.2020 to CIE XYZ (D65).
 const BT2020_TO_XYZ: [[f64; 3]; 3] = [
@@ -28,25 +39,37 @@ const BRADFORD_D65_TO_D50: [[f64; 3]; 3] = [
 
 const D50: [f64; 3] = [0.9642, 1.0, 0.8249];
 
-/// Entries in the PQ `curv` table, shared by the three channels.
-const TRC_ENTRIES: usize = 1024;
+/// Grid points per axis of the `A2B0` lookup table, spaced evenly in PQ.
+/// 17 is the most that keeps the profile under [`MAX_PROFILE_SIZE`]; on the
+/// sample screenshots the fallback differs from a 33-point grid by under
+/// half an 8-bit step on average.
+const CLUT_POINTS: usize = 17;
 
-/// PQ's absolute peak, which the TRC maps to 1.0.
-const PQ_PEAK_NITS: f32 = 10_000.0;
+/// Entries in the `A2B0` output curves.
+const LUT_OUTPUT_ENTRIES: usize = 256;
 
 /// Largest profile some services keep (Discord drops bigger ones).
 pub const MAX_PROFILE_SIZE: usize = 32 * 1024;
 
-pub const PROFILE_NAME: &str = "BT.2100 PQ";
+/// The CLUT stores encoded XYZ raised to this power and the output curves
+/// undo it, which keeps precision in the shadows.
+const LUT_GAMMA: f64 = 2.4;
+
+/// Largest XYZ value the 16-bit ICC PCS encoding can hold (0x8000 is 1.0).
+const PCS_XYZ_MAX: f64 = 1.0 + 32767.0 / 32768.0;
+
+pub const PROFILE_NAME: &str = "BT.2100 PQ with SDR fallback";
 
 /// Coding-independent code points for the `cicp` tag: BT.2020 primaries,
 /// PQ transfer, RGB (identity matrix), full range.
 const CICP: [u8; 4] = [9, 16, 0, 1];
 
-/// Build the BT.2100 PQ profile.
-pub fn pq_profile() -> Vec<u8> {
+/// Build a profile whose curves map PQ to SDR: `white_nits` becomes display
+/// white, and highlights roll off up to `peak_nits`.
+pub fn pq_sdr_fallback_profile(white_nits: f32, peak_nits: f32) -> Vec<u8> {
+    let curve = ToneCurve::new(peak_nits.max(white_nits) / white_nits);
     let colorants = adapted_colorants();
-    let trc = pq_trc();
+    let a2b0 = lut16(&colorants, &curve, white_nits);
     let tags: Vec<([u8; 4], Vec<u8>)> = vec![
         (*b"desc", mluc(PROFILE_NAME)),
         (*b"cprt", mluc("No copyright, use freely")),
@@ -56,34 +79,25 @@ pub fn pq_profile() -> Vec<u8> {
         (*b"rXYZ", xyz(colorants[0])),
         (*b"gXYZ", xyz(colorants[1])),
         (*b"bXYZ", xyz(colorants[2])),
-        (*b"rTRC", trc.clone()),
-        (*b"gTRC", trc.clone()),
-        (*b"bTRC", trc),
+        (*b"A2B0", a2b0),
+        (*b"B2A0", identity_b2a()),
     ];
     let tag_count = tags.len();
 
-    // Tags with identical contents share one copy, as the spec allows.
-    let mut data: Vec<u8> = Vec::new();
+    let mut data = Vec::new();
     let mut table = Vec::new();
-    let mut stored: Vec<(&[u8], usize)> = Vec::new();
-    let base = 128 + 4 + 12 * tag_count;
+    let mut offset = 128 + 4 + 12 * tag_count;
     for (sig, body) in &tags {
-        let offset = match stored.iter().find(|(b, _)| *b == body.as_slice()) {
-            Some(&(_, offset)) => offset,
-            None => {
-                let offset = base + data.len();
-                data.extend_from_slice(body);
-                while !data.len().is_multiple_of(4) {
-                    data.push(0);
-                }
-                stored.push((body, offset));
-                offset
-            }
-        };
         table.push((*sig, offset, body.len()));
+        data.extend_from_slice(body);
+        offset += body.len();
+        while data.len() % 4 != 0 {
+            data.push(0);
+            offset += 1;
+        }
     }
 
-    let size = base + data.len();
+    let size = 128 + 4 + 12 * tag_count + data.len();
     let mut out = Vec::with_capacity(size);
     // Header.
     out.extend_from_slice(&(size as u32).to_be_bytes());
@@ -101,7 +115,9 @@ pub fn pq_profile() -> Vec<u8> {
     out.extend_from_slice(&[0; 4]); // manufacturer
     out.extend_from_slice(&[0; 4]); // model
     out.extend_from_slice(&[0; 8]); // attributes
-    // Relative colorimetric, as in libjxl's PQ profile.
+    // Relative colorimetric, as in libjxl's PQ profile. CMMs that follow the
+    // header's intent and see perceptual on a v4 profile assume the v4
+    // perceptual black point and crush the shadows.
     out.extend_from_slice(&1u32.to_be_bytes());
     for v in D50 {
         out.extend_from_slice(&s15f16(v));
@@ -122,15 +138,47 @@ pub fn pq_profile() -> Vec<u8> {
     out
 }
 
-/// `curveType` table of the PQ EOTF, normalized so 10,000 nits is 1.0.
-fn pq_trc() -> Vec<u8> {
-    let mut out = b"curv\0\0\0\0".to_vec();
-    out.extend_from_slice(&(TRC_ENTRIES as u32).to_be_bytes());
-    for i in 0..TRC_ENTRIES {
-        let linear = pq_decode(i as f32 / (TRC_ENTRIES - 1) as f32) / PQ_PEAK_NITS;
-        out.extend_from_slice(&((linear.clamp(0.0, 1.0) * 65535.0).round() as u16).to_be_bytes());
+/// `lut16Type` mapping PQ BT.2020 RGB to PCS XYZ with the hue-preserving
+/// SDR roll-off of [`crate::color::tone_map_sdr`].
+fn lut16(colorants: &[[f64; 3]; 3], curve: &ToneCurve, white_nits: f32) -> Vec<u8> {
+    let mut out = b"mft2\0\0\0\0".to_vec();
+    out.extend_from_slice(&[3, 3, CLUT_POINTS as u8, 0]);
+    // Identity matrix (only used with XYZ input).
+    for (i, j) in (0..3).flat_map(|i| (0..3).map(move |j| (i, j))) {
+        out.extend_from_slice(&s15f16(if i == j { 1.0 } else { 0.0 }));
+    }
+    out.extend_from_slice(&2u16.to_be_bytes());
+    out.extend_from_slice(&(LUT_OUTPUT_ENTRIES as u16).to_be_bytes());
+    // Identity input curves.
+    for _ in 0..3 {
+        out.extend_from_slice(&0u16.to_be_bytes());
+        out.extend_from_slice(&u16::MAX.to_be_bytes());
+    }
+    let node = |i: usize| pq_decode(i as f32 / (CLUT_POINTS - 1) as f32) / white_nits;
+    for r in 0..CLUT_POINTS {
+        for g in 0..CLUT_POINTS {
+            for b in 0..CLUT_POINTS {
+                let rgb = tone_map_sdr([node(r), node(g), node(b)], 1.0, curve);
+                for row in colorants_rows(colorants) {
+                    let xyz: f64 = (0..3).map(|k| row[k] * f64::from(rgb[k])).sum();
+                    let v = (xyz.max(0.0) / PCS_XYZ_MAX).min(1.0).powf(1.0 / LUT_GAMMA);
+                    out.extend_from_slice(&((v * 65535.0).round() as u16).to_be_bytes());
+                }
+            }
+        }
+    }
+    for _ in 0..3 {
+        for i in 0..LUT_OUTPUT_ENTRIES {
+            let v = (i as f64 / (LUT_OUTPUT_ENTRIES - 1) as f64).powf(LUT_GAMMA);
+            out.extend_from_slice(&((v * 65535.0).round() as u16).to_be_bytes());
+        }
     }
     out
+}
+
+/// Rows of the RGB to XYZ matrix whose columns are `colorants`.
+fn colorants_rows(colorants: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    [0, 1, 2].map(|axis| [colorants[0][axis], colorants[1][axis], colorants[2][axis]])
 }
 
 /// BT.2020 primaries in XYZ, adapted to D50, as (red, green, blue).
@@ -154,6 +202,20 @@ fn xyz(v: [f64; 3]) -> Vec<u8> {
     let mut out = b"XYZ \0\0\0\0".to_vec();
     for c in v {
         out.extend_from_slice(&s15f16(c));
+    }
+    out
+}
+
+/// `lutBToAType` with only identity B curves.
+fn identity_b2a() -> Vec<u8> {
+    let mut out = b"mBA \0\0\0\0".to_vec();
+    out.extend_from_slice(&[3, 3, 0, 0]);
+    out.extend_from_slice(&32u32.to_be_bytes()); // offset of the B curves
+    out.extend_from_slice(&[0; 16]); // no matrix, M curves, CLUT or A curves
+    for _ in 0..3 {
+        out.extend_from_slice(b"para\0\0\0\0");
+        out.extend_from_slice(&[0; 4]); // function type 0, reserved
+        out.extend_from_slice(&s15f16(1.0)); // gamma 1
     }
     out
 }
@@ -191,7 +253,7 @@ mod tests {
 
     #[test]
     fn profile_is_well_formed() {
-        let p = pq_profile();
+        let p = pq_sdr_fallback_profile(203.0, 1000.0);
         assert_eq!(
             u32::from_be_bytes(p[0..4].try_into().unwrap()) as usize,
             p.len()
@@ -200,7 +262,7 @@ mod tests {
         assert_eq!(&p[8..12], &[4, 0x40, 0, 0]);
         assert_eq!(&p[36..40], b"acsp");
         let count = u32::from_be_bytes(p[128..132].try_into().unwrap()) as usize;
-        assert_eq!(count, 11);
+        assert_eq!(count, 10);
         let mut cicp = None;
         for i in 0..count {
             let entry = &p[132 + i * 12..144 + i * 12];

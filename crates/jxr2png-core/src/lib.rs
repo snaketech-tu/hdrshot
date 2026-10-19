@@ -123,7 +123,13 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
         std::fs::create_dir_all(dir)?;
     }
     if let Some(path) = &outputs.hdr {
-        write_hdr_png(&image, &options.hdr, BufWriter::new(File::create(path)?))?;
+        write_hdr_png(
+            &image,
+            &levels,
+            &options.hdr,
+            &options.sdr,
+            BufWriter::new(File::create(path)?),
+        )?;
     }
     if let Some(path) = &outputs.sdr {
         write_sdr_png(

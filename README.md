@@ -29,9 +29,11 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   with wrong colors (warm scenes turn yellow) but shows them correctly
   without it, so the desktop app's clipboard copy leaves the chunk out (and `mDCV`,
   which the PNG spec only allows together with `cICP`).
-  The profile describes the pixels as they are (BT.2020 primaries, PQ
-  curve) with no SDR fallback, so SDR-only viewers show the picture dark;
-  use the SDR PNG for those.
+  SDR-only viewers
+  that do color management (such as the Windows Photo Viewer) use the
+  profile's lookup table instead, which applies the same SDR tone mapping
+  as the SDR output, so they show a normal picture instead of a washed-out
+  one.
 - **SDR**: scRGB 1.0 (80 nits) becomes SDR white by default, matching how
   Windows shows these screenshots in SDR viewers. Highlights above that roll off smoothly up to the
   image's 99.9th percentile brightness. The curve is applied to each pixel's
