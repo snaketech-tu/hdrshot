@@ -24,9 +24,12 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   full range), plus `mDCV` and `cLLI` describing the content's peak and
   average brightness so HDR viewers can fit it to the display.
   Chrome, Edge and other HDR-aware apps show it in HDR. It also embeds an
-  ICC profile that applies the same SDR tone mapping, so viewers that
-  ignore `cICP` but do color management (such as the Windows Photo Viewer)
-  show a normal SDR picture instead of a washed-out one.
+  ICC v4.4 profile with a `cicp` tag, which is how Windows Photos detects
+  HDR, so it shows the PNG in HDR like the original JXR. SDR-only viewers
+  that do color management (such as the Windows Photo Viewer) use the
+  profile's lookup table instead, which applies the same SDR tone mapping
+  as the SDR output, so they show a normal picture instead of a washed-out
+  one.
 - **SDR**: scRGB 1.0 (80 nits) becomes SDR white by default, matching how
   Windows shows these screenshots in SDR viewers. Highlights above that roll off smoothly up to the
   image's 99.9th percentile brightness. The curve is applied to each pixel's
