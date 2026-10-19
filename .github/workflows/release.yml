@@ -1,0 +1,143 @@
+name: Release
+
+# Pushing a tag such as v1.0.0 builds the CLI and desktop app for Windows,
+# macOS and Linux and publishes them as a GitHub release. The release notes
+# are that version's section of CHANGELOG.md.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release, e.g. v1.0.0 (created on the selected branch if missing)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-universal
+            os: macos-latest
+          # The oldest supported runner, so the binaries run on older glibc.
+          - name: linux-x64
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        # Link the C runtime statically so no Visual C++ redistributable is needed.
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          cargo build --release --locked --workspace
+          dir="jxr2png-$TAG-${{ matrix.name }}"
+          mkdir "$dir"
+          cp target/release/jxr2png.exe target/release/jxr2png-gui.exe README.md LICENSE "$dir/"
+          7z a "$dir.zip" "$dir" > /dev/null
+          echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked --workspace --target "$target"
+          done
+          dir="jxr2png-$TAG-${{ matrix.name }}"
+          app="$dir/jxr2png.app/Contents"
+          mkdir -p "$app/MacOS" "$app/Resources"
+          for bin in jxr2png jxr2png-gui; do
+            lipo -create -output "target/$bin" \
+              "target/aarch64-apple-darwin/release/$bin" \
+              "target/x86_64-apple-darwin/release/$bin"
+          done
+          cp target/jxr2png "$dir/"
+          cp target/jxr2png-gui "$app/MacOS/"
+          iconset="$RUNNER_TEMP/jxr2png.iconset"
+          mkdir "$iconset"
+          for size in 16 32 64 128 256; do
+            sips -z $size $size crates/jxr2png-gui/assets/icon.png --out "$iconset/icon_${size}x${size}.png" > /dev/null
+          done
+          for size in 16 32 64 128; do
+            cp "$iconset/icon_$((size * 2))x$((size * 2)).png" "$iconset/icon_${size}x${size}@2x.png"
+          done
+          iconutil -c icns "$iconset" -o "$app/Resources/jxr2png.icns"
+          version="${TAG#v}"
+          cat > "$app/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>jxr2png</string>
+            <key>CFBundleDisplayName</key><string>jxr2png</string>
+            <key>CFBundleIdentifier</key><string>io.github.snaketech-tu.jxr2png</string>
+            <key>CFBundleExecutable</key><string>jxr2png-gui</string>
+            <key>CFBundleIconFile</key><string>jxr2png</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$version</string>
+            <key>CFBundleVersion</key><string>$version</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOF
+          # Ad-hoc signature: required for Apple silicon, not a notarization.
+          codesign --force --deep --sign - "$dir/jxr2png.app" "$dir/jxr2png"
+          cp README.md LICENSE "$dir/"
+          ditto -c -k --keepParent "$dir" "$dir.zip"
+          echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release --locked --workspace
+          dir="jxr2png-$TAG-${{ matrix.name }}"
+          mkdir "$dir"
+          cp target/release/jxr2png target/release/jxr2png-gui README.md LICENSE "$dir/"
+          tar -czf "$dir.tar.gz" "$dir"
+          echo "ASSET=$dir.tar.gz" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="${TAG#v}" '
+            /^## / { on = index($0, "[" v "]") > 0; next }
+            on' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section for $TAG"; exit 1; }
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: jxr2png ${{ env.TAG }}
+          body_path: notes.md
+          files: dist/*
