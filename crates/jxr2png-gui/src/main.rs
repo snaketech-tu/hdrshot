@@ -353,7 +353,7 @@ impl App {
             return;
         }
         if self.is_default_app {
-            ui.weak("✔ Opens .jxr files");
+            ui.weak("Opens .jxr files");
             return;
         }
         if ui
@@ -426,12 +426,17 @@ impl App {
         };
         let big = height > 120.0;
         if big {
-            painter.text(
-                center - Vec2::new(0.0, 34.0),
-                egui::Align2::CENTER_CENTER,
-                "⬇",
-                egui::FontId::proportional(36.0),
-                if highlight { accent } else { weak },
+            // Drawn as shapes: egui's bundled fonts have no arrow glyphs.
+            let arrow = Stroke::new(3.0, if highlight { accent } else { weak });
+            let tip = center - Vec2::new(0.0, 22.0);
+            painter.line_segment([center - Vec2::new(0.0, 48.0), tip], arrow);
+            painter.line(
+                vec![
+                    tip + Vec2::new(-10.0, -10.0),
+                    tip,
+                    tip + Vec2::new(10.0, -10.0),
+                ],
+                arrow,
             );
         }
         let title_y = if big { 10.0 } else { -9.0 };
@@ -485,7 +490,7 @@ impl App {
                         ui.spacing_mut().item_spacing.x = 8.0;
                         if !running
                             && ui
-                                .small_button("✕")
+                                .small_button("×")
                                 .on_hover_text("Remove from the list")
                                 .clicked()
                         {
@@ -700,7 +705,7 @@ impl App {
                 }
                 if let Some(dir) = self.output_folder()
                     && ui
-                        .button("🗁 Open folder")
+                        .button("Open folder")
                         .on_hover_text(dir.display().to_string())
                         .clicked()
                 {
@@ -823,11 +828,11 @@ fn status_ui(ui: &mut egui::Ui, status: &Status) {
                 .flatten()
                 .map(|p| p.display().to_string())
                 .collect();
-            ui.label(RichText::new("✔ Done").color(ok_color(ui)))
+            ui.label(RichText::new("Done").color(ok_color(ui)))
                 .on_hover_text(format!("Saved:\n{}", saved.join("\n")));
         }
         Status::Failed(error) => {
-            ui.label(RichText::new("✖ Failed").color(ui.visuals().error_fg_color))
+            ui.label(RichText::new("Failed").color(ui.visuals().error_fg_color))
                 .on_hover_text(error);
         }
     }
