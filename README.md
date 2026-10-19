@@ -59,8 +59,9 @@ cargo run --release -p jxr2png-gui
 Drop `.jxr` files or whole folders onto the window (or click the drop area
 to choose files), pick HDR, SDR or both, choose where to save, and press
 Convert. Files given on the command line, or dropped onto the program's
-icon, are added to the list. After converting, the last image is copied to
-the clipboard (as SDR) so it can be pasted straight into a chat; this can be
+icon, are added to the list. After converting, the last PNG (the HDR one if
+made) is copied to the clipboard as a file, so pasting it into Discord, a
+browser upload or a folder gives the file exactly as written; this can be
 turned off. On Windows and Linux, "Open .jxr files with jxr2png" makes the
 app open `.jxr` files on double-click; Windows asks you to confirm the
 choice in Settings. The tuning options from the command line are

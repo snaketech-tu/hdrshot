@@ -31,7 +31,7 @@ pub struct Job {
 impl Job {
     /// Convert `files` one after another (the core already uses every CPU
     /// core per image). Each event carries the file's index in `files`.
-    /// With `clipboard`, the last image converted is copied to it as SDR.
+    /// With `clipboard`, the last PNG written is copied to it.
     pub fn start(
         files: Vec<(usize, PathBuf)>,
         options: ConvertOptions,
@@ -52,20 +52,19 @@ impl Job {
                     break;
                 }
                 send(&tx, Event::Started(index));
-                let result = convert(&path, &options).map(|(outputs, snapshot)| {
-                    last = Some(snapshot);
-                    outputs
-                });
+                let result = jxr2png_core::convert_file(&path, &options);
+                if let Ok(outputs) = &result {
+                    // The HDR PNG when there is one: it is the faithful copy.
+                    last = outputs.hdr.clone().or_else(|| outputs.sdr.clone());
+                }
                 send(
                     &tx,
                     Event::Finished(index, result.map_err(|e| e.to_string())),
                 );
             }
-            // Encoding for the clipboard takes a moment for big images, so
-            // it happens here rather than on the UI thread.
             let copied = clipboard
                 .zip(last)
-                .map(|(clipboard, image)| copy(&clipboard, image));
+                .map(|(clipboard, path)| copy(&clipboard, &path));
             send(&tx, Event::Done(copied));
         });
         Self { events, cancel }
@@ -81,16 +80,10 @@ impl Job {
     }
 }
 
-/// The last image's SDR pixels, kept as RGB until the batch is over.
-struct Rgb {
-    name: String,
-    width: usize,
-    height: usize,
-    rgb: Vec<u8>,
-}
-
-/// Copy `image` and describe the result for the user.
-fn copy(clipboard: &SharedClipboard, image: Rgb) -> String {
+/// Put `path` on the clipboard as a file, so pasting it (into Discord,
+/// a browser or a folder) gives the PNG exactly as written, HDR included.
+/// Returns the message for the user.
+fn copy(clipboard: &SharedClipboard, path: &Path) -> String {
     let mut clipboard = clipboard.lock().unwrap_or_else(|e| e.into_inner());
     let clipboard = match &mut *clipboard {
         Some(c) => c,
@@ -99,37 +92,9 @@ fn copy(clipboard: &SharedClipboard, image: Rgb) -> String {
             Err(e) => return format!("Could not copy to the clipboard: {e}"),
         },
     };
-    let rgba = image
-        .rgb
-        .as_chunks::<3>()
-        .0
-        .iter()
-        .flat_map(|&[r, g, b]| [r, g, b, 255])
-        .collect::<Vec<u8>>();
-    let data = arboard::ImageData {
-        width: image.width,
-        height: image.height,
-        bytes: rgba.into(),
-    };
-    match clipboard.set_image(data) {
-        Ok(()) => format!("Copied {} to the clipboard", image.name),
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    match clipboard.set().file_list(&[path]) {
+        Ok(()) => format!("Copied {name} to the clipboard"),
         Err(e) => format!("Could not copy to the clipboard: {e}"),
     }
-}
-
-fn convert(path: &Path, options: &ConvertOptions) -> jxr2png_core::Result<(Outputs, Rgb)> {
-    let image = jxr2png_core::decode(&std::fs::read(path)?)?;
-    let levels = jxr2png_core::light_levels(&image);
-    let outputs = jxr2png_core::convert_image(path, &image, &levels, options)?;
-    let rgb = Rgb {
-        name: path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned(),
-        width: image.width as usize,
-        height: image.height as usize,
-        rgb: jxr2png_core::sdr_pixels(&image, &levels, &options.sdr),
-    };
-    Ok((outputs, rgb))
 }

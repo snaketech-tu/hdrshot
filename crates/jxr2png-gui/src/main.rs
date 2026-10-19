@@ -537,8 +537,8 @@ impl App {
                     "Copy the last converted image",
                 )
                 .on_hover_text(
-                    "After converting, copy the last image to the clipboard (as SDR), \
-                     ready to paste into a chat or document",
+                    "After converting, copy the last PNG to the clipboard as a file \
+                     (the HDR one if made), ready to paste into Discord, a browser or a folder",
                 );
                 ui.end_row();
             });
