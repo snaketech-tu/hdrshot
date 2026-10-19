@@ -37,6 +37,12 @@ struct Args {
     /// (defaults to the image's 99.9th percentile).
     #[arg(long, value_name = "NITS")]
     sdr_peak: Option<f32>,
+
+    /// Scale images taller than this down to this height in pixels, keeping
+    /// the aspect ratio (e.g. 1080). By default the source resolution is
+    /// kept.
+    #[arg(long, value_name = "PIXELS")]
+    max_height: Option<u32>,
 }
 
 fn main() -> ExitCode {
@@ -56,6 +62,7 @@ fn main() -> ExitCode {
             white_nits: args.sdr_white,
             peak_nits: args.sdr_peak,
         },
+        max_height: args.max_height,
     };
 
     let mut failed = false;

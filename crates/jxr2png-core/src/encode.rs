@@ -53,14 +53,12 @@ pub fn light_levels(image: &ScRgbImage) -> LightLevels {
 ///
 /// Highlights above `hdr.peak_nits` roll off smoothly so the brightest
 /// pixel lands on that peak. `sdr` sets the tone curve of the embedded ICC
-/// profile, which viewers without HDR support use instead of its `cicp`
-/// tag.
+/// profile, which viewers without HDR support use instead of the `cICP`
+/// chunk.
 ///
-/// HDR is signalled only by the profile's `cicp` tag, not by a PNG `cICP`
-/// chunk. Chrome, Edge and Windows Photos read the tag, while Discord's
-/// image service converts any PNG with a `cICP` chunk to SDR with its red
-/// and blue channels mixed up, which turns the picture yellow. Without the
-/// chunk it keeps the profile and the image shows correctly.
+/// HDR is signalled both by a PNG `cICP` chunk, which Windows Photos and
+/// HDR image viewers need, and by the profile's `cicp` tag. Discord's
+/// image service mishandles the chunk (see [`for_discord`]).
 pub fn write_hdr_png<W: Write>(
     image: &ScRgbImage,
     levels: &LightLevels,
@@ -82,7 +80,7 @@ pub fn write_hdr_png<W: Write>(
         .map(|peak| (peak, ToneCurve::new(source_peak / peak)));
 
     let mut data = vec![0u8; image.pixels.len() * 6];
-    let (max, sum) = data
+    let mut brightest: Vec<f32> = data
         .par_chunks_mut(6)
         .zip(image.pixels.par_iter())
         .map(|(out, &p)| {
@@ -98,11 +96,13 @@ pub fn write_hdr_png<W: Write>(
                 let v = quantize_pq(pq_encode(c));
                 out[i * 2..i * 2 + 2].copy_from_slice(&v.to_be_bytes());
             }
-            let brightest = rgb.into_iter().fold(0.0, f32::max);
-            (brightest, f64::from(brightest))
+            rgb.into_iter().fold(0.0, f32::max)
         })
-        .reduce(|| (0.0, 0.0), |a, b| (a.0.max(b.0), a.1 + b.1));
-    let average = (sum / image.pixels.len().max(1) as f64) as f32;
+        .collect();
+    let max = brightest.par_iter().copied().reduce(|| 0.0, f32::max);
+    let average = (brightest.par_iter().map(|&v| f64::from(v)).sum::<f64>()
+        / brightest.len().max(1) as f64) as f32;
+    let max_cll = max_content_light_level(&mut brightest);
 
     let mut info = png::Info::with_size(image.width, image.height);
     info.color_type = ColorType::Rgb;
@@ -117,6 +117,8 @@ pub fn write_hdr_png<W: Write>(
     encoder.set_compression(Compression::Balanced);
     let mut writer = encoder.write_header()?;
 
+    // cICP: BT.2020 primaries, PQ transfer, RGB (identity matrix), full range.
+    writer.write_chunk(png::chunk::ChunkType(*b"cICP"), &[9, 16, 0, 1])?;
     // sBIT: the samples carry only this many significant bits.
     let bits = HDR_SIGNIFICANT_BITS as u8;
     writer.write_chunk(png::chunk::sBIT, &[bits; 3])?;
@@ -132,13 +134,30 @@ pub fn write_hdr_png<W: Write>(
     writer.write_chunk(png::chunk::ChunkType(*b"mDCV"), &mdcv)?;
     // cLLI: MaxCLL and MaxFALL in units of 0.0001 nits.
     let mut clli = [0u8; 8];
-    clli[..4].copy_from_slice(&to_clli_units(max).to_be_bytes());
+    clli[..4].copy_from_slice(&to_clli_units(max_cll).to_be_bytes());
     clli[4..].copy_from_slice(&to_clli_units(average).to_be_bytes());
     writer.write_chunk(png::chunk::ChunkType(*b"cLLI"), &clli)?;
 
     writer.write_image_data(&data)?;
     writer.finish()?;
     Ok(())
+}
+
+/// MaxCLL for the per-pixel brightest channel values in `brightest`: the
+/// 99.99th percentile rather than the true maximum. Following the PNG
+/// spec's recommendation ("On the Calculation and Usage of HDR Static
+/// Content Metadata", SMPTE), this ignores a handful of stray pixels, so
+/// viewers don't dim the whole picture to fit a few specks. The mastering
+/// peak in `mDCV` still covers the true maximum.
+fn max_content_light_level(brightest: &mut [f32]) -> f32 {
+    if brightest.is_empty() {
+        return 0.0;
+    }
+    // Nearest-rank percentile: the smallest value at or above 99.99% of
+    // the pixels.
+    let rank = (brightest.len() as f64 * 0.9999).ceil() as usize;
+    let (_, value, _) = brightest.select_nth_unstable_by(rank.max(1) - 1, f32::total_cmp);
+    *value
 }
 
 /// Bits of PQ precision kept in the 16-bit HDR samples. Ten bits is what
@@ -167,6 +186,36 @@ fn sdr_peak_nits(levels: &LightLevels, options: &SdrOptions) -> f32 {
 
 fn to_clli_units(nits: f32) -> u32 {
     (f64::from(nits.clamp(0.0, 10_000.0)) * 10_000.0).round() as u32
+}
+
+/// Copy of an HDR PNG without its `cICP` chunk, for sharing on Discord.
+///
+/// Discord's image service converts any PNG with a `cICP` chunk to SDR with
+/// its red and blue channels mixed up, which turns warm scenes yellow.
+/// Without the chunk it keeps the ICC profile, whose `cicp` tag still marks
+/// the image as HDR, and shows it correctly. The `mDCV` chunk goes too,
+/// since the PNG spec only allows it alongside `cICP`. Every other chunk is
+/// copied byte for byte. Bytes that aren't a well-formed PNG are returned
+/// as is.
+pub fn for_discord(png: &[u8]) -> Vec<u8> {
+    const SIGNATURE: usize = 8;
+    if png.len() < SIGNATURE {
+        return png.to_vec();
+    }
+    let mut out = png[..SIGNATURE].to_vec();
+    let mut rest = &png[SIGNATURE..];
+    while rest.len() >= 12 {
+        let len = u32::from_be_bytes(rest[..4].try_into().unwrap()) as usize;
+        let Some(chunk) = rest.get(..len + 12) else {
+            break;
+        };
+        if !matches!(&chunk[4..8], b"cICP" | b"mDCV") {
+            out.extend_from_slice(chunk);
+        }
+        rest = &rest[len + 12..];
+    }
+    out.extend_from_slice(rest);
+    out
 }
 
 /// Write a tone-mapped 8-bit sRGB PNG.
@@ -222,6 +271,19 @@ mod tests {
     }
 
     #[test]
+    fn max_cll_ignores_stray_pixels() {
+        // Among 20,000 pixels at 100 nits, two 4000-nit specks are within
+        // the brightest 0.01% and ignored; a third one is not.
+        let mut levels = vec![100.0; 20_000];
+        levels[7] = 4000.0;
+        levels[8] = 4000.0;
+        assert_eq!(max_content_light_level(&mut levels.clone()), 100.0);
+        levels[9] = 4000.0;
+        assert_eq!(max_content_light_level(&mut levels), 4000.0);
+        assert_eq!(max_content_light_level(&mut []), 0.0);
+    }
+
+    #[test]
     fn light_levels_use_brightest_channel() {
         let img = image(vec![[1.0, 0.0, 0.0], [0.0, 0.0, 3.0]], 2);
         let levels = light_levels(&img);
@@ -248,9 +310,27 @@ mod tests {
         assert!(info.icc_profile.is_some());
         assert_eq!(info.bit_depth, BitDepth::Sixteen);
         assert_eq!(info.color_type, ColorType::Rgb);
-        // HDR is signalled by the profile's `cicp` tag only (see
-        // `write_hdr_png`).
-        assert!(info.coding_independent_code_points.is_none());
+        let cicp = info.coding_independent_code_points.unwrap();
+        assert_eq!(
+            (
+                cicp.color_primaries,
+                cicp.transfer_function,
+                cicp.matrix_coefficients,
+                cicp.is_video_full_range_image
+            ),
+            (9, 16, 0, true)
+        );
+
+        // The Discord copy is the same file minus cICP and mDCV, and still
+        // decodes to the same pixels with the same profile.
+        let stripped = for_discord(&bytes);
+        assert_eq!(stripped.len(), bytes.len() - (12 + 4) - (12 + 24));
+        let (stripped_info, stripped_data) = read_png(&stripped);
+        assert!(stripped_info.coding_independent_code_points.is_none());
+        assert!(stripped_info.mastering_display_color_volume.is_none());
+        assert_eq!(stripped_info.content_light_level, info.content_light_level);
+        assert_eq!(stripped_info.icc_profile, info.icc_profile);
+        assert_eq!(stripped_data, data);
         let clli = info.content_light_level.unwrap();
         assert_eq!(clli.max_content_light_level, 10_000_000);
 
