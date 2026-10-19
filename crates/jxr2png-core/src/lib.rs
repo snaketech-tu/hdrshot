@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 pub mod color;
 pub mod decode;
 pub mod encode;
+pub mod icc;
 
 pub use decode::{ScRgbImage, decode};
 pub use encode::{LightLevels, light_levels, write_hdr_png, write_sdr_png};
@@ -110,7 +111,12 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
         std::fs::create_dir_all(dir)?;
     }
     if let Some(path) = &outputs.hdr {
-        write_hdr_png(&image, &levels, BufWriter::new(File::create(path)?))?;
+        write_hdr_png(
+            &image,
+            &levels,
+            &options.sdr,
+            BufWriter::new(File::create(path)?),
+        )?;
     }
     if let Some(path) = &outputs.sdr {
         write_sdr_png(

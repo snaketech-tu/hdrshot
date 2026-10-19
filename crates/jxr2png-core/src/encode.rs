@@ -1,5 +1,6 @@
 //! PNG output.
 
+use std::borrow::Cow;
 use std::io::Write;
 
 use png::{BitDepth, ColorType, Compression, SrgbRenderingIntent};
@@ -9,6 +10,7 @@ use crate::color::{
     SCRGB_WHITE_NITS, ToneCurve, bt709_to_bt2020, pq_encode, srgb_encode, tone_map_sdr,
 };
 use crate::decode::ScRgbImage;
+use crate::icc::pq_sdr_fallback_profile;
 use crate::{Result, SdrOptions};
 
 /// Light-level statistics of an image, in nits.
@@ -48,7 +50,15 @@ pub fn light_levels(image: &ScRgbImage) -> LightLevels {
 }
 
 /// Write a 16-bit PNG in BT.2020 primaries with the PQ transfer function.
-pub fn write_hdr_png<W: Write>(image: &ScRgbImage, levels: &LightLevels, out: W) -> Result<()> {
+///
+/// `sdr` sets the tone curve of the embedded ICC profile, which viewers
+/// without HDR support use instead of the `cICP` chunk.
+pub fn write_hdr_png<W: Write>(
+    image: &ScRgbImage,
+    levels: &LightLevels,
+    sdr: &SdrOptions,
+    out: W,
+) -> Result<()> {
     let mut data = vec![0u8; image.pixels.len() * 6];
     data.par_chunks_mut(6)
         .zip(image.pixels.par_iter())
@@ -59,9 +69,14 @@ pub fn write_hdr_png<W: Write>(image: &ScRgbImage, levels: &LightLevels, out: W)
             }
         });
 
-    let mut encoder = png::Encoder::new(out, image.width, image.height);
-    encoder.set_color(ColorType::Rgb);
-    encoder.set_depth(BitDepth::Sixteen);
+    let mut info = png::Info::with_size(image.width, image.height);
+    info.color_type = ColorType::Rgb;
+    info.bit_depth = BitDepth::Sixteen;
+    info.icc_profile = Some(Cow::Owned(pq_sdr_fallback_profile(
+        sdr.white_nits,
+        sdr_peak_nits(levels, sdr),
+    )));
+    let mut encoder = png::Encoder::with_info(out, info)?;
     encoder.set_compression(Compression::Fast);
     let mut writer = encoder.write_header()?;
 
@@ -78,6 +93,14 @@ pub fn write_hdr_png<W: Write>(image: &ScRgbImage, levels: &LightLevels, out: W)
     Ok(())
 }
 
+/// Brightness that maps to SDR maximum.
+fn sdr_peak_nits(levels: &LightLevels, options: &SdrOptions) -> f32 {
+    options
+        .peak_nits
+        .unwrap_or(levels.p999)
+        .max(options.white_nits)
+}
+
 fn to_clli_units(nits: f32) -> u32 {
     (f64::from(nits.clamp(0.0, 10_000.0)) * 10_000.0).round() as u32
 }
@@ -90,11 +113,7 @@ pub fn write_sdr_png<W: Write>(
     out: W,
 ) -> Result<()> {
     let white = options.white_nits / SCRGB_WHITE_NITS;
-    let peak = options
-        .peak_nits
-        .unwrap_or(levels.p999)
-        .max(options.white_nits);
-    let curve = ToneCurve::new(peak / options.white_nits);
+    let curve = ToneCurve::new(sdr_peak_nits(levels, options) / options.white_nits);
     let mut data = vec![0u8; image.pixels.len() * 3];
     data.par_chunks_mut(3)
         .zip(image.pixels.par_iter())
@@ -152,9 +171,10 @@ mod tests {
         let img = image(vec![[0.0; 3], [1.0; 3], [12.5; 3]], 3);
         let levels = light_levels(&img);
         let mut bytes = Vec::new();
-        write_hdr_png(&img, &levels, &mut bytes).unwrap();
+        write_hdr_png(&img, &levels, &SdrOptions::default(), &mut bytes).unwrap();
 
         let (info, data) = read_png(&bytes);
+        assert!(info.icc_profile.is_some());
         assert_eq!(info.bit_depth, BitDepth::Sixteen);
         assert_eq!(info.color_type, ColorType::Rgb);
         let cicp = info.coding_independent_code_points.unwrap();

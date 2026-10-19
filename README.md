@@ -21,6 +21,10 @@ Rust JPEG XR decoder, so no C toolchain is needed.
 
 - **HDR**: converted to BT.2020, encoded with PQ (absolute nits) and tagged
   with `cICP` (BT.2020, PQ, full range) and `cLLI` (MaxCLL/MaxFALL).
+  Chrome, Edge and other HDR-aware apps show it in HDR. It also embeds an
+  ICC profile whose curves apply the SDR tone mapping, so viewers that
+  ignore `cICP` but do color management (such as the Windows Photo Viewer)
+  show a normal SDR picture instead of a washed-out one.
 - **SDR**: the HDR reference white (203 nits by default, from ITU-R BT.2408)
   becomes SDR white. Highlights above that roll off smoothly up to the
   image's 99.9th percentile brightness. The curve is applied to each pixel's

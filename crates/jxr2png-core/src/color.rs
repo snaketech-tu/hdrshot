@@ -37,6 +37,18 @@ pub fn pq_encode(nits: f32) -> f32 {
     ((C1 + C2 * y) / (1.0 + C3 * y)).powf(M2)
 }
 
+/// SMPTE ST 2084 (PQ) EOTF: a 0..1 signal to absolute luminance in nits.
+pub fn pq_decode(signal: f32) -> f32 {
+    const M1: f32 = 2610.0 / 16384.0;
+    const M2: f32 = 2523.0 / 4096.0 * 128.0;
+    const C1: f32 = 3424.0 / 4096.0;
+    const C2: f32 = 2413.0 / 4096.0 * 32.0;
+    const C3: f32 = 2392.0 / 4096.0 * 32.0;
+    let e = signal.clamp(0.0, 1.0).powf(1.0 / M2);
+    let y = ((e - C1).max(0.0) / (C2 - C3 * e)).powf(1.0 / M1);
+    y * PQ_MAX_NITS
+}
+
 /// sRGB OETF: linear 0..1 to an encoded 0..1 signal.
 pub fn srgb_encode(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
@@ -124,6 +136,14 @@ mod tests {
         assert!(close(pq_encode(100.0), 0.508, 1e-3));
         assert!(close(pq_encode(203.0), 0.58, 1e-3));
         assert!(close(pq_encode(1000.0), 0.752, 1e-3));
+    }
+
+    #[test]
+    fn pq_roundtrip() {
+        for nits in [0.0, 0.5, 80.0, 203.0, 1000.0, 4000.0, 10_000.0] {
+            let back = pq_decode(pq_encode(nits));
+            assert!(close(back, nits, nits * 1e-3 + 1e-3), "{nits} -> {back}");
+        }
     }
 
     #[test]
