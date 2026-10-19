@@ -1868,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "jxr2png"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "clap",
  "jxr2png-core",
@@ -1876,7 +1876,7 @@ dependencies = [
 
 [[package]]
 name = "jxr2png-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "jxr",
  "png",
@@ -1886,7 +1886,7 @@ dependencies = [
 
 [[package]]
 name = "jxr2png-gui"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "arboard",
  "eframe",
