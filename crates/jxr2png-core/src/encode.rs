@@ -169,13 +169,8 @@ fn to_clli_units(nits: f32) -> u32 {
     (f64::from(nits.clamp(0.0, 10_000.0)) * 10_000.0).round() as u32
 }
 
-/// Write a tone-mapped 8-bit sRGB PNG.
-pub fn write_sdr_png<W: Write>(
-    image: &ScRgbImage,
-    levels: &LightLevels,
-    options: &SdrOptions,
-    out: W,
-) -> Result<()> {
+/// Tone-map to 8-bit sRGB, as packed RGB rows: the pixels of the SDR PNG.
+pub fn sdr_pixels(image: &ScRgbImage, levels: &LightLevels, options: &SdrOptions) -> Vec<u8> {
     let white = options.white_nits / SCRGB_WHITE_NITS;
     let curve = ToneCurve::new(sdr_peak_nits(levels, options) / options.white_nits);
     let mut data = vec![0u8; image.pixels.len() * 3];
@@ -186,7 +181,17 @@ pub fn write_sdr_png<W: Write>(
                 *o = (srgb_encode(c) * 255.0).round() as u8;
             }
         });
+    data
+}
 
+/// Write a tone-mapped 8-bit sRGB PNG.
+pub fn write_sdr_png<W: Write>(
+    image: &ScRgbImage,
+    levels: &LightLevels,
+    options: &SdrOptions,
+    out: W,
+) -> Result<()> {
+    let data = sdr_pixels(image, levels, options);
     let mut encoder = png::Encoder::new(out, image.width, image.height);
     encoder.set_color(ColorType::Rgb);
     encoder.set_depth(BitDepth::Eight);

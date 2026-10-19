@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod assoc;
 mod convert;
 
 use std::path::{Path, PathBuf};
@@ -9,7 +10,7 @@ use eframe::egui::{self, Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
 use jxr2png_core::{ConvertOptions, HdrOptions, OutputMode, Outputs, SdrOptions};
 use serde::{Deserialize, Serialize};
 
-use convert::{Event, Job};
+use convert::{Event, Job, SharedClipboard};
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -36,6 +37,7 @@ struct Settings {
     mode: Mode,
     save_to_folder: bool,
     output_dir: Option<PathBuf>,
+    copy_to_clipboard: bool,
 }
 
 impl Default for Settings {
@@ -44,6 +46,7 @@ impl Default for Settings {
             mode: Mode::Both,
             save_to_folder: false,
             output_dir: None,
+            copy_to_clipboard: true,
         }
     }
 }
@@ -114,7 +117,21 @@ struct App {
     /// Files finished in the running (or last) batch, and its size.
     progress: (usize, usize),
     notice: Option<String>,
+    clipboard: SharedClipboard,
+    toast: Option<Toast>,
+    /// Whether jxr2png opens `.jxr` files; rechecked when the window
+    /// regains focus, since the choice is made in the system's settings.
+    is_default_app: bool,
+    was_focused: bool,
 }
+
+struct Toast {
+    text: String,
+    /// `egui` time at which it disappears.
+    until: f64,
+}
+
+const TOAST_SECONDS: f64 = 3.0;
 
 const SETTINGS_KEY: &str = "settings";
 
@@ -135,7 +152,14 @@ impl App {
             job: None,
             progress: (0, 0),
             notice: None,
+            clipboard: SharedClipboard::default(),
+            toast: None,
+            is_default_app: assoc::SUPPORTED && assoc::is_default(),
+            was_focused: true,
         };
+        if assoc::SUPPORTED {
+            assoc::refresh();
+        }
         // Files passed on the command line, e.g. by "Open with" or by
         // dropping them onto the program's icon.
         app.add_paths(std::env::args_os().skip(1).map(PathBuf::from));
@@ -217,11 +241,20 @@ impl App {
             .collect();
         self.progress = (0, files.len());
         self.notice = None;
-        self.job = Some(Job::start(files, self.convert_options(), ctx.clone()));
+        let clipboard = self
+            .settings
+            .copy_to_clipboard
+            .then(|| self.clipboard.clone());
+        self.job = Some(Job::start(
+            files,
+            self.convert_options(),
+            clipboard,
+            ctx.clone(),
+        ));
     }
 
-    fn poll_job(&mut self) {
-        let Some(job) = &self.job else { return };
+    fn poll_job(&mut self, ctx: &egui::Context) {
+        let Some(job) = self.job.take() else { return };
         let mut done = false;
         while let Ok(event) = job.events.try_recv() {
             match event {
@@ -233,7 +266,12 @@ impl App {
                     };
                     self.progress.0 += 1;
                 }
-                Event::Done => done = true,
+                Event::Done(copied) => {
+                    done = true;
+                    if let Some(text) = copied {
+                        self.show_toast(text, ctx);
+                    }
+                }
             }
         }
         if done {
@@ -250,7 +288,72 @@ impl App {
                     if failed == 1 { "" } else { "s" }
                 ));
             }
-            self.job = None;
+        } else {
+            self.job = Some(job);
+        }
+    }
+
+    fn show_toast(&mut self, text: String, ctx: &egui::Context) {
+        self.toast = Some(Toast {
+            text,
+            until: ctx.input(|i| i.time) + TOAST_SECONDS,
+        });
+    }
+
+    fn toast_ui(&mut self, ctx: &egui::Context) {
+        let Some(toast) = &self.toast else { return };
+        let left = toast.until - ctx.input(|i| i.time);
+        if left <= 0.0 {
+            self.toast = None;
+            return;
+        }
+        // Fade out over the last half second.
+        let opacity = (left / 0.5).min(1.0) as f32;
+        egui::Area::new(egui::Id::unique("toast"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 56.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                ui.set_opacity(opacity);
+                let visuals = ui.visuals();
+                egui::Frame::new()
+                    .fill(visuals.extreme_bg_color)
+                    .stroke(visuals.window_stroke)
+                    .corner_radius(8.0)
+                    .shadow(visuals.popup_shadow)
+                    .inner_margin(egui::Margin::symmetric(14, 10))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(&toast.text).size(14.0));
+                    });
+            });
+        ctx.request_repaint();
+    }
+
+    fn default_app_ui(&mut self, ui: &mut egui::Ui) {
+        if !assoc::SUPPORTED {
+            return;
+        }
+        if self.is_default_app {
+            ui.weak("✔ Opens .jxr files");
+            return;
+        }
+        if ui
+            .small_button("Open .jxr files with jxr2png")
+            .on_hover_text("Make jxr2png the app that opens .jxr files when you double-click them")
+            .clicked()
+        {
+            let ctx = ui.ctx().clone();
+            match assoc::make_default() {
+                Ok(assoc::Outcome::Done) => {
+                    self.is_default_app = true;
+                    self.show_toast("jxr2png now opens .jxr files".into(), &ctx);
+                }
+                Ok(assoc::Outcome::Confirm) => self.show_toast(
+                    "In Settings, choose jxr2png for .jxr to finish".into(),
+                    &ctx,
+                ),
+                Err(e) => self.show_toast(e, &ctx),
+            }
         }
     }
 
@@ -427,6 +530,17 @@ impl App {
                     });
                 });
                 ui.end_row();
+
+                ui.label("Clipboard");
+                ui.checkbox(
+                    &mut self.settings.copy_to_clipboard,
+                    "Copy the last converted image",
+                )
+                .on_hover_text(
+                    "After converting, copy the last image to the clipboard (as SDR), \
+                     ready to paste into a chat or document",
+                );
+                ui.end_row();
             });
 
         let custom = !self.tuning.is_default();
@@ -574,7 +688,13 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.poll_job();
+        let ctx = ui.ctx().clone();
+        self.poll_job(&ctx);
+        let focused = ui.input(|i| i.focused);
+        if focused && !self.was_focused && assoc::SUPPORTED {
+            self.is_default_app = assoc::is_default();
+        }
+        self.was_focused = focused;
         let dropped: Vec<PathBuf> = ui.input(|i| {
             i.raw
                 .dropped_files
@@ -601,6 +721,9 @@ impl eframe::App for App {
                 ui.horizontal(|ui| {
                     ui.heading(RichText::new("jxr2png").strong());
                     ui.label(RichText::new("HDR screenshots to PNG").weak());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        self.default_app_ui(ui);
+                    });
                 });
                 ui.add_space(4.0);
                 if self.files.is_empty() {
@@ -611,6 +734,7 @@ impl eframe::App for App {
                     self.file_list(ui);
                 }
             });
+        self.toast_ui(&ctx);
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

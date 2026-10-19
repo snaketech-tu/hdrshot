@@ -17,7 +17,7 @@ pub mod icc;
 
 use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode};
-pub use encode::{LightLevels, light_levels, write_hdr_png, write_sdr_png};
+pub use encode::{LightLevels, light_levels, sdr_pixels, write_hdr_png, write_sdr_png};
 
 /// Which PNG files to produce for each input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -116,16 +116,25 @@ pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {
 
 /// Convert one `.jxr` file according to `options`.
 pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
-    let outputs = output_paths(input, options);
     let image = decode(&std::fs::read(input)?)?;
-    let levels = light_levels(&image);
+    convert_image(input, &image, &light_levels(&image), options)
+}
+
+/// Write the outputs for `input`, already decoded into `image`.
+pub fn convert_image(
+    input: &Path,
+    image: &ScRgbImage,
+    levels: &LightLevels,
+    options: &ConvertOptions,
+) -> Result<Outputs> {
+    let outputs = output_paths(input, options);
     if let Some(dir) = &options.output_dir {
         std::fs::create_dir_all(dir)?;
     }
     if let Some(path) = &outputs.hdr {
         write_hdr_png(
-            &image,
-            &levels,
+            image,
+            levels,
             &options.hdr,
             &options.sdr,
             BufWriter::new(File::create(path)?),
@@ -133,8 +142,8 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
     }
     if let Some(path) = &outputs.sdr {
         write_sdr_png(
-            &image,
-            &levels,
+            image,
+            levels,
             &options.sdr,
             BufWriter::new(File::create(path)?),
         )?;
