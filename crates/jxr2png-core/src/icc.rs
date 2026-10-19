@@ -18,6 +18,9 @@
 //! per-channel roll-off turns warm colors yellow. Like libjxl's and Skia's
 //! PQ profiles, this one only has lookup tables (`B2A0` is a placeholder,
 //! since the profile is only ever used as a source).
+//!
+//! The profile must stay under 32 KiB: Discord's image service drops larger
+//! profiles, and then shows the PQ values as sRGB, washed out and yellow.
 
 use crate::color::{ToneCurve, pq_decode, tone_map_sdr};
 
@@ -38,10 +41,16 @@ const BRADFORD_D65_TO_D50: [[f64; 3]; 3] = [
 const D50: [f64; 3] = [0.9642, 1.0, 0.8249];
 
 /// Grid points per axis of the `A2B0` lookup table, spaced evenly in PQ.
-const CLUT_POINTS: usize = 33;
+/// 17 is the most that keeps the profile under [`MAX_PROFILE_SIZE`]; on the
+/// sample screenshots the fallback differs from a 33-point grid by under
+/// half an 8-bit step on average.
+const CLUT_POINTS: usize = 17;
 
 /// Entries in the `A2B0` output curves.
-const LUT_OUTPUT_ENTRIES: usize = 4096;
+const LUT_OUTPUT_ENTRIES: usize = 256;
+
+/// Largest profile some services keep (Discord drops bigger ones).
+pub const MAX_PROFILE_SIZE: usize = 32 * 1024;
 
 /// The CLUT stores encoded XYZ raised to this power and the output curves
 /// undo it, which keeps precision in the shadows.
@@ -107,7 +116,10 @@ pub fn pq_sdr_fallback_profile(white_nits: f32, peak_nits: f32) -> Vec<u8> {
     out.extend_from_slice(&[0; 4]); // manufacturer
     out.extend_from_slice(&[0; 4]); // model
     out.extend_from_slice(&[0; 8]); // attributes
-    out.extend_from_slice(&0u32.to_be_bytes()); // perceptual intent
+    // Relative colorimetric, as in libjxl's PQ profile. CMMs that follow the
+    // header's intent and see perceptual on a v4 profile assume the v4
+    // perceptual black point and crush the shadows.
+    out.extend_from_slice(&1u32.to_be_bytes());
     for v in D50 {
         out.extend_from_slice(&s15f16(v));
     }
@@ -247,6 +259,7 @@ mod tests {
             u32::from_be_bytes(p[0..4].try_into().unwrap()) as usize,
             p.len()
         );
+        assert!(p.len() <= MAX_PROFILE_SIZE, "{} bytes", p.len());
         assert_eq!(&p[8..12], &[4, 0x40, 0, 0]);
         assert_eq!(&p[36..40], b"acsp");
         let count = u32::from_be_bytes(p[128..132].try_into().unwrap()) as usize;
