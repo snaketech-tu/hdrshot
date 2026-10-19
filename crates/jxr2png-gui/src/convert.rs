@@ -46,6 +46,7 @@ impl Job {
                 let _ = tx.send(event);
                 ctx.request_repaint();
             };
+            // The last PNG written, and whether it is the HDR one.
             let mut last = None;
             for (index, path) in files {
                 if stop.load(Ordering::Relaxed) {
@@ -55,7 +56,8 @@ impl Job {
                 let result = jxr2png_core::convert_file(&path, &options);
                 if let Ok(outputs) = &result {
                     // The HDR PNG when there is one: it is the faithful copy.
-                    last = outputs.hdr.clone().or_else(|| outputs.sdr.clone());
+                    last = (outputs.hdr.clone().map(|p| (p, true)))
+                        .or_else(|| outputs.sdr.clone().map(|p| (p, false)));
                 }
                 send(
                     &tx,
@@ -64,7 +66,7 @@ impl Job {
             }
             let copied = clipboard
                 .zip(last)
-                .map(|(clipboard, path)| copy(&clipboard, &path));
+                .map(|(clipboard, (path, hdr))| copy(&clipboard, &path, hdr));
             send(&tx, Event::Done(copied));
         });
         Self { events, cancel }
@@ -81,9 +83,19 @@ impl Job {
 }
 
 /// Put `path` on the clipboard as a file, so pasting it (into Discord,
-/// a browser or a folder) gives the PNG exactly as written, HDR included.
+/// a browser or a folder) gives the full PNG, HDR included. An HDR PNG is
+/// copied without its `cICP` chunk so that it also shows right on Discord.
 /// Returns the message for the user.
-fn copy(clipboard: &SharedClipboard, path: &Path) -> String {
+fn copy(clipboard: &SharedClipboard, path: &Path, hdr: bool) -> String {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let path = if hdr {
+        match discord_copy(path) {
+            Ok(copy) => copy,
+            Err(e) => return format!("Could not copy to the clipboard: {e}"),
+        }
+    } else {
+        path.to_path_buf()
+    };
     let mut clipboard = clipboard.lock().unwrap_or_else(|e| e.into_inner());
     let clipboard = match &mut *clipboard {
         Some(c) => c,
@@ -92,9 +104,20 @@ fn copy(clipboard: &SharedClipboard, path: &Path) -> String {
             Err(e) => return format!("Could not copy to the clipboard: {e}"),
         },
     };
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
     match clipboard.set().file_list(&[path]) {
         Ok(()) => format!("Copied {name} to the clipboard"),
         Err(e) => format!("Could not copy to the clipboard: {e}"),
     }
+}
+
+/// Write a copy of the HDR PNG without its `cICP` chunk, which Discord
+/// mishandles (see [`jxr2png_core::without_cicp`]), to a temporary folder
+/// that only ever holds the latest copy. It keeps the original's name.
+fn discord_copy(path: &Path) -> std::io::Result<PathBuf> {
+    let dir = std::env::temp_dir().join("jxr2png-clipboard");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    let copy = dir.join(path.file_name().unwrap_or_default());
+    std::fs::write(&copy, jxr2png_core::without_cicp(&std::fs::read(path)?))?;
+    Ok(copy)
 }

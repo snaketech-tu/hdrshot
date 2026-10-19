@@ -2,8 +2,8 @@
 //!
 //! Two outputs are supported:
 //! - **HDR**: 16-bit PNG in Rec.2020 primaries with the PQ (SMPTE ST 2084)
-//!   transfer function, with an ICC profile whose `cicp` tag makes
-//!   HDR-aware viewers display it in HDR.
+//!   transfer function, tagged with a `cICP` chunk and an ICC profile
+//!   `cicp` tag so HDR-aware viewers display it in HDR.
 //! - **SDR**: tone-mapped 8-bit sRGB PNG.
 
 use std::fs::File;
@@ -17,7 +17,7 @@ pub mod icc;
 
 use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode};
-pub use encode::{LightLevels, light_levels, write_hdr_png, write_sdr_png};
+pub use encode::{LightLevels, light_levels, without_cicp, write_hdr_png, write_sdr_png};
 
 /// Which PNG files to produce for each input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

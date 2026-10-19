@@ -18,14 +18,15 @@ Rust JPEG XR decoder, so no C toolchain is needed.
 
 - **HDR**: converted to BT.2020 and encoded with PQ (absolute nits), keeping
   the screenshot's brightness exactly. Samples are rounded to 10 bits, the
-  precision HDR displays use, which halves the file size. It embeds an ICC
-  v4.4 profile with a `cicp` tag (BT.2020, PQ, full range), which Chrome,
-  Edge and Windows Photos use to show it in HDR like the original JXR, plus
-  `mDCV` and `cLLI` describing the content's peak and average brightness so
-  HDR viewers can fit it to the display. There is deliberately no PNG
-  `cICP` chunk: Discord's image service converts PNGs that have one to SDR
-  with wrong colors (warm scenes turn yellow), but keeps the profile when
-  it is missing. SDR-only viewers
+  precision HDR displays use, which halves the file size. It is tagged as
+  BT.2020 PQ both by a PNG `cICP` chunk, which Windows Photos and HDR image
+  viewers need, and by an ICC v4.4 profile with a matching `cicp` tag,
+  which Chrome and Edge also read, plus `mDCV` and `cLLI` describing the
+  content's peak and average brightness so HDR viewers can fit it to the
+  display. Discord's image service converts PNGs with a `cICP` chunk to SDR
+  with wrong colors (warm scenes turn yellow) but shows them correctly
+  without it, so the desktop app's clipboard copy leaves the chunk out.
+  SDR-only viewers
   that do color management (such as the Windows Photo Viewer) use the
   profile's lookup table instead, which applies the same SDR tone mapping
   as the SDR output, so they show a normal picture instead of a washed-out
@@ -61,8 +62,9 @@ to choose files), pick HDR, SDR or both, choose where to save, and press
 Convert. Files given on the command line, or dropped onto the program's
 icon, are added to the list. After converting, the last PNG (the HDR one if
 made) is copied to the clipboard as a file, so pasting it into Discord, a
-browser upload or a folder gives the file exactly as written; this can be
-turned off. On Windows and Linux, "Open .jxr files with jxr2png" makes the
+browser upload or a folder gives the full file. The HDR copy leaves out the
+`cICP` chunk so Discord shows it correctly; the saved file keeps it for
+Windows Photos and HDR viewers. This can be turned off. On Windows and Linux, "Open .jxr files with jxr2png" makes the
 app open `.jxr` files on double-click; Windows asks you to confirm the
 choice in Settings. The tuning options from the command line are
 under Advanced; they are off by default and reset every time the app

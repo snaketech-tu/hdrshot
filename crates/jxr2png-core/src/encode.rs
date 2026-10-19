@@ -53,14 +53,12 @@ pub fn light_levels(image: &ScRgbImage) -> LightLevels {
 ///
 /// Highlights above `hdr.peak_nits` roll off smoothly so the brightest
 /// pixel lands on that peak. `sdr` sets the tone curve of the embedded ICC
-/// profile, which viewers without HDR support use instead of its `cicp`
-/// tag.
+/// profile, which viewers without HDR support use instead of the `cICP`
+/// chunk.
 ///
-/// HDR is signalled only by the profile's `cicp` tag, not by a PNG `cICP`
-/// chunk. Chrome, Edge and Windows Photos read the tag, while Discord's
-/// image service converts any PNG with a `cICP` chunk to SDR with its red
-/// and blue channels mixed up, which turns the picture yellow. Without the
-/// chunk it keeps the profile and the image shows correctly.
+/// HDR is signalled both by a PNG `cICP` chunk, which Windows Photos and
+/// HDR image viewers need, and by the profile's `cicp` tag. Discord's
+/// image service mishandles the chunk (see [`without_cicp`]).
 pub fn write_hdr_png<W: Write>(
     image: &ScRgbImage,
     levels: &LightLevels,
@@ -117,6 +115,8 @@ pub fn write_hdr_png<W: Write>(
     encoder.set_compression(Compression::Balanced);
     let mut writer = encoder.write_header()?;
 
+    // cICP: BT.2020 primaries, PQ transfer, RGB (identity matrix), full range.
+    writer.write_chunk(png::chunk::ChunkType(*b"cICP"), &[9, 16, 0, 1])?;
     // sBIT: the samples carry only this many significant bits.
     let bits = HDR_SIGNIFICANT_BITS as u8;
     writer.write_chunk(png::chunk::sBIT, &[bits; 3])?;
@@ -167,6 +167,34 @@ fn sdr_peak_nits(levels: &LightLevels, options: &SdrOptions) -> f32 {
 
 fn to_clli_units(nits: f32) -> u32 {
     (f64::from(nits.clamp(0.0, 10_000.0)) * 10_000.0).round() as u32
+}
+
+/// Copy of a PNG without its `cICP` chunk, for sharing on Discord.
+///
+/// Discord's image service converts any PNG with a `cICP` chunk to SDR with
+/// its red and blue channels mixed up, which turns warm scenes yellow.
+/// Without the chunk it keeps the ICC profile, whose `cicp` tag still marks
+/// the image as HDR, and shows it correctly. Every other chunk is copied
+/// byte for byte. Bytes that aren't a well-formed PNG are returned as is.
+pub fn without_cicp(png: &[u8]) -> Vec<u8> {
+    const SIGNATURE: usize = 8;
+    if png.len() < SIGNATURE {
+        return png.to_vec();
+    }
+    let mut out = png[..SIGNATURE].to_vec();
+    let mut rest = &png[SIGNATURE..];
+    while rest.len() >= 12 {
+        let len = u32::from_be_bytes(rest[..4].try_into().unwrap()) as usize;
+        let Some(chunk) = rest.get(..len + 12) else {
+            break;
+        };
+        if &chunk[4..8] != b"cICP" {
+            out.extend_from_slice(chunk);
+        }
+        rest = &rest[len + 12..];
+    }
+    out.extend_from_slice(rest);
+    out
 }
 
 /// Write a tone-mapped 8-bit sRGB PNG.
@@ -248,9 +276,25 @@ mod tests {
         assert!(info.icc_profile.is_some());
         assert_eq!(info.bit_depth, BitDepth::Sixteen);
         assert_eq!(info.color_type, ColorType::Rgb);
-        // HDR is signalled by the profile's `cicp` tag only (see
-        // `write_hdr_png`).
-        assert!(info.coding_independent_code_points.is_none());
+        let cicp = info.coding_independent_code_points.unwrap();
+        assert_eq!(
+            (
+                cicp.color_primaries,
+                cicp.transfer_function,
+                cicp.matrix_coefficients,
+                cicp.is_video_full_range_image
+            ),
+            (9, 16, 0, true)
+        );
+
+        // The Discord copy is the same file minus the chunk, and still
+        // decodes to the same pixels with the same profile.
+        let stripped = without_cicp(&bytes);
+        assert_eq!(stripped.len(), bytes.len() - 16);
+        let (stripped_info, stripped_data) = read_png(&stripped);
+        assert!(stripped_info.coding_independent_code_points.is_none());
+        assert_eq!(stripped_info.icc_profile, info.icc_profile);
+        assert_eq!(stripped_data, data);
         let clli = info.content_light_level.unwrap();
         assert_eq!(clli.max_content_light_level, 10_000_000);
 
