@@ -2,8 +2,8 @@
 //!
 //! Two outputs are supported:
 //! - **HDR**: 16-bit PNG in Rec.2020 primaries with the PQ (SMPTE ST 2084)
-//!   transfer function, tagged with a `cICP` chunk so HDR-aware viewers
-//!   display it in HDR.
+//!   transfer function, with an ICC profile whose `cicp` tag makes
+//!   HDR-aware viewers display it in HDR.
 //! - **SDR**: tone-mapped 8-bit sRGB PNG.
 
 use std::fs::File;

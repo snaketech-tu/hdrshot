@@ -1,10 +1,9 @@
 //! ICC profile for the HDR PNG.
 //!
 //! The profile is ICC v4.4 and carries a `cicp` tag (BT.2020, PQ, full
-//! range). Windows recognises HDR images by that tag, not by the PNG
-//! `cICP` chunk, and then shows the pixels as HDR like the JXR itself.
-//! Browsers and other apps that read the PNG `cICP` chunk ignore the
-//! profile.
+//! range). This tag is the PNG's only HDR signal: Windows Photos detects
+//! HDR by it and then shows the pixels as HDR like the JXR itself, and
+//! Chrome and Edge use it the same way.
 //!
 //! Viewers that only do SDR color management, such as the Windows Photo
 //! Viewer, use the profile's lookup tables instead, so they bake in the

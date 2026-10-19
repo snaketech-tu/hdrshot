@@ -53,7 +53,14 @@ pub fn light_levels(image: &ScRgbImage) -> LightLevels {
 ///
 /// Highlights above `hdr.peak_nits` roll off smoothly so the brightest
 /// pixel lands on that peak. `sdr` sets the tone curve of the embedded ICC
-/// profile, which viewers without HDR support use instead of `cICP`.
+/// profile, which viewers without HDR support use instead of its `cicp`
+/// tag.
+///
+/// HDR is signalled only by the profile's `cicp` tag, not by a PNG `cICP`
+/// chunk. Chrome, Edge and Windows Photos read the tag, while Discord's
+/// image service converts any PNG with a `cICP` chunk to SDR with its red
+/// and blue channels mixed up, which turns the picture yellow. Without the
+/// chunk it keeps the profile and the image shows correctly.
 pub fn write_hdr_png<W: Write>(
     image: &ScRgbImage,
     levels: &LightLevels,
@@ -110,8 +117,6 @@ pub fn write_hdr_png<W: Write>(
     encoder.set_compression(Compression::Balanced);
     let mut writer = encoder.write_header()?;
 
-    // cICP: BT.2020 primaries, PQ transfer, RGB (identity matrix), full range.
-    writer.write_chunk(png::chunk::ChunkType(*b"cICP"), &[9, 16, 0, 1])?;
     // sBIT: the samples carry only this many significant bits.
     let bits = HDR_SIGNIFICANT_BITS as u8;
     writer.write_chunk(png::chunk::sBIT, &[bits; 3])?;
@@ -243,16 +248,9 @@ mod tests {
         assert!(info.icc_profile.is_some());
         assert_eq!(info.bit_depth, BitDepth::Sixteen);
         assert_eq!(info.color_type, ColorType::Rgb);
-        let cicp = info.coding_independent_code_points.unwrap();
-        assert_eq!(
-            (
-                cicp.color_primaries,
-                cicp.transfer_function,
-                cicp.matrix_coefficients,
-                cicp.is_video_full_range_image
-            ),
-            (9, 16, 0, true)
-        );
+        // HDR is signalled by the profile's `cicp` tag only (see
+        // `write_hdr_png`).
+        assert!(info.coding_independent_code_points.is_none());
         let clli = info.content_light_level.unwrap();
         assert_eq!(clli.max_content_light_level, 10_000_000);
 

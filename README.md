@@ -5,8 +5,8 @@ screenshots, to PNG. Runs on Windows, macOS and Linux.
 
 Each input can produce:
 
-- **HDR PNG**: 16-bit, Rec.2020 primaries with the PQ transfer function and a
-  `cICP` chunk, so HDR-aware viewers and browsers display it in HDR.
+- **HDR PNG**: 16-bit, Rec.2020 primaries with the PQ transfer function and an
+  HDR color profile, so HDR-aware viewers and browsers display it in HDR.
 - **SDR PNG**: tone-mapped 8-bit sRGB for everything else.
 
 > Work in progress: conversion works from the command line. The desktop
@@ -21,13 +21,14 @@ Rust JPEG XR decoder, so no C toolchain is needed.
 
 - **HDR**: converted to BT.2020 and encoded with PQ (absolute nits), keeping
   the screenshot's brightness exactly. Samples are rounded to 10 bits, the
-  precision HDR displays use, which halves the file size. It's tagged with
-  `cICP` (BT.2020, PQ, full range), plus `mDCV` and `cLLI` describing the
-  content's peak and average brightness so HDR viewers can fit it to the
-  display.
-  Chrome, Edge and other HDR-aware apps show it in HDR. It also embeds an
-  ICC v4.4 profile with a `cicp` tag, which is how Windows Photos detects
-  HDR, so it shows the PNG in HDR like the original JXR. SDR-only viewers
+  precision HDR displays use, which halves the file size. It embeds an ICC
+  v4.4 profile with a `cicp` tag (BT.2020, PQ, full range), which Chrome,
+  Edge and Windows Photos use to show it in HDR like the original JXR, plus
+  `mDCV` and `cLLI` describing the content's peak and average brightness so
+  HDR viewers can fit it to the display. There is deliberately no PNG
+  `cICP` chunk: Discord's image service converts PNGs that have one to SDR
+  with wrong colors (warm scenes turn yellow), but keeps the profile when
+  it is missing. SDR-only viewers
   that do color management (such as the Windows Photo Viewer) use the
   profile's lookup table instead, which applies the same SDR tone mapping
   as the SDR output, so they show a normal picture instead of a washed-out
