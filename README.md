@@ -27,8 +27,8 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   ICC profile that applies the same SDR tone mapping, so viewers that
   ignore `cICP` but do color management (such as the Windows Photo Viewer)
   show a normal SDR picture instead of a washed-out one.
-- **SDR**: the HDR reference white (203 nits by default, from ITU-R BT.2408)
-  becomes SDR white. Highlights above that roll off smoothly up to the
+- **SDR**: scRGB 1.0 (80 nits) becomes SDR white by default, matching how
+  Windows shows these screenshots in SDR viewers. Highlights above that roll off smoothly up to the
   image's 99.9th percentile brightness. The curve is applied to each pixel's
   brightest channel and the other channels are scaled with it, which keeps
   hue and saturation.
@@ -52,7 +52,7 @@ cargo build --release
 ```sh
 jxr2png shot.jxr                 # writes shot_hdr.png and shot_sdr.png
 jxr2png --sdr -o out/ *.jxr      # SDR only, into out/
-jxr2png --sdr --sdr-white 160 shot.jxr   # brighter SDR result
+jxr2png --sdr --sdr-white 203 shot.jxr   # darker SDR result
 ```
 
 Everything is automatic by default; these options are only for tuning.

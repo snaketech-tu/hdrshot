@@ -15,6 +15,7 @@ pub mod decode;
 pub mod encode;
 pub mod icc;
 
+use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode};
 pub use encode::{LightLevels, light_levels, write_hdr_png, write_sdr_png};
 
@@ -50,8 +51,8 @@ pub struct HdrOptions {
 /// Settings for the tone-mapped SDR output.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SdrOptions {
-    /// HDR luminance, in nits, that becomes SDR white. Defaults to 203,
-    /// the HDR reference white from ITU-R BT.2408.
+    /// HDR luminance, in nits, that becomes SDR white. Defaults to 80,
+    /// scRGB 1.0, which is how Windows shows these screenshots as SDR.
     pub white_nits: f32,
     /// Luminance, in nits, that maps to the SDR maximum. `None` uses the
     /// image's 99.9th percentile, so a few tiny specular pixels don't
@@ -62,7 +63,7 @@ pub struct SdrOptions {
 impl Default for SdrOptions {
     fn default() -> Self {
         Self {
-            white_nits: 203.0,
+            white_nits: SCRGB_WHITE_NITS,
             peak_nits: None,
         }
     }

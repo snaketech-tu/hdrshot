@@ -286,14 +286,14 @@ mod tests {
 
     #[test]
     fn sdr_png_maps_reference_white_near_full_scale() {
-        let white = 203.0 / SCRGB_WHITE_NITS;
+        let options = SdrOptions {
+            white_nits: 203.0,
+            peak_nits: Some(2030.0),
+        };
+        let white = options.white_nits / SCRGB_WHITE_NITS;
         let img = image(vec![[0.0; 3], [white; 3], [white * 10.0; 3]], 3);
         let levels = light_levels(&img);
         let mut bytes = Vec::new();
-        let options = SdrOptions {
-            peak_nits: Some(2030.0),
-            ..Default::default()
-        };
         write_sdr_png(&img, &levels, &options, &mut bytes).unwrap();
 
         let (info, data) = read_png(&bytes);
