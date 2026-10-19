@@ -2,10 +2,13 @@ name: Release
 
 # Pushing a tag such as v1.0.0 builds the CLI and desktop app for Windows,
 # macOS and Linux and publishes them as a GitHub release. The release notes
-# are that version's section of CHANGELOG.md.
+# are that version's section of CHANGELOG.md. Pull requests that change this
+# workflow run the builds without publishing anything.
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
   workflow_dispatch:
     inputs:
       tag:
@@ -17,7 +20,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  TAG: ${{ inputs.tag || github.ref_name }}
+  TAG: ${{ inputs.tag || (github.event_name == 'pull_request' && 'dev' || github.ref_name) }}
 
 jobs:
   build:
@@ -121,6 +124,7 @@ jobs:
 
   release:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
