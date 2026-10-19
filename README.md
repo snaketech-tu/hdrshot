@@ -9,9 +9,6 @@ Each input can produce:
   HDR color profile, so HDR-aware viewers and browsers display it in HDR.
 - **SDR PNG**: tone-mapped 8-bit sRGB for everything else.
 
-> Work in progress: conversion works from the command line. The desktop
-> app is coming next.
-
 ## How the conversion works
 
 Windows HDR screenshots store linear scRGB: BT.709 primaries, where 1.0 is
@@ -52,6 +49,20 @@ Rust JPEG XR decoder, so no C toolchain is needed.
 ```sh
 cargo build --release
 ```
+
+## Desktop app
+
+```sh
+cargo run --release -p jxr2png-gui
+```
+
+Drop `.jxr` files or whole folders onto the window (or click the drop area
+to choose files), pick HDR, SDR or both, choose where to save, and press
+Convert. Files given on the command line, or dropped onto the program's
+icon, are added to the list. The tuning options from the command line are
+under Advanced; they are off by default and reset every time the app
+starts, so results always match the original screenshot unless you change
+them.
 
 ## Command line
 

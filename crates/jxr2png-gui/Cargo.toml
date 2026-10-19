@@ -7,5 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-eframe = "0.37.0"
+eframe = { version = "0.37.0", features = ["persistence"] }
 jxr2png-core = { version = "0.1.0", path = "../jxr2png-core" }
+rfd = "0.17.2"
+serde = { version = "1.0.229", features = ["derive"] }
