@@ -4,7 +4,7 @@
 
 # jxr2png
 
-**Turn HDR screenshots (`.jxr`) into PNGs that look exactly like the original.**
+**Converts HDR JPEG XR (`.jxr`) screenshots to HDR and SDR PNG.**
 
 [![Release](https://img.shields.io/github/v/release/snaketech-tu/jxr2png?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/jxr2png/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/snaketech-tu/jxr2png/total?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/jxr2png/releases)
@@ -21,42 +21,42 @@
 
 </div>
 
-Windows Game Bar and Xbox save HDR screenshots as JPEG XR, a format almost
-nothing else can open. jxr2png converts them to PNG, in HDR for screens and
+Windows Game Bar and Xbox save HDR screenshots as JPEG XR, a format few
+applications can open. jxr2png converts them to PNG, in HDR for screens and
 apps that support it and in SDR for everything else, without changing how
 the screenshot looks.
 
-## ✨ Features
+## Features
 
-- 🌈 **True HDR PNG.** Rec.2020 PQ with the brightness of the original
+- **HDR PNG.** Rec.2020 PQ with the brightness of the original
   screenshot, shown in HDR by Windows Photos, Chrome, Edge and HDR image
   viewers.
-- 🖼️ **Great-looking SDR PNG.** Tone-mapped the way Windows shows the
+- **SDR PNG.** Tone-mapped the way Windows shows the
   screenshot on an SDR screen, with highlights that roll off smoothly and
   colors that keep their hue.
-- 🎯 **Matches the input by default.** Brightness, peak and white level all
-  come from the screenshot itself. Tuning options exist, but you never need
-  them.
-- 🖱️ **Drag and drop.** Drop files or whole folders, pick HDR, SDR or both,
+- **Faithful by default.** Brightness, peak and white level all
+  come from the screenshot itself. Tuning options are available but
+  not required.
+- **Drag and drop.** Drop files or whole folders, pick HDR, SDR or both,
   press Convert.
-- 💬 **Copy for Discord.** One click puts the image on the clipboard in a
+- **Copy for Discord.** One click puts the image on the clipboard in a
   form Discord shows with correct colors.
-- 📂 **Double-click to convert.** Optionally opens `.jxr` files with jxr2png
+- **Double-click to convert.** Optionally opens `.jxr` files with jxr2png
   on Windows and Linux.
-- ⚡ **Fast.** Converts in parallel on all CPU cores, in pure Rust with no
+- **Parallel conversion.** Uses all CPU cores, written in pure Rust with no
   external libraries.
 
-## 📥 Download
+## Download
 
-Grab the archive for your system from the
+Download the archive for your system from the
 [latest release](https://github.com/snaketech-tu/jxr2png/releases/latest).
 Each one contains the desktop app and the `jxr2png` command-line tool.
 
 | Platform | File | Desktop app |
 | --- | --- | --- |
-| 🪟 Windows 10/11 (x64) | `jxr2png-vX.Y.Z-windows-x64.zip` | `jxr2png-gui.exe` |
-| 🍎 macOS 11+ (Apple silicon and Intel) | `jxr2png-vX.Y.Z-macos-universal.zip` | `jxr2png.app` |
-| 🐧 Linux (x64) | `jxr2png-vX.Y.Z-linux-x64.tar.gz` | `jxr2png-gui` |
+| Windows 10/11 (x64) | `jxr2png-vX.Y.Z-windows-x64.zip` | `jxr2png-gui.exe` |
+| macOS 11+ (Apple silicon and Intel) | `jxr2png-vX.Y.Z-macos-universal.zip` | `jxr2png.app` |
+| Linux (x64) | `jxr2png-vX.Y.Z-linux-x64.tar.gz` | `jxr2png-gui` |
 
 No installer is needed: unpack it and run the app. The builds aren't signed
 with a paid certificate, so the first launch needs one extra step:
@@ -68,7 +68,7 @@ with a paid certificate, so the first launch needs one extra step:
   right-click the app and choose **Open**). Or remove the download
   quarantine in Terminal: `xattr -dr com.apple.quarantine jxr2png.app jxr2png`.
 
-## 🖥️ Desktop app
+## Desktop app
 
 1. Drop `.jxr` files or folders onto the window, or click the drop area to
    choose files. On Windows and Linux, files dropped onto the program's icon
@@ -100,7 +100,7 @@ with a paid certificate, so the first launch needs one extra step:
 
 </details>
 
-## ⌨️ Command line
+## Command line
 
 ```sh
 jxr2png shot.jxr                         # writes shot_hdr.png and shot_sdr.png
@@ -125,7 +125,7 @@ Everything is automatic; these options are only for tuning:
 
 Run `jxr2png --help` for the full list.
 
-## 🔬 How it works
+## How it works
 
 Windows HDR screenshots store linear scRGB: BT.709 primaries, where 1.0 is
 80 nits, values above 1.0 are highlights and negative values are colors
@@ -167,7 +167,7 @@ Rust JPEG XR decoder, so no C toolchain is needed.
 
 </details>
 
-## 🛠️ Building from source
+## Building from source
 
 With [Rust](https://rustup.rs) installed:
 
@@ -194,6 +194,6 @@ Releases are built by GitHub Actions: pushing a `v*` tag builds all three
 platforms and publishes the release with notes from
 [CHANGELOG.md](CHANGELOG.md).
 
-## 📄 License
+## License
 
 [Apache-2.0](LICENSE)
