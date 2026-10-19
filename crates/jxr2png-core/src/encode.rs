@@ -88,7 +88,7 @@ pub fn write_hdr_png<W: Write>(
                 rgb = rgb.map(|c| c * scale);
             }
             for (i, c) in rgb.into_iter().enumerate() {
-                let v = (pq_encode(c) * 65535.0).round() as u16;
+                let v = quantize_pq(pq_encode(c));
                 out[i * 2..i * 2 + 2].copy_from_slice(&v.to_be_bytes());
             }
             let brightest = rgb.into_iter().fold(0.0, f32::max);
@@ -112,6 +112,9 @@ pub fn write_hdr_png<W: Write>(
 
     // cICP: BT.2020 primaries, PQ transfer, RGB (identity matrix), full range.
     writer.write_chunk(png::chunk::ChunkType(*b"cICP"), &[9, 16, 0, 1])?;
+    // sBIT: the samples carry only this many significant bits.
+    let bits = HDR_SIGNIFICANT_BITS as u8;
+    writer.write_chunk(png::chunk::sBIT, &[bits; 3])?;
     // mDCV: BT.2020 primaries and D65 white in units of 0.00002, then the
     // display's peak and minimum luminance in units of 0.0001 nits.
     let mastering_peak = roll_off.map_or(max, |(peak, _)| peak);
@@ -131,6 +134,22 @@ pub fn write_hdr_png<W: Write>(
     writer.write_image_data(&data)?;
     writer.finish()?;
     Ok(())
+}
+
+/// Bits of PQ precision kept in the 16-bit HDR samples. Ten bits is what
+/// HDR10 displays and video use; dropping the bits below it makes the PNG
+/// about half the size.
+const HDR_SIGNIFICANT_BITS: u32 = 10;
+
+/// Round a 0..1 PQ signal to [`HDR_SIGNIFICANT_BITS`] and store it as a
+/// 16-bit sample. The steps are multiples of 64 on the 16-bit scale, so
+/// viewers that read the sample as `v / 65535` (most ignore `sBIT`) get the
+/// signal to within half a step, with no overall brightness shift.
+fn quantize_pq(signal: f32) -> u16 {
+    let step = 1u32 << (16 - HDR_SIGNIFICANT_BITS);
+    let max_code = (1u32 << HDR_SIGNIFICANT_BITS) - 1;
+    let code = ((signal * 65535.0 / step as f32).round() as u32).min(max_code);
+    (code * step) as u16
 }
 
 /// Brightness that maps to SDR maximum.
@@ -237,12 +256,28 @@ mod tests {
         let clli = info.content_light_level.unwrap();
         assert_eq!(clli.max_content_light_level, 10_000_000);
 
+        assert_eq!(info.sbit.as_deref(), Some(&[10, 10, 10][..]));
+
         let sample = |i: usize| u16::from_be_bytes([data[i * 2], data[i * 2 + 1]]);
         assert_eq!(sample(0), 0);
         let expect = |nits: f32| (pq_encode(nits) * 65535.0).round() as u16;
         for c in 0..3 {
-            assert!(sample(3 + c).abs_diff(expect(80.0)) <= 2);
-            assert!(sample(6 + c).abs_diff(expect(1000.0)) <= 2);
+            assert!(sample(3 + c).abs_diff(expect(80.0)) <= 32);
+            assert!(sample(6 + c).abs_diff(expect(1000.0)) <= 32);
+        }
+    }
+
+    #[test]
+    fn pq_is_rounded_to_ten_bits_on_the_16_bit_scale() {
+        assert_eq!(quantize_pq(0.0), 0);
+        assert_eq!(quantize_pq(1.0), 1023 << 6);
+        for i in 0..=1000 {
+            let signal = i as f32 / 1000.0;
+            let v = quantize_pq(signal);
+            assert_eq!(v % 64, 0);
+            // Within half a 10-bit step, except at the very top where the
+            // last step is cut off.
+            assert!((f32::from(v) - signal * 65535.0).abs() <= 32.0 || v == 1023 << 6);
         }
     }
 

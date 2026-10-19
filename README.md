@@ -20,9 +20,11 @@ outside BT.709. Decoding uses [`jxr`](https://crates.io/crates/jxr), a pure
 Rust JPEG XR decoder, so no C toolchain is needed.
 
 - **HDR**: converted to BT.2020 and encoded with PQ (absolute nits), keeping
-  the screenshot's brightness exactly. It's tagged with `cICP` (BT.2020, PQ,
-  full range), plus `mDCV` and `cLLI` describing the content's peak and
-  average brightness so HDR viewers can fit it to the display.
+  the screenshot's brightness exactly. Samples are rounded to 10 bits, the
+  precision HDR displays use, which halves the file size. It's tagged with
+  `cICP` (BT.2020, PQ, full range), plus `mDCV` and `cLLI` describing the
+  content's peak and average brightness so HDR viewers can fit it to the
+  display.
   Chrome, Edge and other HDR-aware apps show it in HDR. It also embeds an
   ICC v4.4 profile with a `cicp` tag, which is how Windows Photos detects
   HDR, so it shows the PNG in HDR like the original JXR. SDR-only viewers
