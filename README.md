@@ -23,7 +23,9 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   viewers need, and by an ICC v4.4 profile with a matching `cicp` tag,
   which Chrome and Edge also read, plus `mDCV` and `cLLI` describing the
   content's peak and average brightness so HDR viewers can fit it to the
-  display. Discord's image service converts PNGs with a `cICP` chunk to SDR
+  display. MaxCLL is the 99.99th percentile of pixel brightness, as the PNG
+  spec recommends, so a few stray bright pixels don't make viewers dim the
+  whole picture. Discord's image service converts PNGs with a `cICP` chunk to SDR
   with wrong colors (warm scenes turn yellow) but shows them correctly
   without it, so the desktop app's clipboard copy leaves the chunk out (and `mDCV`,
   which the PNG spec only allows together with `cICP`).

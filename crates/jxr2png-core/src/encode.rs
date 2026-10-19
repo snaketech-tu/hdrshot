@@ -80,7 +80,7 @@ pub fn write_hdr_png<W: Write>(
         .map(|peak| (peak, ToneCurve::new(source_peak / peak)));
 
     let mut data = vec![0u8; image.pixels.len() * 6];
-    let (max, sum) = data
+    let mut brightest: Vec<f32> = data
         .par_chunks_mut(6)
         .zip(image.pixels.par_iter())
         .map(|(out, &p)| {
@@ -96,11 +96,13 @@ pub fn write_hdr_png<W: Write>(
                 let v = quantize_pq(pq_encode(c));
                 out[i * 2..i * 2 + 2].copy_from_slice(&v.to_be_bytes());
             }
-            let brightest = rgb.into_iter().fold(0.0, f32::max);
-            (brightest, f64::from(brightest))
+            rgb.into_iter().fold(0.0, f32::max)
         })
-        .reduce(|| (0.0, 0.0), |a, b| (a.0.max(b.0), a.1 + b.1));
-    let average = (sum / image.pixels.len().max(1) as f64) as f32;
+        .collect();
+    let max = brightest.par_iter().copied().reduce(|| 0.0, f32::max);
+    let average = (brightest.par_iter().map(|&v| f64::from(v)).sum::<f64>()
+        / brightest.len().max(1) as f64) as f32;
+    let max_cll = max_content_light_level(&mut brightest);
 
     let mut info = png::Info::with_size(image.width, image.height);
     info.color_type = ColorType::Rgb;
@@ -132,13 +134,30 @@ pub fn write_hdr_png<W: Write>(
     writer.write_chunk(png::chunk::ChunkType(*b"mDCV"), &mdcv)?;
     // cLLI: MaxCLL and MaxFALL in units of 0.0001 nits.
     let mut clli = [0u8; 8];
-    clli[..4].copy_from_slice(&to_clli_units(max).to_be_bytes());
+    clli[..4].copy_from_slice(&to_clli_units(max_cll).to_be_bytes());
     clli[4..].copy_from_slice(&to_clli_units(average).to_be_bytes());
     writer.write_chunk(png::chunk::ChunkType(*b"cLLI"), &clli)?;
 
     writer.write_image_data(&data)?;
     writer.finish()?;
     Ok(())
+}
+
+/// MaxCLL for the per-pixel brightest channel values in `brightest`: the
+/// 99.99th percentile rather than the true maximum. Following the PNG
+/// spec's recommendation ("On the Calculation and Usage of HDR Static
+/// Content Metadata", SMPTE), this ignores a handful of stray pixels, so
+/// viewers don't dim the whole picture to fit a few specks. The mastering
+/// peak in `mDCV` still covers the true maximum.
+fn max_content_light_level(brightest: &mut [f32]) -> f32 {
+    if brightest.is_empty() {
+        return 0.0;
+    }
+    // Nearest-rank percentile: the smallest value at or above 99.99% of
+    // the pixels.
+    let rank = (brightest.len() as f64 * 0.9999).ceil() as usize;
+    let (_, value, _) = brightest.select_nth_unstable_by(rank.max(1) - 1, f32::total_cmp);
+    *value
 }
 
 /// Bits of PQ precision kept in the 16-bit HDR samples. Ten bits is what
@@ -249,6 +268,19 @@ mod tests {
         let frame = reader.next_frame(&mut buf).unwrap();
         buf.truncate(frame.buffer_size());
         (reader.info().clone(), buf)
+    }
+
+    #[test]
+    fn max_cll_ignores_stray_pixels() {
+        // Among 20,000 pixels at 100 nits, two 4000-nit specks are within
+        // the brightest 0.01% and ignored; a third one is not.
+        let mut levels = vec![100.0; 20_000];
+        levels[7] = 4000.0;
+        levels[8] = 4000.0;
+        assert_eq!(max_content_light_level(&mut levels.clone()), 100.0);
+        levels[9] = 4000.0;
+        assert_eq!(max_content_light_level(&mut levels), 4000.0);
+        assert_eq!(max_content_light_level(&mut []), 0.0);
     }
 
     #[test]
