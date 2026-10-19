@@ -17,7 +17,7 @@ pub mod icc;
 
 use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode};
-pub use encode::{LightLevels, light_levels, without_cicp, write_hdr_png, write_sdr_png};
+pub use encode::{LightLevels, for_discord, light_levels, write_hdr_png, write_sdr_png};
 
 /// Which PNG files to produce for each input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

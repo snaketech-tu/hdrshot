@@ -111,13 +111,13 @@ fn copy(clipboard: &SharedClipboard, path: &Path, hdr: bool) -> String {
 }
 
 /// Write a copy of the HDR PNG without its `cICP` chunk, which Discord
-/// mishandles (see [`jxr2png_core::without_cicp`]), to a temporary folder
+/// mishandles (see [`jxr2png_core::for_discord`]), to a temporary folder
 /// that only ever holds the latest copy. It keeps the original's name.
 fn discord_copy(path: &Path) -> std::io::Result<PathBuf> {
     let dir = std::env::temp_dir().join("jxr2png-clipboard");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
     let copy = dir.join(path.file_name().unwrap_or_default());
-    std::fs::write(&copy, jxr2png_core::without_cicp(&std::fs::read(path)?))?;
+    std::fs::write(&copy, jxr2png_core::for_discord(&std::fs::read(path)?))?;
     Ok(copy)
 }

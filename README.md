@@ -25,7 +25,8 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   content's peak and average brightness so HDR viewers can fit it to the
   display. Discord's image service converts PNGs with a `cICP` chunk to SDR
   with wrong colors (warm scenes turn yellow) but shows them correctly
-  without it, so the desktop app's clipboard copy leaves the chunk out.
+  without it, so the desktop app's clipboard copy leaves the chunk out (and `mDCV`,
+  which the PNG spec only allows together with `cICP`).
   SDR-only viewers
   that do color management (such as the Windows Photo Viewer) use the
   profile's lookup table instead, which applies the same SDR tone mapping

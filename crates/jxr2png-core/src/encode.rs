@@ -58,7 +58,7 @@ pub fn light_levels(image: &ScRgbImage) -> LightLevels {
 ///
 /// HDR is signalled both by a PNG `cICP` chunk, which Windows Photos and
 /// HDR image viewers need, and by the profile's `cicp` tag. Discord's
-/// image service mishandles the chunk (see [`without_cicp`]).
+/// image service mishandles the chunk (see [`for_discord`]).
 pub fn write_hdr_png<W: Write>(
     image: &ScRgbImage,
     levels: &LightLevels,
@@ -169,14 +169,16 @@ fn to_clli_units(nits: f32) -> u32 {
     (f64::from(nits.clamp(0.0, 10_000.0)) * 10_000.0).round() as u32
 }
 
-/// Copy of a PNG without its `cICP` chunk, for sharing on Discord.
+/// Copy of an HDR PNG without its `cICP` chunk, for sharing on Discord.
 ///
 /// Discord's image service converts any PNG with a `cICP` chunk to SDR with
 /// its red and blue channels mixed up, which turns warm scenes yellow.
 /// Without the chunk it keeps the ICC profile, whose `cicp` tag still marks
-/// the image as HDR, and shows it correctly. Every other chunk is copied
-/// byte for byte. Bytes that aren't a well-formed PNG are returned as is.
-pub fn without_cicp(png: &[u8]) -> Vec<u8> {
+/// the image as HDR, and shows it correctly. The `mDCV` chunk goes too,
+/// since the PNG spec only allows it alongside `cICP`. Every other chunk is
+/// copied byte for byte. Bytes that aren't a well-formed PNG are returned
+/// as is.
+pub fn for_discord(png: &[u8]) -> Vec<u8> {
     const SIGNATURE: usize = 8;
     if png.len() < SIGNATURE {
         return png.to_vec();
@@ -188,7 +190,7 @@ pub fn without_cicp(png: &[u8]) -> Vec<u8> {
         let Some(chunk) = rest.get(..len + 12) else {
             break;
         };
-        if &chunk[4..8] != b"cICP" {
+        if !matches!(&chunk[4..8], b"cICP" | b"mDCV") {
             out.extend_from_slice(chunk);
         }
         rest = &rest[len + 12..];
@@ -287,12 +289,14 @@ mod tests {
             (9, 16, 0, true)
         );
 
-        // The Discord copy is the same file minus the chunk, and still
+        // The Discord copy is the same file minus cICP and mDCV, and still
         // decodes to the same pixels with the same profile.
-        let stripped = without_cicp(&bytes);
-        assert_eq!(stripped.len(), bytes.len() - 16);
+        let stripped = for_discord(&bytes);
+        assert_eq!(stripped.len(), bytes.len() - (12 + 4) - (12 + 24));
         let (stripped_info, stripped_data) = read_png(&stripped);
         assert!(stripped_info.coding_independent_code_points.is_none());
+        assert!(stripped_info.mastering_display_color_volume.is_none());
+        assert_eq!(stripped_info.content_light_level, info.content_light_level);
         assert_eq!(stripped_info.icc_profile, info.icc_profile);
         assert_eq!(stripped_data, data);
         let clli = info.content_light_level.unwrap();
