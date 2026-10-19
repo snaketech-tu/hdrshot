@@ -101,8 +101,10 @@ fn copy(clipboard: &SharedClipboard, image: Rgb) -> String {
     };
     let rgba = image
         .rgb
-        .chunks_exact(3)
-        .flat_map(|p| [p[0], p[1], p[2], 255])
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .flat_map(|&[r, g, b]| [r, g, b, 255])
         .collect::<Vec<u8>>();
     let data = arboard::ImageData {
         width: image.width,
