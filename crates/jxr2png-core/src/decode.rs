@@ -18,32 +18,55 @@ pub struct ScRgbImage {
     pub height: u32,
     /// Row-major RGB pixels.
     pub pixels: Vec<[f32; 3]>,
+    /// Straight (not premultiplied) alpha from 0 to 1 for each pixel, if
+    /// the source has an alpha channel that isn't fully opaque.
+    pub alpha: Option<Vec<f32>>,
+    /// Whether the source is HDR (float or fixed point) rather than 8-bit
+    /// SDR.
+    pub hdr: bool,
+}
+
+impl ScRgbImage {
+    /// An opaque HDR image.
+    pub fn new(width: u32, height: u32, pixels: Vec<[f32; 3]>) -> Self {
+        Self {
+            width,
+            height,
+            pixels,
+            alpha: None,
+            hdr: true,
+        }
+    }
 }
 
 /// Decode a `.jxr` file's bytes.
 ///
 /// Float, half-float and fixed-point sources are linear scRGB already, which
 /// is what Windows HDR screenshots use. 8-bit sources are treated as sRGB and
-/// linearized.
+/// linearized, and marked as SDR. Alpha is kept only if some pixel isn't
+/// fully opaque: Game Bar captures carry an alpha plane that is always 1.
 pub fn decode(bytes: &[u8]) -> Result<ScRgbImage> {
     let view = JxrView::parse(bytes).map_err(decode_error)?;
     let info = view.info();
     let (width, height) = (info.width, info.height);
     let sample_format = info.primary.sample_format;
-    // The decoder only offers layouts matching the source, so alpha is
-    // decoded when present and dropped below.
+    // The decoder only offers layouts matching the source.
     let (layout, channels) = if matches!(info.alpha_mode, AlphaMode::None) {
         (ChannelLayout::Rgb, 3)
     } else {
         (ChannelLayout::Rgba, 4)
     };
 
-    let pixels = match sample_format {
+    let (pixels, alpha, hdr) = match sample_format {
         SampleFormat::Float16 | SampleFormat::Float32 | SampleFormat::FixedPoint { .. } => {
             let request = DecodeRequest::new(PixelFormat::F32(layout));
             let image = view.decoder().decode(&request).map_err(decode_error)?;
             match image.samples {
-                DecodedSamples::F32(samples) => to_pixels(&samples, channels, |v| v),
+                DecodedSamples::F32(samples) => (
+                    to_pixels(&samples, channels, |v| v),
+                    to_alpha(&samples, channels, |v| v),
+                    true,
+                ),
                 _ => return Err(unsupported(sample_format)),
             }
         }
@@ -51,9 +74,11 @@ pub fn decode(bytes: &[u8]) -> Result<ScRgbImage> {
             let request = DecodeRequest::new(PixelFormat::U8(layout));
             let image = view.decoder().decode(&request).map_err(decode_error)?;
             match image.samples {
-                DecodedSamples::U8(samples) => {
-                    to_pixels(&samples, channels, |v| srgb_decode(f32::from(v) / 255.0))
-                }
+                DecodedSamples::U8(samples) => (
+                    to_pixels(&samples, channels, |v| srgb_decode(f32::from(v) / 255.0)),
+                    to_alpha(&samples, channels, |v| f32::from(v) / 255.0),
+                    false,
+                ),
                 _ => return Err(unsupported(sample_format)),
             }
         }
@@ -70,6 +95,8 @@ pub fn decode(bytes: &[u8]) -> Result<ScRgbImage> {
         width,
         height,
         pixels,
+        alpha,
+        hdr,
     })
 }
 
@@ -120,6 +147,19 @@ fn to_pixels<T: Copy>(samples: &[T], channels: usize, f: impl Fn(T) -> f32) -> V
         .chunks_exact(channels)
         .map(|p| [f(p[0]), f(p[1]), f(p[2])])
         .collect()
+}
+
+/// The alpha channel, the last of `channels`, unless there is none or every
+/// pixel is opaque.
+fn to_alpha<T: Copy>(samples: &[T], channels: usize, f: impl Fn(T) -> f32) -> Option<Vec<f32>> {
+    if channels < 4 {
+        return None;
+    }
+    let alpha: Vec<f32> = samples
+        .chunks_exact(channels)
+        .map(|p| f(p[channels - 1]).clamp(0.0, 1.0))
+        .collect();
+    alpha.iter().any(|&a| a < 1.0).then_some(alpha)
 }
 
 fn decode_error(e: jxr::JxrError) -> Error {

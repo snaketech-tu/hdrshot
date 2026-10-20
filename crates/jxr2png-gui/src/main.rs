@@ -15,7 +15,7 @@ use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
-use jxr2png_core::{ConvertOptions, Existing, HdrOptions, OutputMode, Outputs, SdrOptions};
+use jxr2png_core::{ConvertOptions, Existing, HdrOptions, Naming, OutputMode, Outputs, SdrOptions};
 use serde::{Deserialize, Serialize};
 
 use convert::{Event, Job, SharedClipboard};
@@ -37,7 +37,7 @@ fn main() {
     let viewport = egui::ViewportBuilder::default()
         .with_title("jxr2png")
         .with_app_id("jxr2png")
-        .with_inner_size([560.0, 640.0])
+        .with_inner_size([560.0, 680.0])
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());
@@ -78,6 +78,29 @@ struct Settings {
     output_dir: Option<PathBuf>,
     copy_to_clipboard: bool,
     keep_date: bool,
+    /// Put HDR and SDR PNGs into `hdr` and `sdr` subfolders.
+    subfolders: bool,
+    /// End file names in `_hdr` or `_sdr`. Always on when both types share
+    /// a folder.
+    type_suffix: bool,
+}
+
+impl Settings {
+    /// Whether the names need `_hdr`/`_sdr` to tell the two PNGs apart.
+    fn suffix_needed(&self) -> bool {
+        self.mode == Mode::Both && !self.subfolders
+    }
+
+    fn naming(&self) -> Naming {
+        Naming {
+            pattern: if self.type_suffix || self.suffix_needed() {
+                Naming::DEFAULT_PATTERN.into()
+            } else {
+                "{name}".into()
+            },
+            subfolders: self.subfolders,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -88,6 +111,8 @@ impl Default for Settings {
             output_dir: None,
             copy_to_clipboard: true,
             keep_date: true,
+            subfolders: false,
+            type_suffix: true,
         }
     }
 }
@@ -325,6 +350,7 @@ impl App {
             } else {
                 None
             },
+            naming: self.settings.naming(),
             hdr: HdrOptions {
                 peak_nits: t.limit_hdr_peak.then_some(t.hdr_peak),
             },
@@ -633,18 +659,31 @@ impl App {
     }
 
     /// Folder the last batch wrote to, if there is a single one.
+    /// With HDR and SDR subfolders, the folder holding both.
     fn output_folder(&self) -> Option<PathBuf> {
-        let mut dirs = self.files.iter().filter_map(|e| match &e.status {
-            Status::Done(o) => o
-                .hdr
-                .as_ref()
-                .or(o.sdr.as_ref())?
-                .parent()
-                .map(Path::to_path_buf),
-            _ => None,
-        });
-        let first = dirs.next()?;
-        dirs.all(|d| d == first).then_some(first)
+        let dirs: Vec<&Path> = self
+            .files
+            .iter()
+            .filter_map(|e| match &e.status {
+                Status::Done(o) => Some([&o.hdr, &o.sdr]),
+                _ => None,
+            })
+            .flatten()
+            .flatten()
+            .filter_map(|p| p.parent())
+            .collect();
+        common_folder(&dirs)
+            .or_else(|| {
+                let parents: Option<Vec<&Path>> = dirs
+                    .iter()
+                    .map(|d| {
+                        let kind = d.file_name()?;
+                        (kind == "hdr" || kind == "sdr").then(|| d.parent())?
+                    })
+                    .collect();
+                common_folder(&parents?)
+            })
+            .map(Path::to_path_buf)
     }
 
     fn drop_zone(&mut self, ui: &mut egui::Ui, height: f32) {
@@ -939,13 +978,39 @@ impl App {
         egui::CollapsingHeader::new(title)
             .id_salt("advanced")
             .show(ui, |ui| {
-                ui.checkbox(&mut self.settings.keep_date, "Keep the capture date")
-                    .on_hover_text(
-                        "Give each PNG the date of its screenshot, so folders sorted \
-                         by date stay in capture order",
-                    );
-                self.tuning_ui(ui);
+                // Scrolls, so opening it doesn't squeeze the file list away.
+                egui::ScrollArea::vertical()
+                    .max_height(170.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| self.advanced_ui(ui));
             });
+    }
+
+    fn advanced_ui(&mut self, ui: &mut egui::Ui) {
+        ui.checkbox(&mut self.settings.keep_date, "Keep the capture date")
+            .on_hover_text(
+                "Give each PNG the date of its screenshot, so folders sorted \
+                         by date stay in capture order",
+            );
+        let s = &mut self.settings;
+        ui.checkbox(&mut s.subfolders, "Save HDR and SDR PNGs in subfolders")
+            .on_hover_text("Put them in folders named hdr and sdr");
+        let needed = s.suffix_needed();
+        let mut suffix = s.type_suffix || needed;
+        ui.add_enabled_ui(!needed, |ui| {
+            if ui
+                .checkbox(&mut suffix, "End file names in _hdr and _sdr")
+                .on_hover_text("Off: shot.jxr becomes shot.png")
+                .on_disabled_hover_text(
+                    "Needed to tell the two PNGs apart when both are saved in the \
+                             same folder",
+                )
+                .changed()
+            {
+                s.type_suffix = suffix;
+            }
+        });
+        self.tuning_ui(ui);
     }
 
     fn tuning_ui(&mut self, ui: &mut egui::Ui) {
@@ -1196,6 +1261,12 @@ fn existing_outputs<'a>(
         .collect()
 }
 
+/// The folder all of `dirs` are, if they are the same one.
+fn common_folder<'a>(dirs: &[&'a Path]) -> Option<&'a Path> {
+    let first = *dirs.first()?;
+    dirs.iter().all(|&d| d == first).then_some(first)
+}
+
 /// What size the listed files come out at with a given height limit.
 #[derive(Debug, PartialEq)]
 enum OutputSize {
@@ -1339,13 +1410,17 @@ fn status_ui(ui: &mut egui::Ui, status: &Status) {
             };
             let saved = list(&mut [&outputs.hdr, &outputs.sdr].into_iter().flatten());
             let kept = list(&mut outputs.skipped.iter());
-            let tooltip = match (saved.is_empty(), kept.is_empty()) {
+            let mut tooltip = match (saved.is_empty(), kept.is_empty()) {
                 (false, true) => format!("Saved:\n{saved}"),
                 (true, _) => format!("Already there, left alone:\n{kept}"),
                 (false, false) => {
                     format!("Saved:\n{saved}\n\nAlready there, left alone:\n{kept}")
                 }
             };
+            if outputs.sdr_input {
+                tooltip =
+                    format!("This is an SDR image, so only the SDR PNG was made.\n\n{tooltip}");
+            }
             if saved.is_empty() {
                 ui.weak("Skipped").on_hover_text(tooltip);
             } else {

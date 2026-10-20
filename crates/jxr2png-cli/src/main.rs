@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 
 use clap::Parser;
-use jxr2png_core::{ConvertOptions, Existing, HdrOptions, OutputMode, Outputs, SdrOptions};
+use jxr2png_core::{ConvertOptions, Existing, HdrOptions, Naming, OutputMode, Outputs, SdrOptions};
 use rayon::prelude::*;
 
 /// Convert HDR JPEG XR (.jxr) images to HDR and/or SDR PNG files.
@@ -31,6 +31,15 @@ struct Args {
     /// Output directory (defaults to each input's directory).
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    /// Output file name without .png: {name} is the input's name, {type}
+    /// is hdr or sdr.
+    #[arg(long, value_name = "PATTERN", default_value = Naming::DEFAULT_PATTERN)]
+    name: String,
+
+    /// Put HDR and SDR PNGs into hdr and sdr subfolders.
+    #[arg(long)]
+    subfolders: bool,
 
     /// Limit the HDR PNG's brightest highlight to this many nits; brighter
     /// parts roll off smoothly. By default the original brightness is kept.
@@ -85,6 +94,10 @@ fn main() -> ExitCode {
     let options = ConvertOptions {
         mode,
         output_dir: args.output.clone(),
+        naming: Naming {
+            pattern: args.name.clone(),
+            subfolders: args.subfolders,
+        },
         hdr: HdrOptions {
             peak_nits: args.hdr_peak,
         },
@@ -100,6 +113,10 @@ fn main() -> ExitCode {
         },
         keep_date: !args.no_keep_date,
     };
+    if let Err(e) = options.naming.check(mode) {
+        eprintln!("--name: {e}");
+        return ExitCode::from(2);
+    }
 
     let mut missing = false;
     let mut files = Vec::new();
@@ -197,12 +214,19 @@ impl<'a> Report<'a> {
                 format!("[{}]", items.join(","))
             };
             println!(
-                "{{\"input\":{},\"written\":{},\"skipped\":{}}}",
+                "{{\"input\":{},\"written\":{},\"skipped\":{},\"sdr_input\":{}}}",
                 json(&input.display().to_string()),
                 list(&mut written.into_iter()),
-                list(&mut outputs.skipped.iter())
+                list(&mut outputs.skipped.iter()),
+                outputs.sdr_input
             );
         } else if !self.args.quiet {
+            if outputs.sdr_input && !(self.args.sdr && !self.args.hdr) {
+                println!(
+                    "{}: an SDR image, so only the SDR PNG is made",
+                    input.display()
+                );
+            }
             for path in written {
                 println!("{} -> {}", input.display(), path.display());
             }

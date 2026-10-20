@@ -79,9 +79,10 @@ pub fn write_hdr_png<W: Write>(
         .filter(|&peak| source_peak > peak)
         .map(|peak| (peak, ToneCurve::new(source_peak / peak)));
 
-    let mut data = vec![0u8; image.pixels.len() * 6];
+    let channels = if image.alpha.is_some() { 4 } else { 3 };
+    let mut data = vec![0u8; image.pixels.len() * 2 * channels];
     let mut brightest: Vec<f32> = data
-        .par_chunks_mut(6)
+        .par_chunks_mut(2 * channels)
         .zip(image.pixels.par_iter())
         .map(|(out, &p)| {
             let mut rgb = to_nits(p);
@@ -99,13 +100,25 @@ pub fn write_hdr_png<W: Write>(
             rgb.into_iter().fold(0.0, f32::max)
         })
         .collect();
+    if let Some(alpha) = &image.alpha {
+        data.par_chunks_mut(8)
+            .zip(alpha.par_iter())
+            .for_each(|(out, &a)| {
+                let a = (a.clamp(0.0, 1.0) * 65535.0).round() as u16;
+                out[6..].copy_from_slice(&a.to_be_bytes());
+            });
+    }
     let max = brightest.par_iter().copied().reduce(|| 0.0, f32::max);
     let average = (brightest.par_iter().map(|&v| f64::from(v)).sum::<f64>()
         / brightest.len().max(1) as f64) as f32;
     let max_cll = max_content_light_level(&mut brightest);
 
     let mut info = png::Info::with_size(image.width, image.height);
-    info.color_type = ColorType::Rgb;
+    info.color_type = if image.alpha.is_some() {
+        ColorType::Rgba
+    } else {
+        ColorType::Rgb
+    };
     info.bit_depth = BitDepth::Sixteen;
     info.icc_profile = Some(Cow::Owned(pq_sdr_fallback_profile(
         sdr.white_nits,
@@ -121,7 +134,8 @@ pub fn write_hdr_png<W: Write>(
     writer.write_chunk(png::chunk::ChunkType(*b"cICP"), &[9, 16, 0, 1])?;
     // sBIT: the samples carry only this many significant bits.
     let bits = HDR_SIGNIFICANT_BITS as u8;
-    writer.write_chunk(png::chunk::sBIT, &[bits; 3])?;
+    let sbit = [bits, bits, bits, 16];
+    writer.write_chunk(png::chunk::sBIT, &sbit[..channels])?;
     // mDCV: BT.2020 primaries and D65 white in units of 0.00002, then the
     // display's peak and minimum luminance in units of 0.0001 nits.
     let mastering_peak = roll_off.map_or(max, |(peak, _)| peak);
@@ -242,9 +256,20 @@ pub fn write_sdr_png<W: Write>(
     options: &SdrOptions,
     out: W,
 ) -> Result<()> {
-    let data = sdr_rgb8(image, levels, options);
+    let rgb = sdr_rgb8(image, levels, options);
+    let (data, color) = match &image.alpha {
+        None => (rgb, ColorType::Rgb),
+        Some(alpha) => {
+            let rgba = rgb
+                .chunks_exact(3)
+                .zip(alpha)
+                .flat_map(|(p, &a)| [p[0], p[1], p[2], (a * 255.0).round() as u8])
+                .collect();
+            (rgba, ColorType::Rgba)
+        }
+    };
     let mut encoder = png::Encoder::new(out, image.width, image.height);
-    encoder.set_color(ColorType::Rgb);
+    encoder.set_color(color);
     encoder.set_depth(BitDepth::Eight);
     encoder.set_compression(Compression::Fast);
     encoder.set_source_srgb(SrgbRenderingIntent::Perceptual);
@@ -260,11 +285,7 @@ mod tests {
 
     fn image(pixels: Vec<[f32; 3]>, width: u32) -> ScRgbImage {
         let height = pixels.len() as u32 / width;
-        ScRgbImage {
-            width,
-            height,
-            pixels,
-        }
+        ScRgbImage::new(width, height, pixels)
     }
 
     fn read_png(bytes: &[u8]) -> (png::Info<'static>, Vec<u8>) {

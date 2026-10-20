@@ -113,7 +113,10 @@ with a paid certificate, so the first launch needs one extra step:
   **Change All**.
 - **Advanced** has **Keep the capture date** (on by default), which gives
   each PNG the date of its screenshot so folders sorted by date stay in
-  capture order. It also holds the tuning options from the command line.
+  capture order. **Save HDR and SDR PNGs in subfolders** writes them
+  to `hdr` and `sdr` subfolders, and with that on, **End file names in _hdr
+  and _sdr** can be turned off. It also holds the tuning options from the
+  command line.
   They are off by default and reset every time the app starts, so results
   always match the original screenshot unless you change them.
 - While converting, the Windows taskbar button shows the progress, and the
@@ -154,6 +157,8 @@ Everything is automatic; these options are only for tuning:
 | `--hdr-peak <NITS>` | Limit the HDR PNG's brightest highlight, rolling off anything brighter |
 | `--sdr-white <NITS>` | HDR brightness that becomes SDR white (default 80; lower is brighter) |
 | `--sdr-peak <NITS>` | Brightness that maps to full SDR white, instead of the 99.9th percentile |
+| `--name <PATTERN>` | Output file name without `.png`: `{name}` is the input's name, `{type}` is `hdr` or `sdr` (default `{name}_{type}`) |
+| `--subfolders` | Put the PNGs in `hdr` and `sdr` subfolders of the output folder |
 | `--max-height <PIXELS>` | Scale taller images down to this height, averaging in linear light |
 | `--overwrite` | Replace PNGs that already exist; by default they are skipped |
 | `--no-keep-date` | Give the PNGs the current time instead of the screenshot's date |
@@ -201,6 +206,13 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   off smoothly up to the image's 99.9th percentile brightness. The curve is
   applied to each pixel's brightest channel and the other channels are
   scaled with it, which keeps hue and saturation.
+- **Transparency**: Game Bar captures carry an alpha channel that is always
+  opaque, so it is dropped. A JXR with real transparency gives PNGs with an
+  alpha channel; colors are weighted by alpha when scaling, so transparent
+  pixels don't darken the edges.
+- **SDR JXR files** (8 bits per channel) have no HDR to keep, so only the
+  SDR PNG is made, a faithful copy of the picture. The app and the command
+  line say so.
 
 </details>
 

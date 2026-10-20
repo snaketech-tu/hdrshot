@@ -25,6 +25,13 @@
 - Thumbnails in the desktop app's file list. Hovering one shows a larger
   preview; with Advanced settings changed, it shows the automatic result
   and yours one above the other.
+- JXR files with transparency keep it: both PNGs get an alpha channel.
+  The always-opaque alpha of Game Bar captures is still dropped.
+- An SDR (8-bit) JXR gives only the SDR PNG, with a note saying why,
+  instead of an HDR PNG that would only hold the SDR picture.
+- Output names: `--name` sets a pattern such as `{name}-{type}`, and
+  `--subfolders` (and the app's Advanced settings) put HDR and SDR PNGs in
+  `hdr` and `sdr` folders, where the `_hdr`/`_sdr` ending can be left off.
 - A "Made with ♥ by snake.tech" line at the bottom of the desktop app,
   linking to Ko-fi.
 

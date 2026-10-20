@@ -93,9 +93,16 @@ pub fn texture(
     let image = &preview.image;
     let rgb = jxr2png_core::sdr_rgb8(image, &preview.levels, sdr);
     let size = [image.width as usize, image.height as usize];
-    ctx.load_texture(
-        name,
-        egui::ColorImage::from_rgb(size, &rgb),
-        egui::TextureOptions::LINEAR,
-    )
+    let color = match &image.alpha {
+        None => egui::ColorImage::from_rgb(size, &rgb),
+        Some(alpha) => {
+            let rgba: Vec<u8> = rgb
+                .chunks_exact(3)
+                .zip(alpha)
+                .flat_map(|(p, &a)| [p[0], p[1], p[2], (a * 255.0).round() as u8])
+                .collect();
+            egui::ColorImage::from_rgba_unmultiplied(size, &rgba)
+        }
+    };
+    ctx.load_texture(name, color, egui::TextureOptions::LINEAR)
 }
