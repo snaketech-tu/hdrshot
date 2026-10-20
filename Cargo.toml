@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/jxr2png-core", "crates/jxr2png-cli", "crates/jxr2png-gui"]
+members = [
+    "crates/jxr2png-core",
+    "crates/jxr2png-cli",
+    "crates/jxr2png-gui",
+    "crates/egui-software-backend",
+]
 
 [workspace.package]
 version = "1.0.0"
