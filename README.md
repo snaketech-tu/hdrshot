@@ -73,7 +73,9 @@ with a paid certificate, so the first launch needs one extra step:
 1. Drop `.jxr` files or folders onto the window, click the drop area to
    choose files, or paste files copied in Explorer or Finder with Ctrl+V.
    On Windows and Linux, files dropped onto the program's icon are added
-   too.
+   too. Files opened while the app is running, for example several
+   screenshots picked with **Open with**, go to the window that is already
+   open.
 2. Choose **HDR + SDR**, **HDR only** or **SDR only**, and whether to save
    next to each image or into one folder.
 3. Press **Convert**.

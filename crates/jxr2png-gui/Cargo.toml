@@ -13,6 +13,7 @@ egui = { version = "0.37.0", features = ["default_fonts"] }
 egui-winit = "0.37.0"
 egui_software_backend = { path = "../egui-software-backend" }
 egui_system_font_provider = "0.37.0"
+interprocess = "2.4.6"
 jxr2png-core = { version = "1.0.0", path = "../jxr2png-core" }
 png = "0.18.1"
 rfd = "0.17.2"

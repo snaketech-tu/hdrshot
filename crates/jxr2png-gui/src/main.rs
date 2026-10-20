@@ -2,6 +2,7 @@
 
 mod assoc;
 mod convert;
+mod single;
 mod storage;
 mod window;
 
@@ -20,6 +21,14 @@ use convert::{Event, Job, SharedClipboard};
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 fn main() {
+    // Files passed on the command line, e.g. by "Open with" or by dropping
+    // them onto the program's icon.
+    let files: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    let listener = match single::claim(&files) {
+        Some(single::Claim::HandedOff) => return,
+        Some(single::Claim::First(listener)) => Some(listener),
+        None => None,
+    };
     let viewport = egui::ViewportBuilder::default()
         .with_title("jxr2png")
         .with_app_id("jxr2png")
@@ -27,7 +36,7 @@ fn main() {
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());
-    if let Err(e) = window::run(viewport, App::new) {
+    if let Err(e) = window::run(viewport, |ctx| App::new(ctx, files, listener)) {
         eprintln!("jxr2png: {e}");
         std::process::exit(1);
     }
@@ -161,6 +170,8 @@ struct App {
     was_focused: bool,
     /// Row picked by clicking it, for the keyboard shortcuts.
     selected: Option<usize>,
+    /// Files opened while the app was already running.
+    opened: Option<Receiver<Vec<PathBuf>>>,
     /// A batch waiting for the user to say what to do with PNGs that
     /// already exist.
     asking: Option<Asking>,
@@ -193,7 +204,7 @@ const TOAST_SECONDS: f64 = 3.0;
 const SETTINGS_KEY: &str = "settings";
 
 impl App {
-    fn new(ctx: &egui::Context) -> Self {
+    fn new(ctx: &egui::Context, files: Vec<PathBuf>, listener: Option<single::Listener>) -> Self {
         let settings = storage::load(SETTINGS_KEY).unwrap_or_default();
         ctx.global_style_mut(|style| {
             style.spacing.item_spacing = Vec2::new(8.0, 8.0);
@@ -214,15 +225,30 @@ impl App {
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
             selected: None,
+            opened: listener.map(|l| l.serve(ctx.clone())),
             asking: None,
         };
         if assoc::SUPPORTED {
             assoc::refresh();
         }
-        // Files passed on the command line, e.g. by "Open with" or by
-        // dropping them onto the program's icon.
-        app.add_paths(std::env::args_os().skip(1).map(PathBuf::from));
+        app.add_paths(files);
         app
+    }
+
+    /// Adds files opened in another launch of the app and brings the
+    /// window to the front. Adding is safe mid-batch: new rows go at the end
+    /// and the batch only refers to the rows it started with.
+    fn receive_opened(&mut self, ctx: &egui::Context) {
+        let Some(opened) = &self.opened else { return };
+        let batches: Vec<_> = opened.try_iter().collect();
+        if batches.is_empty() {
+            return;
+        }
+        for files in batches {
+            self.add_paths(files);
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
 
     fn running(&self) -> bool {
@@ -1031,6 +1057,7 @@ impl window::App for App {
             self.add_paths(dropped);
         }
         self.shortcuts(&ctx);
+        self.receive_opened(&ctx);
 
         let margin = egui::Margin::same(16);
         let panel_fill = ui.visuals().panel_fill;

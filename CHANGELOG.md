@@ -13,6 +13,9 @@
   again or remove it, plus Clear converted files, Retry failed, keyboard
   shortcuts (Delete, Enter, arrow keys) and pasting copied files with
   Ctrl+V.
+- The desktop app runs once per user: files opened while it is already
+  running, such as several screenshots opened with "Open with", are added
+  to the open window instead of each opening a new one.
 - A "Made with ♥ by snake.tech" line at the bottom of the desktop app,
   linking to Ko-fi.
 
