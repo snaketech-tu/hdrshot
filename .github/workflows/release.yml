@@ -4,6 +4,18 @@ name: Release
 # macOS and Linux and publishes them as a GitHub release. The release notes
 # are that version's section of CHANGELOG.md. Pull requests that change this
 # workflow run the builds without publishing anything.
+#
+# Each platform gets a separate download for the desktop app and for the CLI.
+# File names carry no version, so releases/latest/download/<name> always
+# points at the newest build:
+#   jxr2png-gui.exe, jxr2png.exe          Windows, ready to run
+#   jxr2png-gui-macos.dmg                 macOS app, drag to Applications
+#   jxr2png-cli-macos.tar.gz              macOS CLI, completions, man page
+#   jxr2png-gui-linux-x64.tar.gz          Linux app, .desktop file, icon
+#   jxr2png-cli-linux-x64.tar.gz          Linux CLI, completions, man page
+#   SHA256SUMS.txt
+# The tarballs keep the executable bit, which a bare binary loses when a
+# browser downloads it.
 on:
   push:
     tags: ["v*"]
@@ -50,13 +62,8 @@ jobs:
           RUSTFLAGS: -C target-feature=+crt-static
         run: |
           cargo build --release --locked --workspace
-          dir="jxr2png-$TAG-${{ matrix.name }}"
-          mkdir "$dir"
-          cp target/release/jxr2png.exe target/release/jxr2png-gui.exe README.md LICENSE "$dir/"
-          mkdir "$dir/completions"
-          target/release/jxr2png.exe --generate powershell > "$dir/completions/_jxr2png.ps1"
-          7z a "$dir.zip" "$dir" > /dev/null
-          echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+          mkdir out
+          cp target/release/jxr2png.exe target/release/jxr2png-gui.exe out/
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
@@ -64,20 +71,21 @@ jobs:
           for target in aarch64-apple-darwin x86_64-apple-darwin; do
             cargo build --release --locked --workspace --target "$target"
           done
-          dir="jxr2png-$TAG-${{ matrix.name }}"
-          app="$dir/jxr2png.app/Contents"
-          mkdir -p "$app/MacOS" "$app/Resources"
+          cli=jxr2png-cli-macos
+          gui="$RUNNER_TEMP/gui"
+          app="$gui/jxr2png.app/Contents"
+          mkdir -p out "$cli" "$app/MacOS" "$app/Resources"
           for bin in jxr2png jxr2png-gui; do
             lipo -create -output "target/$bin" \
               "target/aarch64-apple-darwin/release/$bin" \
               "target/x86_64-apple-darwin/release/$bin"
           done
-          cp target/jxr2png "$dir/"
-          mkdir "$dir/completions" "$dir/man"
-          target/jxr2png --generate bash > "$dir/completions/jxr2png.bash"
-          target/jxr2png --generate zsh > "$dir/completions/_jxr2png"
-          target/jxr2png --generate fish > "$dir/completions/jxr2png.fish"
-          target/jxr2png --generate man > "$dir/man/jxr2png.1"
+          cp target/jxr2png README.md LICENSE "$cli/"
+          mkdir "$cli/completions" "$cli/man"
+          target/jxr2png --generate bash > "$cli/completions/jxr2png.bash"
+          target/jxr2png --generate zsh > "$cli/completions/_jxr2png"
+          target/jxr2png --generate fish > "$cli/completions/jxr2png.fish"
+          target/jxr2png --generate man > "$cli/man/jxr2png.1"
           cp target/jxr2png-gui "$app/MacOS/"
           iconset="$RUNNER_TEMP/jxr2png.iconset"
           mkdir "$iconset"
@@ -135,37 +143,46 @@ jobs:
           </plist>
           EOF
           # Ad-hoc signature: required for Apple silicon, not a notarization.
-          codesign --force --deep --sign - "$dir/jxr2png.app" "$dir/jxr2png"
-          cp README.md LICENSE "$dir/"
-          ditto -c -k --keepParent "$dir" "$dir.zip"
-          echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+          codesign --force --deep --sign - "$gui/jxr2png.app" "$cli/jxr2png"
+          tar -czf "out/$cli.tar.gz" "$cli"
+          # The disk image shows the app next to a link to Applications.
+          ln -s /Applications "$gui/Applications"
+          # hdiutil now and then fails with "Resource busy" on CI runners.
+          for attempt in 1 2 3; do
+            hdiutil create -volname jxr2png -srcfolder "$gui" -fs HFS+ \
+              -format UDZO -ov out/jxr2png-gui-macos.dmg && break
+            test $attempt -lt 3 && sleep 5
+          done
+          test -f out/jxr2png-gui-macos.dmg
 
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
           cargo build --release --locked --workspace
-          dir="jxr2png-$TAG-${{ matrix.name }}"
-          mkdir "$dir"
-          cp target/release/jxr2png target/release/jxr2png-gui README.md LICENSE "$dir/"
-          mkdir "$dir/completions" "$dir/man"
-          target/release/jxr2png --generate bash > "$dir/completions/jxr2png.bash"
-          target/release/jxr2png --generate zsh > "$dir/completions/_jxr2png"
-          target/release/jxr2png --generate fish > "$dir/completions/jxr2png.fish"
-          target/release/jxr2png --generate man > "$dir/man/jxr2png.1"
-          cp packaging/linux/jxr2png.desktop "$dir/"
-          cp crates/jxr2png-gui/assets/icon.png "$dir/jxr2png.png"
-          tar -czf "$dir.tar.gz" "$dir"
-          echo "ASSET=$dir.tar.gz" >> "$GITHUB_ENV"
+          cli=jxr2png-cli-linux-x64
+          gui=jxr2png-gui-linux-x64
+          mkdir out "$cli" "$gui"
+          cp target/release/jxr2png README.md LICENSE "$cli/"
+          mkdir "$cli/completions" "$cli/man"
+          target/release/jxr2png --generate bash > "$cli/completions/jxr2png.bash"
+          target/release/jxr2png --generate zsh > "$cli/completions/_jxr2png"
+          target/release/jxr2png --generate fish > "$cli/completions/jxr2png.fish"
+          target/release/jxr2png --generate man > "$cli/man/jxr2png.1"
+          cp target/release/jxr2png-gui README.md LICENSE packaging/linux/jxr2png.desktop "$gui/"
+          cp crates/jxr2png-gui/assets/icon.png "$gui/jxr2png.png"
+          tar -czf "out/$cli.tar.gz" "$cli"
+          tar -czf "out/$gui.tar.gz" "$gui"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: ${{ env.ASSET }}
+          path: out/*
           if-no-files-found: error
 
+  # On pull requests this job checks the combined downloads and stops before
+  # publishing.
   release:
     needs: build
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -173,13 +190,21 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          test "$(wc -l < SHA256SUMS.txt)" -eq 7
       - name: Release notes from CHANGELOG.md
+        if: github.event_name != 'pull_request'
         run: |
           awk -v v="${TAG#v}" '
             /^## / { on = index($0, "[" v "]") > 0; next }
             on' CHANGELOG.md > notes.md
           test -s notes.md || { echo "CHANGELOG.md has no section for $TAG"; exit 1; }
       - uses: softprops/action-gh-release@v2
+        if: github.event_name != 'pull_request'
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
