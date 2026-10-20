@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=jxr2png
+GenericName=HDR Screenshot Converter
+Comment=Convert HDR JPEG XR screenshots to PNG
+Exec=jxr2png-gui %F
+Icon=jxr2png
+Terminal=false
+Categories=Graphics;Utility;
+MimeType=image/vnd.ms-photo;image/jxr;
+Keywords=HDR;JXR;JPEG XR;PNG;screenshot;

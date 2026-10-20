@@ -68,6 +68,15 @@ with a paid certificate, so the first launch needs one extra step:
   right-click the app and choose **Open**). Or remove the download
   quarantine in Terminal: `xattr -dr com.apple.quarantine jxr2png.app jxr2png`.
 
+On Linux, to list the app in your application menu and open `.jxr` files
+with it, install the files from the unpacked folder:
+
+```sh
+install -Dm755 jxr2png jxr2png-gui -t ~/.local/bin
+install -Dm644 jxr2png.desktop -t ~/.local/share/applications
+install -Dm644 jxr2png.png -t ~/.local/share/icons/hicolor/256x256/apps
+```
+
 ## Desktop app
 
 1. Drop `.jxr` files or folders onto the window, click the drop area to
@@ -171,6 +180,11 @@ Everything is automatic; these options are only for tuning:
 | `--json` | Print one JSON object per input file, for scripts |
 
 Run `jxr2png --help` for the full list.
+
+The macOS and Linux archives include shell completions for bash, zsh and
+fish in `completions/`, and a man page in `man/jxr2png.1`. The Windows
+archive has a PowerShell completion script, `completions/_jxr2png.ps1`; add
+`. path\to\_jxr2png.ps1` to your PowerShell profile to load it.
 
 ## How it works
 
