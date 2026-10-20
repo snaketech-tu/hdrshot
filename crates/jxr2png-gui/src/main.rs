@@ -63,6 +63,7 @@ struct Settings {
     save_to_folder: bool,
     output_dir: Option<PathBuf>,
     copy_to_clipboard: bool,
+    keep_date: bool,
 }
 
 impl Default for Settings {
@@ -72,6 +73,7 @@ impl Default for Settings {
             save_to_folder: false,
             output_dir: None,
             copy_to_clipboard: true,
+            keep_date: true,
         }
     }
 }
@@ -146,6 +148,8 @@ struct App {
     job: Option<Job>,
     /// Files finished in the running (or last) batch, and its size.
     progress: (usize, usize),
+    /// Files in the running (or last) batch whose PNGs all existed already.
+    skipped: usize,
     notice: Option<String>,
     clipboard: SharedClipboard,
     toast: Option<Toast>,
@@ -157,6 +161,15 @@ struct App {
     was_focused: bool,
     /// Row picked by clicking it, for the keyboard shortcuts.
     selected: Option<usize>,
+    /// A batch waiting for the user to say what to do with PNGs that
+    /// already exist.
+    asking: Option<Asking>,
+}
+
+struct Asking {
+    indices: Vec<usize>,
+    /// The output files that already exist.
+    existing: Vec<PathBuf>,
 }
 
 /// Something done to one row of the file list.
@@ -193,6 +206,7 @@ impl App {
             files: Vec::new(),
             job: None,
             progress: (0, 0),
+            skipped: 0,
             notice: None,
             clipboard: SharedClipboard::default(),
             toast: None,
@@ -200,6 +214,7 @@ impl App {
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
             selected: None,
+            asking: None,
         };
         if assoc::SUPPORTED {
             assoc::refresh();
@@ -247,7 +262,7 @@ impl App {
         }
     }
 
-    fn convert_options(&self) -> ConvertOptions {
+    fn convert_options(&self, existing: Existing) -> ConvertOptions {
         let t = &self.tuning;
         ConvertOptions {
             mode: self.settings.mode.into(),
@@ -264,15 +279,15 @@ impl App {
                 peak_nits: t.fixed_sdr_peak.then_some(t.sdr_peak),
             },
             max_height: self.max_height,
-            // Replacing matches v1.0.0 until the GUI asks what to do.
-            existing: Existing::Replace,
-            keep_date: true,
+            existing,
+            keep_date: self.settings.keep_date,
         }
     }
 
     fn can_convert(&self) -> bool {
         !self.files.is_empty()
             && !self.running()
+            && self.asking.is_none()
             && (!self.settings.save_to_folder || self.settings.output_dir.is_some())
     }
 
@@ -282,10 +297,22 @@ impl App {
     }
 
     /// Converts the files at `indices`, leaving the other rows as they are.
+    /// If some of their PNGs already exist, asks first what to do.
     fn start_some(&mut self, indices: Vec<usize>, ctx: &egui::Context) {
         if indices.is_empty() {
             return;
         }
+        let options = self.convert_options(Existing::Skip);
+        let existing = existing_outputs(indices.iter().map(|&i| &self.files[i].path), &options);
+        if existing.is_empty() {
+            // Nothing to overwrite, so the choice doesn't matter.
+            self.run(indices, Existing::Skip, ctx);
+        } else {
+            self.asking = Some(Asking { indices, existing });
+        }
+    }
+
+    fn run(&mut self, indices: Vec<usize>, existing: Existing, ctx: &egui::Context) {
         let files: Vec<_> = indices
             .into_iter()
             .map(|i| {
@@ -295,6 +322,7 @@ impl App {
             })
             .collect();
         self.progress = (0, files.len());
+        self.skipped = 0;
         self.notice = None;
         let clipboard = self
             .settings
@@ -302,7 +330,7 @@ impl App {
             .then(|| self.clipboard.clone());
         self.job = Some(Job::start(
             files,
-            self.convert_options(),
+            self.convert_options(existing),
             clipboard,
             ctx.clone(),
         ));
@@ -332,7 +360,7 @@ impl App {
     /// Delete removes the selected row, Enter converts, and the arrow keys
     /// move the selection; not while a text field has focus or a batch runs.
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        if self.running() || ctx.memory(|m| m.focused().is_some()) {
+        if self.running() || self.asking.is_some() || ctx.memory(|m| m.focused().is_some()) {
             return;
         }
         let pressed = |key| ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
@@ -370,7 +398,12 @@ impl App {
                 Event::Started(i) => self.files[i].status = Status::Converting,
                 Event::Finished(i, result) => {
                     self.files[i].status = match result {
-                        Ok(outputs) => Status::Done(outputs),
+                        Ok(outputs) => {
+                            if outputs.hdr.is_none() && outputs.sdr.is_none() {
+                                self.skipped += 1;
+                            }
+                            Status::Done(outputs)
+                        }
                         Err(e) => Status::Failed(e),
                     };
                     self.progress.0 += 1;
@@ -396,9 +429,78 @@ impl App {
                     "{failed} file{} could not be converted.",
                     if failed == 1 { "" } else { "s" }
                 ));
+            } else if self.skipped > 0 {
+                let (n, s) = (self.skipped, if self.skipped == 1 { "" } else { "s" });
+                self.notice = Some(if n == self.progress.1 {
+                    format!("Skipped {n} file{s}: the PNGs already exist.")
+                } else {
+                    format!("Skipped {n} file{s} whose PNGs already exist.")
+                });
             }
         } else {
             self.job = Some(job);
+        }
+    }
+
+    /// Asks once per batch what to do with PNGs that already exist.
+    fn existing_dialog(&mut self, ctx: &egui::Context) {
+        let Some(asking) = &self.asking else { return };
+        let mut choice = None;
+        let mut cancel = false;
+        let modal = egui::Modal::new(egui::Id::unique("existing"))
+            .frame(egui::Frame::popup(&ctx.global_style()).inner_margin(16))
+            .show(ctx, |ui| {
+                ui.set_max_width(360.0);
+                let count = asking.existing.len();
+                let title = if count == 1 {
+                    let name = asking.existing[0].file_name().unwrap_or_default();
+                    format!("{} already exists", name.to_string_lossy())
+                } else {
+                    format!("{count} PNGs already exist")
+                };
+                ui.label(RichText::new(title).strong().size(15.0));
+                ui.label("What should happen to the PNGs that are already there?");
+                if count > 1 {
+                    let names: Vec<String> = asking
+                        .existing
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect();
+                    ui.weak("Show files").on_hover_text(names.join("\n"));
+                }
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("Replace")
+                        .on_hover_text("Overwrite them with the new PNGs")
+                        .clicked()
+                    {
+                        choice = Some(Existing::Replace);
+                    }
+                    if ui
+                        .button("Keep both")
+                        .on_hover_text("Save the new PNGs with a number, e.g. shot_hdr (2).png")
+                        .clicked()
+                    {
+                        choice = Some(Existing::KeepBoth);
+                    }
+                    if ui
+                        .button("Skip")
+                        .on_hover_text("Leave them alone and only make the PNGs that are missing")
+                        .clicked()
+                    {
+                        choice = Some(Existing::Skip);
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        cancel = ui.button("Cancel").clicked();
+                    });
+                });
+            });
+        if let Some(existing) = choice {
+            let indices = self.asking.take().map(|a| a.indices).unwrap_or_default();
+            self.run(indices, existing, ctx);
+        } else if cancel || modal.should_close() {
+            self.asking = None;
         }
     }
 
@@ -582,7 +684,9 @@ impl App {
                         ui.painter().rect_filled(rect, 4.0, stripe);
                     }
                     let outputs = match &entry.status {
-                        Status::Done(outputs) => Some(outputs),
+                        Status::Done(outputs) if outputs.hdr.is_some() || outputs.sdr.is_some() => {
+                            Some(outputs)
+                        }
                         _ => None,
                     };
                     let primary = outputs.and_then(|o| o.hdr.as_ref().or(o.sdr.as_ref()));
@@ -741,7 +845,14 @@ impl App {
         };
         egui::CollapsingHeader::new(title)
             .id_salt("advanced")
-            .show(ui, |ui| self.tuning_ui(ui));
+            .show(ui, |ui| {
+                ui.checkbox(&mut self.settings.keep_date, "Keep the capture date")
+                    .on_hover_text(
+                        "Give each PNG the date of its screenshot, so folders sorted \
+                         by date stay in capture order",
+                    );
+                self.tuning_ui(ui);
+            });
     }
 
     fn tuning_ui(&mut self, ui: &mut egui::Ui) {
@@ -951,6 +1062,7 @@ impl window::App for App {
                     self.file_list(ui);
                 }
             });
+        self.existing_dialog(&ctx);
         self.toast_ui(&ctx);
     }
 
@@ -963,6 +1075,21 @@ impl window::App for App {
             self.add_paths(files);
         }
     }
+}
+
+/// The planned output files of `inputs` that already exist.
+fn existing_outputs<'a>(
+    inputs: impl Iterator<Item = &'a PathBuf>,
+    options: &ConvertOptions,
+) -> Vec<PathBuf> {
+    inputs
+        .flat_map(|input| {
+            let planned = jxr2png_core::output_paths(input, options);
+            [planned.hdr, planned.sdr]
+        })
+        .flatten()
+        .filter(|p| p.exists())
+        .collect()
 }
 
 /// What size the listed files come out at with a given height limit.
@@ -1002,7 +1129,7 @@ fn after_removal(selected: Option<usize>, removed: usize) -> Option<usize> {
 fn row_menu(ui: &mut egui::Ui, i: usize, entry: &Entry, running: bool) -> Option<RowAction> {
     let mut action = None;
     let outputs = match &entry.status {
-        Status::Done(outputs) => Some(outputs),
+        Status::Done(outputs) if outputs.hdr.is_some() || outputs.sdr.is_some() => Some(outputs),
         _ => None,
     };
     let hdr = outputs.and_then(|o| o.hdr.clone());
@@ -1059,13 +1186,27 @@ fn status_ui(ui: &mut egui::Ui, status: &Status) {
             ui.spinner();
         }
         Status::Done(outputs) => {
-            let saved: Vec<String> = [&outputs.hdr, &outputs.sdr]
-                .into_iter()
-                .flatten()
-                .map(|p| p.display().to_string())
-                .collect();
-            ui.label(RichText::new("Done").color(ok_color(ui)))
-                .on_hover_text(format!("Saved:\n{}", saved.join("\n")));
+            let list = |paths: &mut dyn Iterator<Item = &PathBuf>| {
+                paths
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            let saved = list(&mut [&outputs.hdr, &outputs.sdr].into_iter().flatten());
+            let kept = list(&mut outputs.skipped.iter());
+            let tooltip = match (saved.is_empty(), kept.is_empty()) {
+                (false, true) => format!("Saved:\n{saved}"),
+                (true, _) => format!("Already there, left alone:\n{kept}"),
+                (false, false) => {
+                    format!("Saved:\n{saved}\n\nAlready there, left alone:\n{kept}")
+                }
+            };
+            if saved.is_empty() {
+                ui.weak("Skipped").on_hover_text(tooltip);
+            } else {
+                ui.label(RichText::new("Done").color(ok_color(ui)))
+                    .on_hover_text(tooltip);
+            }
         }
         Status::Failed(error) => {
             ui.label(RichText::new("Failed").color(ui.visuals().error_fg_color))
@@ -1219,6 +1360,26 @@ mod tests {
             status: Status::Waiting,
             size,
         }
+    }
+
+    #[test]
+    fn existing_outputs_lists_only_files_on_disk() {
+        let dir = std::env::temp_dir().join(format!("jxr2png-gui-existing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a_hdr.png"), b"png").unwrap();
+        let inputs = [dir.join("a.jxr"), dir.join("b.jxr")];
+        let options = ConvertOptions::default();
+        assert_eq!(
+            existing_outputs(inputs.iter(), &options),
+            [dir.join("a_hdr.png")]
+        );
+        let sdr_only = ConvertOptions {
+            mode: OutputMode::Sdr,
+            ..Default::default()
+        };
+        assert!(existing_outputs(inputs.iter(), &sdr_only).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

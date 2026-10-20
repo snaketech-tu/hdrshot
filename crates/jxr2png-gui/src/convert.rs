@@ -53,8 +53,9 @@ impl Job {
                 }
                 send(&tx, Event::Started(index));
                 let result = jxr2png_core::convert_file(&path, &options);
-                if let Ok(outputs) = &result {
-                    // The HDR PNG when there is one: it is the faithful copy.
+                if let Ok(outputs) = &result
+                    && (outputs.hdr.is_some() || outputs.sdr.is_some())
+                {
                     last = Some(outputs.clone());
                 }
                 send(
