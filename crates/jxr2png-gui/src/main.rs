@@ -2,6 +2,8 @@
 
 mod assoc;
 mod convert;
+#[cfg(target_os = "macos")]
+mod macos;
 mod single;
 mod storage;
 mod window;
@@ -170,8 +172,9 @@ struct App {
     was_focused: bool,
     /// Row picked by clicking it, for the keyboard shortcuts.
     selected: Option<usize>,
-    /// Files opened while the app was already running.
-    opened: Option<Receiver<Vec<PathBuf>>>,
+    /// Files opened while the app was already running, and on macOS all
+    /// files opened from Finder.
+    opened: Receiver<Vec<PathBuf>>,
     /// A batch waiting for the user to say what to do with PNGs that
     /// already exist.
     asking: Option<Asking>,
@@ -206,6 +209,13 @@ const SETTINGS_KEY: &str = "settings";
 impl App {
     fn new(ctx: &egui::Context, files: Vec<PathBuf>, listener: Option<single::Listener>) -> Self {
         let settings = storage::load(SETTINGS_KEY).unwrap_or_default();
+        let (open, opened) = channel();
+        if let Some(listener) = listener {
+            listener.serve(open.clone(), ctx.clone());
+        }
+        #[cfg(target_os = "macos")]
+        macos::receive_opened_files(open.clone(), ctx.clone());
+        drop(open);
         ctx.global_style_mut(|style| {
             style.spacing.item_spacing = Vec2::new(8.0, 8.0);
             style.spacing.button_padding = Vec2::new(10.0, 4.0);
@@ -225,7 +235,7 @@ impl App {
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
             selected: None,
-            opened: listener.map(|l| l.serve(ctx.clone())),
+            opened,
             asking: None,
         };
         if assoc::SUPPORTED {
@@ -239,8 +249,7 @@ impl App {
     /// window to the front. Adding is safe mid-batch: new rows go at the end
     /// and the batch only refers to the rows it started with.
     fn receive_opened(&mut self, ctx: &egui::Context) {
-        let Some(opened) = &self.opened else { return };
-        let batches: Vec<_> = opened.try_iter().collect();
+        let batches: Vec<_> = self.opened.try_iter().collect();
         if batches.is_empty() {
             return;
         }

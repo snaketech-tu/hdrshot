@@ -3,14 +3,16 @@
 //! Windows doesn't let programs take over a file type on their own: the app
 //! registers itself as able to open `.jxr`, then the user confirms the
 //! choice in the Settings page this opens. On Linux the default is set with
-//! `xdg-mime`. On macOS the default comes from the app bundle, so there is
-//! nothing to do here.
+//! `xdg-mime`. On macOS the app bundle declares that it opens `.jxr`, and
+//! Finder's "Open With" and "Get Info" set the default, so there is nothing
+//! to do here.
 
 /// Whether this platform supports setting the default from inside the app.
 pub const SUPPORTED: bool = cfg!(any(windows, all(unix, not(target_os = "macos"))));
 
 pub enum Outcome {
     /// jxr2png now opens `.jxr` files.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Done,
     /// The system's settings were opened for the user to confirm.
     #[cfg_attr(not(windows), allow(dead_code))]

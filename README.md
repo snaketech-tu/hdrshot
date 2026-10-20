@@ -105,6 +105,9 @@ with a paid certificate, so the first launch needs one extra step:
 - **Open .jxr files with jxr2png** (Windows and Linux) makes a double-click
   on a screenshot open it in the app. Windows asks you to confirm the choice
   in Settings.
+  On macOS, jxr2png is listed under **Open With** for `.jxr` files; to make
+  it the default, choose it in the file's **Get Info** window and click
+  **Change All**.
 - **Advanced** has **Keep the capture date** (on by default), which gives
   each PNG the date of its screenshot so folders sorted by date stay in
   capture order. It also holds the tuning options from the command line.

@@ -97,6 +97,33 @@ jobs:
             <key>CFBundleVersion</key><string>$version</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
             <key>NSHighResolutionCapable</key><true/>
+            <key>CFBundleDocumentTypes</key>
+            <array>
+              <dict>
+                <key>CFBundleTypeName</key><string>JPEG XR image</string>
+                <key>CFBundleTypeRole</key><string>Viewer</string>
+                <key>LSHandlerRank</key><string>Alternate</string>
+                <key>LSItemContentTypes</key>
+                <array><string>io.github.snaketech-tu.jxr2png.jxr</string></array>
+                <key>CFBundleTypeExtensions</key>
+                <array><string>jxr</string><string>wdp</string></array>
+              </dict>
+            </array>
+            <key>UTImportedTypeDeclarations</key>
+            <array>
+              <dict>
+                <key>UTTypeIdentifier</key><string>io.github.snaketech-tu.jxr2png.jxr</string>
+                <key>UTTypeDescription</key><string>JPEG XR image</string>
+                <key>UTTypeConformsTo</key>
+                <array><string>public.image</string><string>public.data</string></array>
+                <key>UTTypeTagSpecification</key>
+                <dict>
+                  <key>public.filename-extension</key>
+                  <array><string>jxr</string><string>wdp</string></array>
+                  <key>public.mime-type</key><string>image/vnd.ms-photo</string>
+                </dict>
+              </dict>
+            </array>
           </dict>
           </plist>
           EOF
