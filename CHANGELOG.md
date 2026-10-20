@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- A "Made with ♥ by snake.tech" line at the bottom of the desktop app,
+  linking to Ko-fi.
+
+### Changed
+
+- The desktop app draws on the CPU instead of the GPU and only redraws when
+  something changes. It no longer looks like a game to the Nvidia driver,
+  and the G-Sync flicker stays fixed without redrawing every frame.
+- The Resolution menu shows the size the listed files come out at, such as
+  "1080p (2580×1080)" for ultrawide screenshots.
+
 ## [1.0.0] - 2026-10-19
 
 The first release: a desktop app and a command-line tool that turn HDR

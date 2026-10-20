@@ -791,6 +791,8 @@ impl window::App for App {
                 ui.add_enabled_ui(!self.running(), |ui| self.settings_ui(ui));
                 ui.separator();
                 self.action_bar(ui);
+                ui.add_space(2.0);
+                credit(ui);
             });
         egui::CentralPanel::default()
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
@@ -869,6 +871,67 @@ fn collect_jxr(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+const KOFI_URL: &str = "https://ko-fi.com/snake_tech";
+
+/// "Made with ♥ by snake.tech", centered, opening the Ko-fi page when
+/// clicked. The bundled fonts have no heart glyph, so it's drawn.
+fn credit(ui: &mut egui::Ui) {
+    let font = egui::FontId::proportional(11.5);
+    let heart_size = 9.0;
+    let gap = 4.0;
+    let color = ui.visuals().weak_text_color();
+    let before = ui
+        .painter()
+        .layout_no_wrap("Made with".to_owned(), font.clone(), color);
+    let after = ui
+        .painter()
+        .layout_no_wrap("by snake.tech".to_owned(), font, color);
+    let size = Vec2::new(
+        before.size().x + after.size().x + heart_size + 2.0 * gap,
+        before.size().y,
+    );
+    ui.vertical_centered(|ui| {
+        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+        let response = response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(KOFI_URL);
+        let ink = if response.hovered() {
+            ui.visuals().text_color()
+        } else {
+            color
+        };
+        let painter = ui.painter();
+        let mut x = rect.left();
+        painter.galley_with_override_text_color(rect.left_top(), before.clone(), ink);
+        x += before.size().x + gap;
+        let center = egui::pos2(x + heart_size / 2.0, rect.center().y);
+        paint_heart(painter, center, heart_size, Color32::from_rgb(220, 70, 90));
+        x += heart_size + gap;
+        painter.galley_with_override_text_color(egui::pos2(x, rect.top()), after.clone(), ink);
+        if response.clicked() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(KOFI_URL));
+        }
+    });
+}
+
+/// A filled heart `size` points wide, centered on `center`.
+fn paint_heart(painter: &egui::Painter, center: egui::Pos2, size: f32, color: Color32) {
+    // Two circles for the lobes and a triangle for the point.
+    let r = size / 4.0;
+    let top = center.y - size * 0.15;
+    painter.circle_filled(egui::pos2(center.x - r, top), r, color);
+    painter.circle_filled(egui::pos2(center.x + r, top), r, color);
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(center.x - 2.0 * r, top + r * 0.25),
+            egui::pos2(center.x + 2.0 * r, top + r * 0.25),
+            egui::pos2(center.x, center.y + size * 0.45),
+        ],
+        color,
+        Stroke::NONE,
+    ));
 }
 
 /// Open `dir` in the system's file manager.
