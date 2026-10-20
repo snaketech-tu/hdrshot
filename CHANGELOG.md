@@ -8,6 +8,14 @@
   notes of a newer version and can install it: on Windows and Linux it
   replaces the app and restarts it, on macOS it opens the new disk image.
 
+### Changed
+
+- Releases offer the desktop app and the command-line tool as separate
+  downloads for each platform: bare `.exe` files on Windows, a disk image
+  for the macOS app, and `.tar.gz` archives for the macOS command line and
+  for Linux. File names no longer contain the version, and a
+  `SHA256SUMS.txt` lists the checksums.
+
 ## [1.1.0] - 2026-10-20
 
 ### Added
