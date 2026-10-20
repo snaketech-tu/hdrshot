@@ -66,6 +66,16 @@ impl Listener {
     }
 }
 
+/// Waits up to `timeout` for the running instance to quit, as the old
+/// version does right after starting the new one in an update.
+pub fn wait_for_exit(timeout: std::time::Duration) {
+    let Some(name) = name() else { return };
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout && Stream::connect(name.borrow()).is_ok() {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 /// Sends `files` to a running instance; false if none answers.
 fn send(name: &Name<'_>, files: &[PathBuf]) -> bool {
     let Ok(mut stream) = Stream::connect(name.borrow()) else {
