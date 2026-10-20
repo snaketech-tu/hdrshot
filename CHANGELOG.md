@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- A **Check for updates** button in the desktop app shows the release
+  notes of a newer version and can install it: on Windows and Linux it
+  replaces the app and restarts it, on macOS it opens the new disk image.
+
 ## [1.1.0] - 2026-10-20
 
 ### Added

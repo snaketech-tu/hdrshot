@@ -885,7 +885,8 @@ impl App {
             .layout_no_wrap(text.to_owned(), font.clone(), Color32::PLACEHOLDER)
             .size()
             .x
-            + 12.0;
+            + 2.0 * ui.spacing().button_padding.x
+            + 4.0;
         let right = ui.max_rect().right();
         let rect = egui::Rect::from_min_max(
             egui::pos2(right - width, row.top() - 2.0),
@@ -894,7 +895,9 @@ impl App {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
             egui::Layout::centered_and_justified(egui::Direction::TopDown),
         ));
-        let button = egui::Button::new(RichText::new(text).font(font)).small();
+        let button = egui::Button::new(RichText::new(text).font(font))
+            .small()
+            .wrap_mode(egui::TextWrapMode::Extend);
         if child
             .add_enabled(!checking, button)
             .on_hover_text(format!("You have jxr2png {}", update::CURRENT))
