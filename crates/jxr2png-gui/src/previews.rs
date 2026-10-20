@@ -97,9 +97,11 @@ pub fn texture(
         None => egui::ColorImage::from_rgb(size, &rgb),
         Some(alpha) => {
             let rgba: Vec<u8> = rgb
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .zip(alpha)
-                .flat_map(|(p, &a)| [p[0], p[1], p[2], (a * 255.0).round() as u8])
+                .flat_map(|(&[r, g, b], &a)| [r, g, b, (a * 255.0).round() as u8])
                 .collect();
             egui::ColorImage::from_rgba_unmultiplied(size, &rgba)
         }

@@ -261,9 +261,11 @@ pub fn write_sdr_png<W: Write>(
         None => (rgb, ColorType::Rgb),
         Some(alpha) => {
             let rgba = rgb
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .zip(alpha)
-                .flat_map(|(p, &a)| [p[0], p[1], p[2], (a * 255.0).round() as u8])
+                .flat_map(|(&[r, g, b], &a)| [r, g, b, (a * 255.0).round() as u8])
                 .collect();
             (rgba, ColorType::Rgba)
         }
