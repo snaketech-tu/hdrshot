@@ -7,14 +7,14 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use jxr2png_core::{ConvertOptions, Outputs};
+use jxr2png_core::{ConvertOptions, Outputs, share};
 
 pub enum Event {
     Started(usize),
     Finished(usize, Result<Outputs, String>),
     /// The batch is over; carries the outcome of copying the last image
     /// to the clipboard, if that was asked for.
-    Done(Option<String>),
+    Done(Option<Copied>),
 }
 
 /// Kept by the app for as long as it runs: on Linux a copied image is only
@@ -45,7 +45,7 @@ impl Job {
                 let _ = tx.send(event);
                 ctx.request_repaint();
             };
-            // The last PNG written, and whether it is the HDR one.
+            // The last file converted and its PNGs.
             let mut last = None;
             for (index, path) in files {
                 if stop.load(Ordering::Relaxed) {
@@ -56,7 +56,7 @@ impl Job {
                 if let Ok(outputs) = &result
                     && (outputs.hdr.is_some() || outputs.sdr.is_some())
                 {
-                    last = Some(outputs.clone());
+                    last = Some((path.clone(), outputs.clone()));
                 }
                 send(
                     &tx,
@@ -65,7 +65,7 @@ impl Job {
             }
             let copied = clipboard
                 .zip(last)
-                .map(|(clipboard, outputs)| copy(&clipboard, &outputs));
+                .map(|(clipboard, (input, outputs))| copy(&clipboard, &input, &outputs));
             send(&tx, Event::Done(copied));
         });
         Self { events, cancel }
@@ -81,62 +81,131 @@ impl Job {
     }
 }
 
-/// Put one of `outputs` on the clipboard as a file, preferring the HDR PNG,
-/// so pasting it (into Discord, a browser or a folder) gives the full PNG,
-/// HDR included. An HDR PNG is copied without its `cICP` chunk so that it
-/// also shows right on Discord. Returns the message for the user.
-pub fn copy(clipboard: &SharedClipboard, outputs: &Outputs) -> String {
+/// The outcome of a clipboard copy.
+pub struct Copied {
+    pub message: String,
+    /// Set when the copy is too large for Discord, to offer a smaller one.
+    pub too_big: Option<TooBig>,
+}
+
+impl From<String> for Copied {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            too_big: None,
+        }
+    }
+}
+
+/// A copied PNG over Discord's upload limit.
+#[derive(Clone)]
+pub struct TooBig {
+    /// The JXR it was made from.
+    pub input: PathBuf,
+    /// The copied PNG's file name.
+    pub name: String,
+    pub hdr: bool,
+    pub size: u64,
+}
+
+/// Put one of `outputs`, made from `input`, on the clipboard as a file,
+/// preferring the HDR PNG, so pasting it (into Discord, a browser or a
+/// folder) gives the full PNG, HDR included. An HDR PNG is copied without
+/// its `cICP` chunk so that it also shows right on Discord.
+pub fn copy(clipboard: &SharedClipboard, input: &Path, outputs: &Outputs) -> Copied {
     // The HDR PNG when there is one: it is the faithful copy.
     let (path, hdr) = match (&outputs.hdr, &outputs.sdr) {
         (Some(hdr), _) => (hdr.as_path(), true),
         (None, Some(sdr)) => (sdr.as_path(), false),
-        (None, None) => return "Nothing to copy".into(),
+        (None, None) => return Copied::from("Nothing to copy".to_string()),
     };
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let path = if hdr {
-        match discord_copy(path) {
-            Ok(copy) => copy,
-            Err(e) => return format!("Could not copy to the clipboard: {e}"),
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let copy = std::fs::read(path).and_then(|png| {
+        if hdr {
+            share::clipboard_file(&name, &png, true)
+        } else {
+            Ok(path.to_path_buf())
+        }
+    });
+    let copy = match copy {
+        Ok(copy) => copy,
+        Err(e) => return Copied::from(format!("Could not copy to the clipboard: {e}")),
+    };
+    if let Err(e) = set_file(clipboard, copy.clone()) {
+        return Copied::from(e);
+    }
+    let size = std::fs::metadata(&copy).map_or(0, |m| m.len());
+    if size > share::DISCORD_LIMIT {
+        Copied {
+            message: format!(
+                "Copied {name} ({}), more than Discord's {} limit",
+                share::megabytes(size),
+                share::megabytes(share::DISCORD_LIMIT)
+            ),
+            too_big: Some(TooBig {
+                input: input.to_path_buf(),
+                name,
+                hdr,
+                size,
+            }),
         }
     } else {
-        path.to_path_buf()
-    };
-    let mut clipboard = clipboard.lock().unwrap_or_else(|e| e.into_inner());
-    let clipboard = match &mut *clipboard {
-        Some(c) => c,
-        None => match arboard::Clipboard::new() {
-            Ok(c) => clipboard.insert(c),
-            Err(e) => return format!("Could not copy to the clipboard: {e}"),
-        },
-    };
-    match clipboard.set().file_list(&[path]) {
-        Ok(()) => format!("Copied {name} to the clipboard"),
-        Err(e) => format!("Could not copy to the clipboard: {e}"),
+        Copied::from(format!("Copied {name} to the clipboard"))
     }
 }
 
-/// Write a copy of the HDR PNG without its `cICP` chunk, which Discord
-/// mishandles (see [`jxr2png_core::for_discord`]), to a temporary folder
-/// that only ever holds the latest copy. It keeps the original's name.
-fn discord_copy(path: &Path) -> std::io::Result<PathBuf> {
-    let dir = std::env::temp_dir().join("jxr2png-clipboard");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir)?;
-    let copy = dir.join(path.file_name().unwrap_or_default());
-    std::fs::write(&copy, jxr2png_core::for_discord(&std::fs::read(path)?))?;
-    Ok(copy)
+/// Copy a smaller version of `too_big` that fits Discord's limit.
+pub fn copy_smaller(
+    clipboard: &SharedClipboard,
+    too_big: &TooBig,
+    options: &ConvertOptions,
+) -> String {
+    let fail = |e: &dyn std::fmt::Display| format!("Could not make a smaller copy: {e}");
+    let smaller =
+        match share::smaller_png(&too_big.input, options, too_big.hdr, share::DISCORD_LIMIT) {
+            Ok(Some(smaller)) => smaller,
+            Ok(None) => return "Even a 720p copy is larger than 10 MB".into(),
+            Err(e) => return fail(&e),
+        };
+    let path = match share::clipboard_file(&too_big.name, &smaller.png, false) {
+        Ok(path) => path,
+        Err(e) => return fail(&e),
+    };
+    match set_file(clipboard, path) {
+        Ok(()) => format!(
+            "Copied {} at {}×{} ({})",
+            too_big.name,
+            smaller.width,
+            smaller.height,
+            share::megabytes(smaller.png.len() as u64)
+        ),
+        Err(e) => e,
+    }
 }
 
-/// Run [`copy`] on a background thread (reading and rewriting the PNG takes
-/// a moment) and send its message to `messages`.
-pub fn copy_in_background(
-    clipboard: SharedClipboard,
-    outputs: Outputs,
-    messages: Sender<String>,
+fn set_file(clipboard: &SharedClipboard, path: PathBuf) -> Result<(), String> {
+    let fail = |e: arboard::Error| format!("Could not copy to the clipboard: {e}");
+    let mut clipboard = clipboard.lock().unwrap_or_else(|e| e.into_inner());
+    let clipboard = match &mut *clipboard {
+        Some(c) => c,
+        None => clipboard.insert(arboard::Clipboard::new().map_err(fail)?),
+    };
+    clipboard.set().file_list(&[path]).map_err(fail)
+}
+
+/// Run `copy` on a background thread (reading, rewriting and maybe
+/// shrinking the PNG takes a moment) and send its outcome to `messages`.
+pub fn in_background(
+    messages: Sender<Copied>,
     ctx: egui::Context,
+    copy: impl FnOnce() -> Copied + Send + 'static,
 ) {
     thread::spawn(move || {
-        let _ = messages.send(copy(&clipboard, &outputs));
+        let _ = messages.send(copy());
         ctx.request_repaint();
     });
 }

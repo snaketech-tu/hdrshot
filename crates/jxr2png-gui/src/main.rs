@@ -18,7 +18,7 @@ use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
 use jxr2png_core::{ConvertOptions, Existing, HdrOptions, Naming, OutputMode, Outputs, SdrOptions};
 use serde::{Deserialize, Serialize};
 
-use convert::{Event, Job, SharedClipboard};
+use convert::{Copied, Event, Job, SharedClipboard, TooBig};
 use previews::{Previews, THUMB_SIZE, Thumb};
 
 /// The app icon, 256 px. Windows also gets `assets/icon.ico` embedded in
@@ -37,7 +37,7 @@ fn main() {
     let viewport = egui::ViewportBuilder::default()
         .with_title("jxr2png")
         .with_app_id("jxr2png")
-        .with_inner_size([560.0, 680.0])
+        .with_inner_size([560.0, 760.0])
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());
@@ -203,7 +203,14 @@ struct App {
     clipboard: SharedClipboard,
     toast: Option<Toast>,
     /// Messages from clipboard copies running in the background.
-    copied: (Sender<String>, Receiver<String>),
+    copied: (Sender<Copied>, Receiver<Copied>),
+    /// A copy over Discord's size limit, and whether a smaller one is
+    /// being made.
+    too_big: Option<(TooBig, bool)>,
+    /// Height of the bottom panel without the Advanced settings' scroll
+    /// area, and of that area, from the last frame.
+    bottom_rest: f32,
+    advanced_height: f32,
     /// Whether jxr2png opens `.jxr` files; rechecked when the window
     /// regains focus, since the choice is made in the system's settings.
     is_default_app: bool,
@@ -231,7 +238,8 @@ enum RowAction {
     Select(usize),
     Open(PathBuf),
     ShowInFolder(PathBuf),
-    Copy(Outputs),
+    /// Copy the PNGs made from a file.
+    Copy(PathBuf, Outputs),
     Retry(usize),
     Remove(usize),
 }
@@ -243,6 +251,12 @@ struct Toast {
 }
 
 const TOAST_SECONDS: f64 = 3.0;
+
+/// Height kept for the title, drop area and a few rows of the file list
+/// when the Advanced settings are open.
+const MIN_LIST_AREA: f32 = 220.0;
+/// The Advanced settings never shrink below this; they scroll instead.
+const MIN_ADVANCED_HEIGHT: f32 = 120.0;
 
 const SETTINGS_KEY: &str = "settings";
 
@@ -272,6 +286,9 @@ impl App {
             clipboard: SharedClipboard::default(),
             toast: None,
             copied: channel(),
+            too_big: None,
+            bottom_rest: 330.0,
+            advanced_height: 0.0,
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
             selected: None,
@@ -490,8 +507,8 @@ impl App {
                 }
                 Event::Done(copied) => {
                     done = true;
-                    if let Some(text) = copied {
-                        self.show_toast(text, ctx);
+                    if let Some(copied) = copied {
+                        self.copied_ui(copied, ctx);
                     }
                 }
             }
@@ -598,9 +615,82 @@ impl App {
         });
     }
 
+    /// Shows the outcome of a clipboard copy. One too large for Discord
+    /// stays up with an offer to copy a smaller version.
+    fn copied_ui(&mut self, copied: Copied, ctx: &egui::Context) {
+        self.too_big = copied.too_big.map(|too_big| (too_big, false));
+        self.show_toast(copied.message, ctx);
+    }
+
+    fn too_big_ui(&mut self, ctx: &egui::Context) {
+        let Some((too_big, working)) = &self.too_big else {
+            return;
+        };
+        let mut make_smaller = false;
+        let mut close = false;
+        egui::Area::new(egui::Id::unique("too big"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 56.0))
+            .show(ctx, |ui| {
+                let visuals = ui.visuals();
+                egui::Frame::new()
+                    .fill(visuals.extreme_bg_color)
+                    .stroke(visuals.window_stroke)
+                    .corner_radius(8.0)
+                    .shadow(visuals.popup_shadow)
+                    .inner_margin(egui::Margin::symmetric(14, 10))
+                    .show(ui, |ui| {
+                        ui.set_max_width(card_width(ctx));
+                        ui.label(
+                            RichText::new(format!(
+                                "Copied {}. At {} it is over Discord's 10 MB limit.",
+                                too_big.name,
+                                jxr2png_core::share::megabytes(too_big.size)
+                            ))
+                            .size(14.0),
+                        );
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if *working {
+                                ui.spinner();
+                                ui.label("Making a smaller copy…");
+                            } else {
+                                make_smaller = ui
+                                    .button("Copy a smaller version")
+                                    .on_hover_text(
+                                        "Copy it at 1440p, or lower if needed, so it fits \
+                                         in 10 MB. The saved PNGs stay as they are.",
+                                    )
+                                    .clicked();
+                                close = ui
+                                    .button("Keep this one")
+                                    .on_hover_text("Keep the full-size copy on the clipboard")
+                                    .clicked();
+                            }
+                        });
+                    });
+            });
+        if close {
+            self.too_big = None;
+            self.toast = None;
+        } else if make_smaller {
+            let clipboard = self.clipboard.clone();
+            let options = self.convert_options(Existing::Replace);
+            let too_big = too_big.clone();
+            self.too_big = Some((too_big.clone(), true));
+            convert::in_background(self.copied.0.clone(), ctx.clone(), move || {
+                Copied::from(convert::copy_smaller(&clipboard, &too_big, &options))
+            });
+        }
+    }
+
     fn toast_ui(&mut self, ctx: &egui::Context) {
-        while let Ok(text) = self.copied.1.try_recv() {
-            self.show_toast(text, ctx);
+        while let Ok(copied) = self.copied.1.try_recv() {
+            self.copied_ui(copied, ctx);
+        }
+        if self.too_big.is_some() {
+            self.too_big_ui(ctx);
+            return;
         }
         let Some(toast) = &self.toast else { return };
         let left = toast.until - ctx.input(|i| i.time);
@@ -624,6 +714,7 @@ impl App {
                     .shadow(visuals.popup_shadow)
                     .inner_margin(egui::Margin::symmetric(14, 10))
                     .show(ui, |ui| {
+                        ui.set_max_width(card_width(ctx));
                         ui.label(RichText::new(&toast.text).size(14.0));
                     });
             });
@@ -828,7 +919,7 @@ impl App {
                                 )
                                 .clicked()
                         {
-                            action = Some(RowAction::Copy(outputs.clone()));
+                            action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
                         }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                             if thumb_ui(ui, &entry.thumb, self.shown.as_ref().filter(|s| s.path == entry.path)) {
@@ -848,12 +939,12 @@ impl App {
             Some(RowAction::Select(i)) => self.selected = Some(i),
             Some(RowAction::Open(path)) => open(&path),
             Some(RowAction::ShowInFolder(path)) => show_in_folder(&path),
-            Some(RowAction::Copy(outputs)) => convert::copy_in_background(
-                self.clipboard.clone(),
-                outputs,
-                self.copied.0.clone(),
-                ctx,
-            ),
+            Some(RowAction::Copy(input, outputs)) => {
+                let clipboard = self.clipboard.clone();
+                convert::in_background(self.copied.0.clone(), ctx, move || {
+                    convert::copy(&clipboard, &input, &outputs)
+                });
+            }
             Some(RowAction::Retry(i)) => self.start_some(vec![i], &ctx),
             Some(RowAction::Remove(i)) => self.remove(i),
         }
@@ -978,11 +1069,14 @@ impl App {
         egui::CollapsingHeader::new(title)
             .id_salt("advanced")
             .show(ui, |ui| {
-                // Scrolls, so opening it doesn't squeeze the file list away.
-                egui::ScrollArea::vertical()
-                    .max_height(170.0)
+                // Scrolls only when the window is too short for it, so
+                // opening it never squeezes the file list away.
+                let room = ui.ctx().content_rect().height() - MIN_LIST_AREA - self.bottom_rest;
+                let shown = egui::ScrollArea::vertical()
+                    .max_height(room.max(MIN_ADVANCED_HEIGHT))
                     .auto_shrink([false, true])
                     .show(ui, |ui| self.advanced_ui(ui));
+                self.advanced_height = shown.inner_rect.height();
             });
     }
 
@@ -1198,7 +1292,8 @@ impl window::App for App {
 
         let margin = egui::Margin::same(16);
         let panel_fill = ui.visuals().panel_fill;
-        egui::Panel::bottom("actions")
+        self.advanced_height = 0.0;
+        let bottom = egui::Panel::bottom("actions")
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
             .show(ui, |ui| {
                 ui.add_enabled_ui(!self.running(), |ui| self.settings_ui(ui));
@@ -1207,6 +1302,7 @@ impl window::App for App {
                 ui.add_space(2.0);
                 credit(ui);
             });
+        self.bottom_rest = bottom.response.rect.height() - self.advanced_height;
         egui::CentralPanel::default()
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
             .show(ui, |ui| {
@@ -1341,6 +1437,12 @@ fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) -> bool {
     hovered
 }
 
+/// Widest a toast may be: the window's width less a margin on each side,
+/// so long file names wrap instead of running off the window.
+fn card_width(ctx: &egui::Context) -> f32 {
+    (ctx.content_rect().width() - 2.0 * 16.0 - 2.0 * 14.0).max(120.0)
+}
+
 /// The right-click menu of a row.
 fn row_menu(ui: &mut egui::Ui, i: usize, entry: &Entry, running: bool) -> Option<RowAction> {
     let mut action = None;
@@ -1365,7 +1467,7 @@ fn row_menu(ui: &mut egui::Ui, i: usize, entry: &Entry, running: bool) -> Option
     if let Some(outputs) = outputs
         && ui.button("Copy for Discord").clicked()
     {
-        action = Some(RowAction::Copy(outputs.clone()));
+        action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
     }
     ui.separator();
     if ui.button("Show in folder").clicked() {

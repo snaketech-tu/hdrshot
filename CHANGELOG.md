@@ -32,6 +32,10 @@
 - Output names: `--name` sets a pattern such as `{name}-{type}`, and
   `--subfolders` (and the app's Advanced settings) put HDR and SDR PNGs in
   `hdr` and `sdr` folders, where the `_hdr`/`_sdr` ending can be left off.
+- When a copy for Discord is over its 10 MB upload limit, the desktop app
+  offers to copy a smaller version (1440p, or lower if needed). On the
+  command line, `--copy` copies the last PNG for Discord and
+  `--copy-small` also scales it down when it is too large.
 - A "Made with ♥ by snake.tech" line at the bottom of the desktop app,
   linking to Ko-fi.
 
