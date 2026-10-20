@@ -1440,7 +1440,7 @@ dependencies = [
 
 [[package]]
 name = "jxr2png"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "arboard",
  "clap",
@@ -1453,7 +1453,7 @@ dependencies = [
 
 [[package]]
 name = "jxr2png-core"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "jxr",
  "png",
@@ -1463,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "jxr2png-gui"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "arboard",
  "bytemuck",
