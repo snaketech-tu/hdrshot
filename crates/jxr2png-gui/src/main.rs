@@ -2,12 +2,14 @@
 
 mod assoc;
 mod convert;
+mod storage;
+mod window;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use eframe::egui::{self, Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
+use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
 use jxr2png_core::{ConvertOptions, HdrOptions, OutputMode, Outputs, SdrOptions};
 use serde::{Deserialize, Serialize};
 
@@ -17,24 +19,39 @@ use convert::{Event, Job, SharedClipboard};
 /// the executable by `build.rs`.
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
-fn main() -> eframe::Result {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("jxr2png")
-            .with_app_id("jxr2png")
-            .with_inner_size([560.0, 640.0])
-            .with_min_inner_size([420.0, 480.0])
-            .with_drag_and_drop(true)
-            .with_icon(
-                eframe::icon_data::from_png_bytes(ICON_PNG).expect("bundled icon is a valid PNG"),
-            ),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "jxr2png",
-        options,
-        Box::new(|cc| Ok(Box::new(App::new(cc)))),
-    )
+fn main() {
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("jxr2png")
+        .with_app_id("jxr2png")
+        .with_inner_size([560.0, 640.0])
+        .with_min_inner_size([420.0, 480.0])
+        .with_drag_and_drop(true)
+        .with_icon(icon());
+    if let Err(e) = window::run(viewport, App::new) {
+        eprintln!("jxr2png: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn icon() -> egui::IconData {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(ICON_PNG));
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = decoder.read_info().expect("bundled icon is a valid PNG");
+    let mut rgba = vec![0; reader.output_buffer_size().expect("icon fits in memory")];
+    let info = reader
+        .next_frame(&mut rgba)
+        .expect("bundled icon is a valid PNG");
+    assert_eq!(
+        info.color_type,
+        png::ColorType::Rgba,
+        "bundled icon is RGBA"
+    );
+    rgba.truncate(info.buffer_size());
+    egui::IconData {
+        rgba,
+        width: info.width,
+        height: info.height,
+    }
 }
 
 /// What the user picked last time. Tuning options are deliberately not
@@ -149,12 +166,9 @@ const TOAST_SECONDS: f64 = 3.0;
 const SETTINGS_KEY: &str = "settings";
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let settings = cc
-            .storage
-            .and_then(|s| eframe::get_value(s, SETTINGS_KEY))
-            .unwrap_or_default();
-        cc.egui_ctx.global_style_mut(|style| {
+    fn new(ctx: &egui::Context) -> Self {
+        let settings = storage::load(SETTINGS_KEY).unwrap_or_default();
+        ctx.global_style_mut(|style| {
             style.spacing.item_spacing = Vec2::new(8.0, 8.0);
             style.spacing.button_padding = Vec2::new(10.0, 4.0);
         });
@@ -749,8 +763,8 @@ impl App {
     }
 }
 
-impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+impl window::App for App {
+    fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.poll_job(&ctx);
         let focused = ui.input(|i| i.focused);
@@ -758,14 +772,6 @@ impl eframe::App for App {
             self.is_default_app = assoc::is_default();
         }
         self.was_focused = focused;
-        // With G-Sync/FreeSync on for windowed apps, the focused window sets
-        // the monitor's refresh rate. egui normally redraws only on input, so
-        // the rate keeps jumping between a few Hz and the maximum, which many
-        // panels show as flicker. Redrawing every vsync while focused keeps
-        // the refresh rate steady at the maximum.
-        if focused {
-            ctx.request_repaint();
-        }
         let dropped: Vec<PathBuf> = ui.input(|i| {
             i.raw
                 .dropped_files
@@ -808,8 +814,8 @@ impl eframe::App for App {
         self.toast_ui(&ctx);
     }
 
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, SETTINGS_KEY, &self.settings);
+    fn on_exit(&mut self) {
+        storage::save(SETTINGS_KEY, &self.settings);
     }
 }
 

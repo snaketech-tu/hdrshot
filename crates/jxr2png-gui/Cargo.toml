@@ -8,10 +8,18 @@ repository.workspace = true
 
 [dependencies]
 arboard = { version = "3.7.0", default-features = false, features = ["wayland-data-control"] }
-eframe = { version = "0.37.0", features = ["persistence"] }
+bytemuck = "1.25.2"
+egui = { version = "0.37.0", features = ["default_fonts"] }
+egui-winit = "0.37.0"
+egui_software_backend = { path = "../egui-software-backend" }
+egui_system_font_provider = "0.37.0"
 jxr2png-core = { version = "1.0.0", path = "../jxr2png-core" }
+png = "0.18.1"
 rfd = "0.17.2"
+ron = "0.12.2"
 serde = { version = "1.0.229", features = ["derive"] }
+softbuffer = "0.4"
+winit = "0.30.13"
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_UI_Shell"] }

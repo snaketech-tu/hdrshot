@@ -7,7 +7,6 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use eframe::egui;
 use jxr2png_core::{ConvertOptions, Outputs};
 
 pub enum Event {

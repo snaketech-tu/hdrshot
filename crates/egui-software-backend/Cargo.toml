@@ -1,0 +1,26 @@
+[package]
+name = "egui_software_backend"
+description = "CPU renderer for egui (vendored from egui_software_backend 0.0.3, ported to egui 0.37)"
+version = "0.0.3"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+# The crate docs show examples that need egui_demo_lib.
+doctest = false
+
+[dependencies]
+ahash = { version = "0.8", default-features = false, features = ["no-rng", "std"] }
+constify = "0.0.1"
+egui = { version = "0.37.0", default-features = false }
+strength_reduce = "0.2.4"
+log = { version = "0.4", optional = true }
+rayon = { version = "1.11.0", optional = true }
+
+[features]
+default = ["std"]
+std = []
+log = ["dep:log"]
+raster_stats = ["std"]
+rayon = ["dep:rayon"]
