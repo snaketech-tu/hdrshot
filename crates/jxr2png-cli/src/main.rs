@@ -9,13 +9,13 @@ use jxr2png_core::{
 };
 use rayon::prelude::*;
 
-/// Convert HDR images (JPEG XR, OpenEXR, Radiance HDR, HDR PNG) to HDR
-/// and/or SDR PNG files.
+/// Convert HDR images (JPEG XR, OpenEXR, Radiance HDR, HDR PNG, JPEG XL)
+/// to HDR and/or SDR PNG files.
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
     /// Input images or folders. Wildcards such as *.jxr also work in cmd and
-    /// PowerShell. Folders are searched for .jxr, .exr and .hdr files; give
+    /// PowerShell. Folders are searched for .jxr, .exr, .hdr and .jxl files; give
     /// HDR PNGs by name.
     #[arg(required = true)]
     inputs: Vec<PathBuf>,
@@ -59,7 +59,8 @@ struct Args {
     #[arg(long, value_name = "NITS")]
     sdr_peak: Option<f32>,
 
-    /// Brightness, in nits, of 1.0 in OpenEXR and Radiance files. By default
+    /// Brightness, in nits, of 1.0 in OpenEXR, Radiance and float JPEG XL
+    /// files. By default
     /// the file's own value is used, or 80 nits if it has none.
     #[arg(long, value_name = "NITS")]
     input_white: Option<f32>,

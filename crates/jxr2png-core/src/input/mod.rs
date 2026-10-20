@@ -3,7 +3,7 @@
 //! Every format is decoded to the same linear scRGB [`ScRgbImage`] that the
 //! JPEG XR path produces, so all outputs work unchanged for every input.
 //!
-//! Display-referred files (JPEG XR, HDR PNG) carry absolute brightness.
+//! Display-referred files (JPEG XR, HDR PNG, PQ or HLG JPEG XL) carry absolute brightness.
 //! Scene-referred files (OpenEXR, Radiance) only say how bright things are
 //! relative to each other; [`InputOptions::white_nits`] sets the brightness
 //! of their 1.0 when the file doesn't.
@@ -14,6 +14,7 @@ use crate::color::SCRGB_WHITE_NITS;
 use crate::decode::ScRgbImage;
 use crate::{Error, Result};
 
+mod jxl;
 mod openexr;
 mod png;
 mod radiance;
@@ -25,10 +26,11 @@ pub enum InputFormat {
     Exr,
     Radiance,
     Png,
+    Jxl,
 }
 
 impl InputFormat {
-    pub const ALL: [Self; 4] = [Self::Jxr, Self::Exr, Self::Radiance, Self::Png];
+    pub const ALL: [Self; 5] = [Self::Jxr, Self::Exr, Self::Radiance, Self::Png, Self::Jxl];
 
     /// File extensions, lowercase and without the dot.
     pub fn extensions(self) -> &'static [&'static str] {
@@ -37,6 +39,7 @@ impl InputFormat {
             Self::Exr => &["exr"],
             Self::Radiance => &["hdr"],
             Self::Png => &["png"],
+            Self::Jxl => &["jxl"],
         }
     }
 
@@ -47,6 +50,7 @@ impl InputFormat {
             Self::Exr => "OpenEXR",
             Self::Radiance => "Radiance HDR",
             Self::Png => "HDR PNG",
+            Self::Jxl => "JPEG XL",
         }
     }
 
@@ -68,6 +72,9 @@ impl InputFormat {
             Some(Self::Radiance)
         } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
             Some(Self::Png)
+        } else if bytes.starts_with(&[0xff, 0x0a]) || bytes.starts_with(b"\0\0\0\x0cJXL \r\n\x87\n")
+        {
+            Some(Self::Jxl)
         } else {
             None
         }
@@ -107,6 +114,7 @@ pub fn decode(bytes: &[u8], options: &InputOptions) -> Result<ScRgbImage> {
         Some(InputFormat::Exr) => openexr::decode(bytes, options),
         Some(InputFormat::Radiance) => radiance::decode(bytes, options),
         Some(InputFormat::Png) => png::decode(bytes),
+        Some(InputFormat::Jxl) => jxl::decode(bytes, options),
         None => Err(Error::UnknownFormat),
     }
 }
@@ -128,6 +136,7 @@ pub fn dimensions(path: &Path) -> Result<(u32, u32)> {
         Some(InputFormat::Jxr) => return crate::decode::dimensions(path),
         Some(InputFormat::Png) => png::dimensions(&head),
         Some(InputFormat::Radiance) => radiance::dimensions(&head),
+        Some(InputFormat::Jxl) => jxl::dimensions(&head),
         Some(InputFormat::Exr) => None,
         None => return Err(Error::UnknownFormat),
     };

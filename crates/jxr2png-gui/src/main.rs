@@ -30,8 +30,8 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 /// Extensions offered in the open dialog, in both cases for platforms whose
 /// dialogs match them exactly.
-const INPUT_EXTENSIONS: [&str; 10] = [
-    "jxr", "wdp", "exr", "hdr", "png", "JXR", "WDP", "EXR", "HDR", "PNG",
+const INPUT_EXTENSIONS: [&str; 12] = [
+    "jxr", "wdp", "exr", "hdr", "png", "jxl", "JXR", "WDP", "EXR", "HDR", "PNG", "JXL",
 ];
 
 fn main() {
@@ -1488,8 +1488,8 @@ impl App {
 
                 ui.checkbox(&mut t.fixed_input_white, "Render white")
                     .on_hover_text(
-                        "For OpenEXR and Radiance files: the brightness of a value \
-                     of 1.0. Off uses the file's own value, or 80 nits.",
+                        "For OpenEXR, Radiance and float JPEG XL files: the \
+                     brightness of a value of 1.0. Off uses the file's own value, or 80 nits.",
                     );
                 ui.add_enabled(t.fixed_input_white, nits(&mut t.input_white, 1.0));
                 ui.end_row();

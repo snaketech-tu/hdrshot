@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 exr = "1.74"
 image = { version = "0.25", default-features = false, features = ["hdr"] }
+jxl-oxide = { version = "0.12", features = ["moxcms"] }
 jxr = "=0.2.1"
 png = "0.18"
 rayon = "1.12.0"

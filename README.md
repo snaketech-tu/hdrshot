@@ -41,8 +41,8 @@ the screenshot looks.
   press Convert.
 - **Copy for Discord.** One click puts the image on the clipboard in a
   form Discord shows with correct colors.
-- **Other HDR inputs.** Also reads OpenEXR (`.exr`), Radiance (`.hdr`)
-  and HDR PNG files, for game photo modes, renders and re-tone-mapping.
+- **Other HDR inputs.** Also reads OpenEXR (`.exr`), Radiance (`.hdr`),
+  HDR PNG and JPEG XL (`.jxl`) files, for game photo modes, renders and re-tone-mapping.
 - **Double-click to convert.** Optionally opens `.jxr` files with jxr2png
   on Windows and Linux.
 - **Parallel conversion.** Uses all CPU cores, written in pure Rust with no
@@ -183,7 +183,7 @@ Everything is automatic; these options are only for tuning:
 | `--hdr-peak <NITS>` | Limit the HDR PNG's brightest highlight, rolling off anything brighter |
 | `--sdr-white <NITS>` | HDR brightness that becomes SDR white (default 80; lower is brighter) |
 | `--sdr-peak <NITS>` | Brightness that maps to full SDR white, instead of the 99.9th percentile |
-| `--input-white <NITS>` | Brightness of 1.0 in OpenEXR and Radiance files (default: the file's own value, or 80) |
+| `--input-white <NITS>` | Brightness of 1.0 in OpenEXR, Radiance and float JPEG XL files (default: the file's own value, or 80) |
 | `--name <PATTERN>` | Output file name without `.png`: `{name}` is the input's name, `{type}` is `hdr` or `sdr` (default `{name}_{type}`) |
 | `--subfolders` | Put the PNGs in `hdr` and `sdr` subfolders of the output folder |
 | `--max-height <PIXELS>` | Scale taller images down to this height, averaging in linear light |
@@ -252,6 +252,12 @@ Rust JPEG XR decoder, so no C toolchain is needed.
     undone. EXR is scene-referred, so 1.0 is the file's `whiteLuminance`,
     or 80 nits like scRGB; `--input-white` sets it.
   - **Radiance `.hdr`**: RGBE, BT.709, with the same 80-nit default.
+  - **JPEG XL**: decoded with [`jxl-oxide`](https://crates.io/crates/jxl-oxide)
+    (pure Rust). PQ and HLG files keep their absolute brightness; float
+    files without an HDR transfer function are scene-linear like OpenEXR
+    (1.0 is their intensity target if set, else 80 nits); other files are
+    SDR and, like 8-bit JXR files, give only the SDR PNG. Animations give
+    their first frame.
   - **HDR PNG**: PQ or HLG in BT.2020, BT.709 or Display P3, marked by a
     `cICP` chunk or an ICC `cicp` tag (so jxr2png's own HDR PNGs and their
     Discord copies both work). HLG uses a 1000-nit display, as BT.2100

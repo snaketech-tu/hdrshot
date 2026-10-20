@@ -1,7 +1,7 @@
 //! Conversion of HDR images to HDR and SDR PNG.
 //!
 //! Inputs are JPEG XR (`.jxr`, as made by Windows HDR screenshots), OpenEXR,
-//! Radiance `.hdr` and HDR PNG; see [`input`]. Two outputs are supported:
+//! Radiance `.hdr`, HDR PNG and JPEG XL; see [`input`]. Two outputs are supported:
 //! - **HDR**: 16-bit PNG in Rec.2020 primaries with the PQ (SMPTE ST 2084)
 //!   transfer function, tagged with a `cICP` chunk and an ICC profile
 //!   `cicp` tag so HDR-aware viewers display it in HDR.
@@ -168,7 +168,7 @@ pub enum Error {
     Decode(String),
     #[error("unsupported pixel format: {0}")]
     UnsupportedFormat(String),
-    #[error("not a supported image (JPEG XR, OpenEXR, Radiance HDR or HDR PNG)")]
+    #[error("not a supported image (JPEG XR, OpenEXR, Radiance HDR, HDR PNG or JPEG XL)")]
     UnknownFormat,
     #[error("not an HDR image: {0}")]
     NotHdr(String),
