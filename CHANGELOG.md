@@ -14,6 +14,15 @@
   and the G-Sync flicker stays fixed without redrawing every frame.
 - The Resolution menu shows the size the listed files come out at, such as
   "1080p (2580×1080)" for ultrawide screenshots.
+- The command line no longer replaces PNGs that already exist. It skips
+  them and says so; `--overwrite` replaces them as before.
+- PNGs get the screenshot's modified date, so folders sorted by date stay
+  in capture order. `--no-keep-date` turns this off.
+
+### Fixed
+
+- A failed conversion no longer leaves a half-written PNG behind. Files are
+  written under a temporary name and renamed when complete.
 
 ## [1.0.0] - 2026-10-19
 

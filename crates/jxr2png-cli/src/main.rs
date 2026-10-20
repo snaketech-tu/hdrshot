@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use jxr2png_core::{ConvertOptions, HdrOptions, OutputMode, SdrOptions};
+use jxr2png_core::{ConvertOptions, Existing, HdrOptions, OutputMode, SdrOptions};
 
 /// Convert HDR JPEG XR (.jxr) images to HDR and/or SDR PNG files.
 #[derive(Parser, Debug)]
@@ -43,6 +43,14 @@ struct Args {
     /// kept.
     #[arg(long, value_name = "PIXELS")]
     max_height: Option<u32>,
+
+    /// Replace PNGs that already exist. By default they are skipped.
+    #[arg(long)]
+    overwrite: bool,
+
+    /// Give the PNGs the current time instead of the JXR's modified time.
+    #[arg(long)]
+    no_keep_date: bool,
 }
 
 fn main() -> ExitCode {
@@ -63,6 +71,12 @@ fn main() -> ExitCode {
             peak_nits: args.sdr_peak,
         },
         max_height: args.max_height,
+        existing: if args.overwrite {
+            Existing::Replace
+        } else {
+            Existing::Skip
+        },
+        keep_date: !args.no_keep_date,
     };
 
     let mut failed = false;
@@ -71,6 +85,13 @@ fn main() -> ExitCode {
             Ok(outputs) => {
                 for path in [outputs.hdr, outputs.sdr].into_iter().flatten() {
                     println!("{} -> {}", input.display(), path.display());
+                }
+                for path in outputs.skipped {
+                    println!(
+                        "{}: skipped {}, which already exists (--overwrite replaces it)",
+                        input.display(),
+                        path.display()
+                    );
                 }
             }
             Err(e) => {

@@ -10,7 +10,7 @@ use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
-use jxr2png_core::{ConvertOptions, HdrOptions, OutputMode, Outputs, SdrOptions};
+use jxr2png_core::{ConvertOptions, Existing, HdrOptions, OutputMode, Outputs, SdrOptions};
 use serde::{Deserialize, Serialize};
 
 use convert::{Event, Job, SharedClipboard};
@@ -254,6 +254,9 @@ impl App {
                 peak_nits: t.fixed_sdr_peak.then_some(t.sdr_peak),
             },
             max_height: self.max_height,
+            // Replacing matches v1.0.0 until the GUI asks what to do.
+            existing: Existing::Replace,
+            keep_date: true,
         }
     }
 

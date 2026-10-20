@@ -113,6 +113,11 @@ Wildcards such as `*.jxr` work in shells that expand them (bash, zsh); in
 cmd and PowerShell, list the files or use the desktop app, which also takes
 folders.
 
+PNGs that already exist are skipped, so converting a folder again only
+adds the new screenshots. Each PNG gets the screenshot's modified date, so
+folders sorted by date stay in capture order. A failed conversion never
+leaves a half-written PNG behind.
+
 Everything is automatic; these options are only for tuning:
 
 | Option | Effect |
@@ -123,6 +128,8 @@ Everything is automatic; these options are only for tuning:
 | `--sdr-white <NITS>` | HDR brightness that becomes SDR white (default 80; lower is brighter) |
 | `--sdr-peak <NITS>` | Brightness that maps to full SDR white, instead of the 99.9th percentile |
 | `--max-height <PIXELS>` | Scale taller images down to this height, averaging in linear light |
+| `--overwrite` | Replace PNGs that already exist; by default they are skipped |
+| `--no-keep-date` | Give the PNGs the current time instead of the screenshot's date |
 
 Run `jxr2png --help` for the full list.
 
