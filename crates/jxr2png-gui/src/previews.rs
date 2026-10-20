@@ -32,7 +32,8 @@ impl Previews {
         std::thread::spawn(move || {
             for path in queue {
                 let (w, h) = PREVIEW_SIZE;
-                let preview = jxr2png_core::preview(&path, w, h).map_err(|e| e.to_string());
+                let preview = jxr2png_core::preview(&path, &Default::default(), w, h)
+                    .map_err(|e| e.to_string());
                 if done.send((path, preview)).is_err() {
                     break;
                 }

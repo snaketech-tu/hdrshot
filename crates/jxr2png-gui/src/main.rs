@@ -16,7 +16,9 @@ use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
-use jxr2png_core::{ConvertOptions, Existing, HdrOptions, Naming, OutputMode, Outputs, SdrOptions};
+use jxr2png_core::{
+    ConvertOptions, Existing, HdrOptions, InputOptions, Naming, OutputMode, Outputs, SdrOptions,
+};
 use serde::{Deserialize, Serialize};
 
 use convert::{Copied, Event, Job, SharedClipboard, TooBig};
@@ -25,6 +27,12 @@ use previews::{Previews, THUMB_SIZE, Thumb};
 /// The app icon, 256 px. Windows also gets `assets/icon.ico` embedded in
 /// the executable by `build.rs`.
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+
+/// Extensions offered in the open dialog, in both cases for platforms whose
+/// dialogs match them exactly.
+const INPUT_EXTENSIONS: [&str; 12] = [
+    "jxr", "wdp", "exr", "hdr", "png", "jxl", "JXR", "WDP", "EXR", "HDR", "PNG", "JXL",
+];
 
 fn main() {
     // Files passed on the command line, e.g. by "Open with" or by dropping
@@ -151,6 +159,8 @@ struct Tuning {
     sdr_white: f32,
     fixed_sdr_peak: bool,
     sdr_peak: f32,
+    fixed_input_white: bool,
+    input_white: f32,
 }
 
 impl Default for Tuning {
@@ -161,6 +171,8 @@ impl Default for Tuning {
             sdr_white: SdrOptions::default().white_nits,
             fixed_sdr_peak: false,
             sdr_peak: 1000.0,
+            fixed_input_white: false,
+            input_white: 80.0,
         }
     }
 }
@@ -169,6 +181,7 @@ impl Tuning {
     fn is_default(&self) -> bool {
         !self.limit_hdr_peak
             && !self.fixed_sdr_peak
+            && !self.fixed_input_white
             && self.sdr_white == SdrOptions::default().white_nits
     }
 }
@@ -371,10 +384,10 @@ impl App {
         let mut skipped = 0;
         for path in paths {
             if path.is_dir() {
-                for file in jxr2png_core::find_jxr(&path, true) {
+                for file in jxr2png_core::find_inputs(&path, true) {
                     self.add_file(file);
                 }
-            } else if jxr2png_core::is_jxr(&path) {
+            } else if jxr2png_core::is_supported(&path) {
                 self.add_file(path);
             } else {
                 skipped += 1;
@@ -382,7 +395,7 @@ impl App {
         }
         self.notice = (skipped > 0).then(|| {
             format!(
-                "Skipped {skipped} file{} that {} not .jxr.",
+                "Skipped {skipped} file{} that {} not a supported image.",
                 if skipped == 1 { "" } else { "s" },
                 if skipped == 1 { "is" } else { "are" }
             )
@@ -391,7 +404,7 @@ impl App {
 
     fn add_file(&mut self, path: PathBuf) {
         if !self.files.iter().any(|e| e.path == path) {
-            let size = jxr2png_core::dimensions(&path).ok();
+            let size = jxr2png_core::input::dimensions(&path).ok();
             self.previews.request(&path);
             self.files.push(Entry {
                 path,
@@ -406,6 +419,9 @@ impl App {
         let t = &self.tuning;
         ConvertOptions {
             mode: self.settings.mode.into(),
+            input: InputOptions {
+                white_nits: t.fixed_input_white.then_some(t.input_white),
+            },
             output_dir: if self.settings.save_to_folder {
                 self.settings.output_dir.clone()
             } else {
@@ -1115,7 +1131,7 @@ impl App {
             ("Release to add", "")
         } else {
             (
-                "Drop .jxr files or folders here",
+                "Drop HDR images or folders here",
                 "or click to choose files",
             )
         };
@@ -1155,8 +1171,8 @@ impl App {
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             && let Some(paths) = rfd::FileDialog::new()
-                .set_title("Choose JXR images")
-                .add_filter("JPEG XR images", &["jxr", "JXR", "wdp"])
+                .set_title("Choose HDR images")
+                .add_filter("HDR images", &INPUT_EXTENSIONS)
                 .pick_files()
         {
             self.add_paths(paths);
@@ -1468,6 +1484,14 @@ impl App {
                      Off uses the brightest 0.1% of each image.",
                     );
                 ui.add_enabled(t.fixed_sdr_peak, nits(&mut t.sdr_peak, 10.0));
+                ui.end_row();
+
+                ui.checkbox(&mut t.fixed_input_white, "Render white")
+                    .on_hover_text(
+                        "For OpenEXR, Radiance and float JPEG XL files: the \
+                     brightness of a value of 1.0. Off uses the file's own value, or 80 nits.",
+                    );
+                ui.add_enabled(t.fixed_input_white, nits(&mut t.input_white, 1.0));
                 ui.end_row();
             });
         if !t.is_default() && ui.button("Back to automatic").clicked() {

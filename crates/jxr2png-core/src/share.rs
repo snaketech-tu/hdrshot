@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::{ConvertOptions, Result, decode, light_levels, resize, write_hdr_png, write_sdr_png};
+use crate::{ConvertOptions, Result, input, light_levels, resize, write_hdr_png, write_sdr_png};
 
 /// Largest file Discord takes from an account without Nitro.
 pub const DISCORD_LIMIT: u64 = 10_000_000;
@@ -54,7 +54,7 @@ fn smaller_png_at(
     limit: u64,
     heights: &[u32],
 ) -> Result<Option<Smaller>> {
-    let image = decode(&std::fs::read(input)?)?;
+    let image = input::decode_file(input, &options.input)?;
     let height = options
         .max_height
         .map_or(image.height, |max| image.height.min(max));
@@ -84,6 +84,7 @@ pub fn megabytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decode;
 
     const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/hdr64.jxr");
 
