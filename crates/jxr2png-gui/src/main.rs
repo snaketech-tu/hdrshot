@@ -132,6 +132,8 @@ enum Status {
 struct Entry {
     path: PathBuf,
     status: Status,
+    /// Source width and height, if the file's header could be read.
+    size: Option<(u32, u32)>,
 }
 
 struct App {
@@ -226,9 +228,11 @@ impl App {
 
     fn add_file(&mut self, path: PathBuf) {
         if !self.files.iter().any(|e| e.path == path) {
+            let size = jxr2png_core::dimensions(&path).ok();
             self.files.push(Entry {
                 path,
                 status: Status::Waiting,
+                size,
             });
         }
     }
@@ -590,9 +594,13 @@ impl App {
                 ui.end_row();
 
                 ui.label("Resolution");
-                let label = |h: Option<u32>| match h {
-                    None => "Source".to_owned(),
-                    Some(h) => format!("{h}p"),
+                let label = |h: Option<u32>| {
+                    let name = h.map_or_else(|| "Source".to_owned(), |h| format!("{h}p"));
+                    match output_size(&self.files, h) {
+                        OutputSize::Unknown => name,
+                        OutputSize::Same(w, h) => format!("{name} ({w}×{h})"),
+                        OutputSize::Varies => format!("{name} (sizes vary)"),
+                    }
                 };
                 egui::ComboBox::from_id_salt("resolution")
                     .selected_text(label(self.max_height))
@@ -604,7 +612,9 @@ impl App {
                     .response
                     .on_hover_text(
                         "Scale images taller than this down to this height, keeping the \
-                         aspect ratio. Smaller images are never scaled up.",
+                         aspect ratio, so ultrawide images stay ultrawide. Smaller images \
+                         are never scaled up. The size in brackets is what the listed \
+                         files come out at.",
                     );
                 ui.end_row();
 
@@ -819,6 +829,30 @@ impl window::App for App {
     }
 }
 
+/// What size the listed files come out at with a given height limit.
+#[derive(Debug, PartialEq)]
+enum OutputSize {
+    /// No file in the list, or none whose size could be read.
+    Unknown,
+    Same(u32, u32),
+    Varies,
+}
+
+fn output_size(files: &[Entry], max_height: Option<u32>) -> OutputSize {
+    let mut sizes = files
+        .iter()
+        .filter_map(|e| e.size)
+        .map(|(w, h)| max_height.map_or((w, h), |max| jxr2png_core::resize::fit_height(w, h, max)));
+    let Some(first) = sizes.next() else {
+        return OutputSize::Unknown;
+    };
+    if sizes.all(|s| s == first) {
+        OutputSize::Same(first.0, first.1)
+    } else {
+        OutputSize::Varies
+    }
+}
+
 fn status_ui(ui: &mut egui::Ui, status: &Status) {
     match status {
         Status::Waiting => {
@@ -881,4 +915,41 @@ fn reveal(dir: &Path) {
         "xdg-open"
     };
     let _ = Command::new(program).arg(dir).spawn();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(size: Option<(u32, u32)>) -> Entry {
+        Entry {
+            path: PathBuf::new(),
+            status: Status::Waiting,
+            size,
+        }
+    }
+
+    #[test]
+    fn output_size_keeps_ultrawide_aspect() {
+        let files = [entry(Some((3440, 1440))), entry(Some((3440, 1440)))];
+        assert_eq!(output_size(&files, None), OutputSize::Same(3440, 1440));
+        assert_eq!(
+            output_size(&files, Some(1080)),
+            OutputSize::Same(2580, 1080)
+        );
+        assert_eq!(
+            output_size(&files, Some(2160)),
+            OutputSize::Same(3440, 1440)
+        );
+    }
+
+    #[test]
+    fn output_size_varies_or_unknown() {
+        let mixed = [entry(Some((3440, 1440))), entry(Some((3840, 2160)))];
+        assert_eq!(output_size(&mixed, Some(1080)), OutputSize::Varies);
+        // Both are 1440 or less tall, but their widths differ.
+        assert_eq!(output_size(&mixed, Some(1440)), OutputSize::Varies);
+        assert_eq!(output_size(&[], Some(1080)), OutputSize::Unknown);
+        assert_eq!(output_size(&[entry(None)], None), OutputSize::Unknown);
+    }
 }
