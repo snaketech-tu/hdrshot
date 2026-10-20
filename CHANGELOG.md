@@ -2,8 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- A "Made with ♥ by snake.tech" line at the bottom of the desktop app,
+  linking to Ko-fi.
+
 ### Changed
 
+- The desktop app draws on the CPU instead of the GPU and only redraws when
+  something changes. It no longer looks like a game to the Nvidia driver,
+  and the G-Sync flicker stays fixed without redrawing every frame.
+- The Resolution menu shows the size the listed files come out at, such as
+  "1080p (2580×1080)" for ultrawide screenshots.
 - The command line no longer replaces PNGs that already exist. It skips
   them and says so; `--overwrite` replaces them as before.
 - PNGs get the screenshot's modified date, so folders sorted by date stay

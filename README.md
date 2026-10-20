@@ -95,8 +95,9 @@ with a paid certificate, so the first launch needs one extra step:
 - **Advanced** holds the tuning options from the command line. They are off
   by default and reset every time the app starts, so results always match
   the original screenshot unless you change them.
-- On variable refresh rate monitors (G-Sync, FreeSync) the window redraws at
-  the monitor's refresh rate while focused, so it doesn't flicker.
+- The window is drawn on the CPU and only redraws when something changes,
+  so it uses almost no CPU or GPU while idle and doesn't flicker on variable
+  refresh rate monitors (G-Sync, FreeSync).
 
 </details>
 
@@ -204,3 +205,6 @@ platforms and publishes the release with notes from
 ## License
 
 [Apache-2.0](LICENSE)
+
+Made by snake.tech. If jxr2png is useful to you, you can support it on
+[Ko-fi](https://ko-fi.com/snake_tech).

@@ -18,7 +18,7 @@ pub mod icc;
 pub mod resize;
 
 use color::SCRGB_WHITE_NITS;
-pub use decode::{ScRgbImage, decode};
+pub use decode::{ScRgbImage, decode, dimensions};
 pub use encode::{LightLevels, for_discord, light_levels, write_hdr_png, write_sdr_png};
 
 /// Which PNG files to produce for each input.

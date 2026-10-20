@@ -132,6 +132,8 @@ enum Status {
 struct Entry {
     path: PathBuf,
     status: Status,
+    /// Source width and height, if the file's header could be read.
+    size: Option<(u32, u32)>,
 }
 
 struct App {
@@ -226,9 +228,11 @@ impl App {
 
     fn add_file(&mut self, path: PathBuf) {
         if !self.files.iter().any(|e| e.path == path) {
+            let size = jxr2png_core::dimensions(&path).ok();
             self.files.push(Entry {
                 path,
                 status: Status::Waiting,
+                size,
             });
         }
     }
@@ -593,9 +597,13 @@ impl App {
                 ui.end_row();
 
                 ui.label("Resolution");
-                let label = |h: Option<u32>| match h {
-                    None => "Source".to_owned(),
-                    Some(h) => format!("{h}p"),
+                let label = |h: Option<u32>| {
+                    let name = h.map_or_else(|| "Source".to_owned(), |h| format!("{h}p"));
+                    match output_size(&self.files, h) {
+                        OutputSize::Unknown => name,
+                        OutputSize::Same(w, h) => format!("{name} ({w}×{h})"),
+                        OutputSize::Varies => format!("{name} (sizes vary)"),
+                    }
                 };
                 egui::ComboBox::from_id_salt("resolution")
                     .selected_text(label(self.max_height))
@@ -607,7 +615,9 @@ impl App {
                     .response
                     .on_hover_text(
                         "Scale images taller than this down to this height, keeping the \
-                         aspect ratio. Smaller images are never scaled up.",
+                         aspect ratio, so ultrawide images stay ultrawide. Smaller images \
+                         are never scaled up. The size in brackets is what the listed \
+                         files come out at.",
                     );
                 ui.end_row();
 
@@ -794,6 +804,8 @@ impl window::App for App {
                 ui.add_enabled_ui(!self.running(), |ui| self.settings_ui(ui));
                 ui.separator();
                 self.action_bar(ui);
+                ui.add_space(2.0);
+                credit(ui);
             });
         egui::CentralPanel::default()
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
@@ -819,6 +831,30 @@ impl window::App for App {
 
     fn on_exit(&mut self) {
         storage::save(SETTINGS_KEY, &self.settings);
+    }
+}
+
+/// What size the listed files come out at with a given height limit.
+#[derive(Debug, PartialEq)]
+enum OutputSize {
+    /// No file in the list, or none whose size could be read.
+    Unknown,
+    Same(u32, u32),
+    Varies,
+}
+
+fn output_size(files: &[Entry], max_height: Option<u32>) -> OutputSize {
+    let mut sizes = files
+        .iter()
+        .filter_map(|e| e.size)
+        .map(|(w, h)| max_height.map_or((w, h), |max| jxr2png_core::resize::fit_height(w, h, max)));
+    let Some(first) = sizes.next() else {
+        return OutputSize::Unknown;
+    };
+    if sizes.all(|s| s == first) {
+        OutputSize::Same(first.0, first.1)
+    } else {
+        OutputSize::Varies
     }
 }
 
@@ -874,6 +910,67 @@ fn collect_jxr(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+const KOFI_URL: &str = "https://ko-fi.com/snake_tech";
+
+/// "Made with ♥ by snake.tech", centered, opening the Ko-fi page when
+/// clicked. The bundled fonts have no heart glyph, so it's drawn.
+fn credit(ui: &mut egui::Ui) {
+    let font = egui::FontId::proportional(11.5);
+    let heart_size = 9.0;
+    let gap = 4.0;
+    let color = ui.visuals().weak_text_color();
+    let before = ui
+        .painter()
+        .layout_no_wrap("Made with".to_owned(), font.clone(), color);
+    let after = ui
+        .painter()
+        .layout_no_wrap("by snake.tech".to_owned(), font, color);
+    let size = Vec2::new(
+        before.size().x + after.size().x + heart_size + 2.0 * gap,
+        before.size().y,
+    );
+    ui.vertical_centered(|ui| {
+        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+        let response = response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(KOFI_URL);
+        let ink = if response.hovered() {
+            ui.visuals().text_color()
+        } else {
+            color
+        };
+        let painter = ui.painter();
+        let mut x = rect.left();
+        painter.galley_with_override_text_color(rect.left_top(), before.clone(), ink);
+        x += before.size().x + gap;
+        let center = egui::pos2(x + heart_size / 2.0, rect.center().y);
+        paint_heart(painter, center, heart_size, Color32::from_rgb(220, 70, 90));
+        x += heart_size + gap;
+        painter.galley_with_override_text_color(egui::pos2(x, rect.top()), after.clone(), ink);
+        if response.clicked() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(KOFI_URL));
+        }
+    });
+}
+
+/// A filled heart `size` points wide, centered on `center`.
+fn paint_heart(painter: &egui::Painter, center: egui::Pos2, size: f32, color: Color32) {
+    // Two circles for the lobes and a triangle for the point.
+    let r = size / 4.0;
+    let top = center.y - size * 0.15;
+    painter.circle_filled(egui::pos2(center.x - r, top), r, color);
+    painter.circle_filled(egui::pos2(center.x + r, top), r, color);
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(center.x - 2.0 * r, top + r * 0.25),
+            egui::pos2(center.x + 2.0 * r, top + r * 0.25),
+            egui::pos2(center.x, center.y + size * 0.45),
+        ],
+        color,
+        Stroke::NONE,
+    ));
+}
+
 /// Open `dir` in the system's file manager.
 fn reveal(dir: &Path) {
     let program = if cfg!(windows) {
@@ -884,4 +981,41 @@ fn reveal(dir: &Path) {
         "xdg-open"
     };
     let _ = Command::new(program).arg(dir).spawn();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(size: Option<(u32, u32)>) -> Entry {
+        Entry {
+            path: PathBuf::new(),
+            status: Status::Waiting,
+            size,
+        }
+    }
+
+    #[test]
+    fn output_size_keeps_ultrawide_aspect() {
+        let files = [entry(Some((3440, 1440))), entry(Some((3440, 1440)))];
+        assert_eq!(output_size(&files, None), OutputSize::Same(3440, 1440));
+        assert_eq!(
+            output_size(&files, Some(1080)),
+            OutputSize::Same(2580, 1080)
+        );
+        assert_eq!(
+            output_size(&files, Some(2160)),
+            OutputSize::Same(3440, 1440)
+        );
+    }
+
+    #[test]
+    fn output_size_varies_or_unknown() {
+        let mixed = [entry(Some((3440, 1440))), entry(Some((3840, 2160)))];
+        assert_eq!(output_size(&mixed, Some(1080)), OutputSize::Varies);
+        // Both are 1440 or less tall, but their widths differ.
+        assert_eq!(output_size(&mixed, Some(1440)), OutputSize::Varies);
+        assert_eq!(output_size(&[], Some(1080)), OutputSize::Unknown);
+        assert_eq!(output_size(&[entry(None)], None), OutputSize::Unknown);
+    }
 }
