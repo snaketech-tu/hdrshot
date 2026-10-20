@@ -201,6 +201,13 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   off smoothly up to the image's 99.9th percentile brightness. The curve is
   applied to each pixel's brightest channel and the other channels are
   scaled with it, which keeps hue and saturation.
+- **Transparency**: Game Bar captures carry an alpha channel that is always
+  opaque, so it is dropped. A JXR with real transparency gives PNGs with an
+  alpha channel; colors are weighted by alpha when scaling, so transparent
+  pixels don't darken the edges.
+- **SDR JXR files** (8 bits per channel) have no HDR to keep, so only the
+  SDR PNG is made, a faithful copy of the picture. The app and the command
+  line say so.
 
 </details>
 

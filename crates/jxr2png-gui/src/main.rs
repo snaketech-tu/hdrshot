@@ -1339,13 +1339,17 @@ fn status_ui(ui: &mut egui::Ui, status: &Status) {
             };
             let saved = list(&mut [&outputs.hdr, &outputs.sdr].into_iter().flatten());
             let kept = list(&mut outputs.skipped.iter());
-            let tooltip = match (saved.is_empty(), kept.is_empty()) {
+            let mut tooltip = match (saved.is_empty(), kept.is_empty()) {
                 (false, true) => format!("Saved:\n{saved}"),
                 (true, _) => format!("Already there, left alone:\n{kept}"),
                 (false, false) => {
                     format!("Saved:\n{saved}\n\nAlready there, left alone:\n{kept}")
                 }
             };
+            if outputs.sdr_input {
+                tooltip =
+                    format!("This is an SDR image, so only the SDR PNG was made.\n\n{tooltip}");
+            }
             if saved.is_empty() {
                 ui.weak("Skipped").on_hover_text(tooltip);
             } else {

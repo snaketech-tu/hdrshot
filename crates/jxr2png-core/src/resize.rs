@@ -32,19 +32,54 @@ pub fn fit_box(width: u32, height: u32, max_width: u32, max_height: u32) -> (u32
     (scaled(width), scaled(height))
 }
 
-/// Resample `image` to `width`×`height`.
+/// Resample `image` to `width`×`height`. Colors are weighted by alpha, so
+/// transparent pixels don't bleed into their neighbours.
 pub fn resize(image: &ScRgbImage, width: u32, height: u32) -> ScRgbImage {
     if (width, height) == (image.width, image.height) {
         return image.clone();
     }
-    let (src_w, src_h) = (image.width as usize, image.height as usize);
-    let (dst_w, dst_h) = (width as usize, height as usize);
+    let src = (image.width as usize, image.height as usize);
+    let dst = (width as usize, height as usize);
+    let (pixels, alpha) = match &image.alpha {
+        None => (resample(&image.pixels, src, dst), None),
+        Some(alpha) => {
+            let premultiplied: Vec<[f32; 3]> = image
+                .pixels
+                .par_iter()
+                .zip(alpha.par_iter())
+                .map(|(p, &a)| p.map(|c| c * a))
+                .collect();
+            let as_rgb: Vec<[f32; 3]> = alpha.iter().map(|&a| [a; 3]).collect();
+            let alpha: Vec<f32> = resample(&as_rgb, src, dst)
+                .into_iter()
+                .map(|a| a[0].clamp(0.0, 1.0))
+                .collect();
+            let pixels = resample(&premultiplied, src, dst)
+                .into_par_iter()
+                .zip(alpha.par_iter())
+                .map(|(p, &a)| if a > 0.0 { p.map(|c| c / a) } else { [0.0; 3] })
+                .collect();
+            (pixels, Some(alpha))
+        }
+    };
+    ScRgbImage {
+        width,
+        height,
+        pixels,
+        alpha,
+        hdr: image.hdr,
+    }
+}
+
+/// Resamples `pixels`, `src` (width, height), to `dst`.
+fn resample(pixels: &[[f32; 3]], src: (usize, usize), dst: (usize, usize)) -> Vec<[f32; 3]> {
+    let ((src_w, src_h), (dst_w, dst_h)) = (src, dst);
 
     // Horizontal pass: src_w × src_h -> dst_w × src_h.
     let columns = weights(src_w, dst_w);
     let mut wide = vec![[0.0f32; 3]; dst_w * src_h];
     wide.par_chunks_mut(dst_w)
-        .zip(image.pixels.par_chunks(src_w))
+        .zip(pixels.par_chunks(src_w))
         .for_each(|(out, row)| {
             for (o, (start, w)) in out.iter_mut().zip(&columns) {
                 *o = blend(w.iter().enumerate().map(|(k, &w)| (row[start + k], w)));
@@ -53,9 +88,8 @@ pub fn resize(image: &ScRgbImage, width: u32, height: u32) -> ScRgbImage {
 
     // Vertical pass: dst_w × src_h -> dst_w × dst_h.
     let rows = weights(src_h, dst_h);
-    let mut pixels = vec![[0.0f32; 3]; dst_w * dst_h];
-    pixels
-        .par_chunks_mut(dst_w)
+    let mut out = vec![[0.0f32; 3]; dst_w * dst_h];
+    out.par_chunks_mut(dst_w)
         .zip(rows.par_iter())
         .for_each(|(out, (start, w))| {
             for (x, o) in out.iter_mut().enumerate() {
@@ -66,12 +100,7 @@ pub fn resize(image: &ScRgbImage, width: u32, height: u32) -> ScRgbImage {
                 );
             }
         });
-
-    ScRgbImage {
-        width,
-        height,
-        pixels,
-    }
+    out
 }
 
 fn blend(taps: impl Iterator<Item = ([f32; 3], f32)>) -> [f32; 3] {
@@ -129,23 +158,19 @@ mod tests {
     #[test]
     fn halving_averages_and_keeps_flat_areas() {
         // A flat 80-nit area stays exactly flat.
-        let flat = ScRgbImage {
-            width: 8,
-            height: 6,
-            pixels: vec![[1.0; 3]; 48],
-        };
+        let flat = ScRgbImage::new(8, 6, vec![[1.0; 3]; 48]);
         let out = resize(&flat, 4, 3);
         assert_eq!((out.width, out.height), (4, 3));
         assert!(out.pixels.iter().flatten().all(|&c| (c - 1.0).abs() < 1e-6));
 
         // A fine checker of 0 and 10 blurs to about its average, 5.
-        let checker = ScRgbImage {
-            width: 8,
-            height: 8,
-            pixels: (0..64)
+        let checker = ScRgbImage::new(
+            8,
+            8,
+            (0..64)
                 .map(|i| [if (i % 8 + i / 8) % 2 == 0 { 0.0 } else { 10.0 }; 3])
                 .collect(),
-        };
+        );
         let out = resize(&checker, 4, 4);
         for &c in out.pixels.iter().flatten() {
             assert!((3.0..=7.0).contains(&c), "{c}");
@@ -158,11 +183,7 @@ mod tests {
         // range, so no negative or brighter-than-source halos.
         let mut pixels = vec![[0.01f32; 3]; 30];
         pixels[15] = [12.5; 3];
-        let image = ScRgbImage {
-            width: 30,
-            height: 1,
-            pixels,
-        };
+        let image = ScRgbImage::new(30, 1, pixels);
         let out = resize(&image, 11, 1);
         for p in &out.pixels {
             for &c in p {

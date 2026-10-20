@@ -135,6 +135,9 @@ pub struct Outputs {
     /// Outputs that already existed and were left alone
     /// ([`Existing::Skip`]).
     pub skipped: Vec<PathBuf>,
+    /// The input is an 8-bit SDR image, so no HDR PNG was made even if one
+    /// was asked for: it would only be the SDR picture in an HDR file.
+    pub sdr_input: bool,
 }
 
 /// Whether `path` names a JPEG XR file (`.jxr` or `.wdp`).
@@ -180,7 +183,7 @@ pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {
     Outputs {
         hdr: options.mode.hdr().then(|| path("_hdr")),
         sdr: options.mode.sdr().then(|| path("_sdr")),
-        skipped: Vec::new(),
+        ..Outputs::default()
     }
 }
 
@@ -275,6 +278,30 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
     };
     let mut image = decode(&bytes)?;
     drop(bytes);
+    if !image.hdr {
+        outputs.sdr_input = true;
+        if outputs.hdr.take().is_some() && !options.mode.sdr() {
+            // HDR only was asked for: make the SDR PNG instead of nothing.
+            let sdr = output_paths(
+                input,
+                &ConvertOptions {
+                    mode: OutputMode::Sdr,
+                    ..options.clone()
+                },
+            )
+            .sdr;
+            outputs.sdr = sdr.and_then(|path| {
+                let resolved = resolve_existing(path.clone(), options.existing);
+                if resolved.is_none() {
+                    outputs.skipped.push(path);
+                }
+                resolved
+            });
+        }
+        if outputs.sdr.is_none() {
+            return Ok(outputs);
+        }
+    }
     if let Some(max_height) = options.max_height {
         let (width, height) = resize::fit_height(image.width, image.height, max_height);
         image = resize::resize(&image, width, height);

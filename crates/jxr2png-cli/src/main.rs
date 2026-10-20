@@ -197,12 +197,19 @@ impl<'a> Report<'a> {
                 format!("[{}]", items.join(","))
             };
             println!(
-                "{{\"input\":{},\"written\":{},\"skipped\":{}}}",
+                "{{\"input\":{},\"written\":{},\"skipped\":{},\"sdr_input\":{}}}",
                 json(&input.display().to_string()),
                 list(&mut written.into_iter()),
-                list(&mut outputs.skipped.iter())
+                list(&mut outputs.skipped.iter()),
+                outputs.sdr_input
             );
         } else if !self.args.quiet {
+            if outputs.sdr_input && !(self.args.sdr && !self.args.hdr) {
+                println!(
+                    "{}: an SDR image, so only the SDR PNG is made",
+                    input.display()
+                );
+            }
             for path in written {
                 println!("{} -> {}", input.display(), path.display());
             }
