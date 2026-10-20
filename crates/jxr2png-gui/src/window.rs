@@ -12,6 +12,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use egui_software_backend::{BufferMutRef, ColorFieldOrder, EguiSoftwareRender};
+
+use crate::taskbar::Taskbar;
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
@@ -27,6 +29,11 @@ pub trait App {
     /// Files pasted with Ctrl+V (Cmd+V on macOS), e.g. copied in Explorer.
     /// egui only passes on pasted text, so the window reads files itself.
     fn paste_files(&mut self, _files: Vec<std::path::PathBuf>) {}
+
+    /// Progress (0 to 1) to show on the taskbar button, or `None`.
+    fn taskbar_progress(&self) -> Option<f32> {
+        None
+    }
 }
 
 /// Opens the window and runs until it is closed.
@@ -83,6 +90,9 @@ struct Running {
     renderer: EguiSoftwareRender,
     info: egui::ViewportInfo,
     modifiers: winit::keyboard::ModifiersState,
+    taskbar: Taskbar,
+    /// Taskbar progress last shown, in thousandths.
+    progress: Option<u32>,
     /// Texture changes not yet handed to the renderer, kept when a frame
     /// can't be drawn so the next one still gets them.
     textures: egui::TexturesDelta,
@@ -128,6 +138,8 @@ impl<A: App> Runner<A> {
             info,
             modifiers: Default::default(),
             textures: Default::default(),
+            taskbar: Taskbar::default(),
+            progress: None,
             window,
         });
     }
@@ -142,15 +154,11 @@ impl<A: App> Runner<A> {
         }
     }
 
+    /// Runs the app for one frame and draws it. While minimized the app
+    /// still runs, so a batch keeps reporting progress on the taskbar, but
+    /// nothing is drawn.
     fn redraw(&mut self) {
         let Some(running) = &mut self.running else {
-            return;
-        };
-        let size = running.window.inner_size();
-        let (Some(width), Some(height)) =
-            (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
-        else {
-            // Minimized: nothing to draw.
             return;
         };
 
@@ -180,41 +188,69 @@ impl<A: App> Runner<A> {
                     );
                     viewport.repaint_delay
                 });
-
         running
             .textures
             .append(std::mem::take(&mut output.textures_delta));
-        let primitives = self.ctx.tessellate(output.shapes, output.pixels_per_point);
-        if let Err(e) = running.surface.resize(width, height) {
-            eprintln!("Couldn't resize the window buffer: {e}");
-            return;
+
+        let progress = self
+            .app
+            .taskbar_progress()
+            .map(|p| (p.clamp(0.0, 1.0) * 1000.0) as u32);
+        if progress != running.progress {
+            running.progress = progress;
+            running
+                .taskbar
+                .set_progress(&running.window, progress.map(|p| p as f32 / 1000.0));
         }
-        let mut buffer = match running.surface.buffer_mut() {
-            Ok(buffer) => buffer,
-            Err(e) => {
-                eprintln!("Couldn't get the window buffer: {e}");
-                return;
-            }
-        };
-        running.renderer.render(
-            &mut BufferMutRef::new(
-                bytemuck::cast_slice_mut(&mut buffer),
-                width.get() as usize,
-                height.get() as usize,
-            ),
-            &primitives,
-            &running.textures,
-            output.pixels_per_point,
-        );
-        running.textures.clear();
-        if let Err(e) = buffer.present() {
-            eprintln!("Couldn't show the frame: {e}");
+
+        let size = running.window.inner_size();
+        if let (Some(width), Some(height)) =
+            (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+        {
+            let primitives = self.ctx.tessellate(output.shapes, output.pixels_per_point);
+            running.draw(width, height, &primitives, output.pixels_per_point);
         }
 
         if let Some(delay) = repaint_delay
             && let Some(when) = Instant::now().checked_add(delay)
         {
             self.schedule(when);
+        }
+    }
+}
+
+impl Running {
+    fn draw(
+        &mut self,
+        width: NonZeroU32,
+        height: NonZeroU32,
+        primitives: &[egui::ClippedPrimitive],
+        pixels_per_point: f32,
+    ) {
+        if let Err(e) = self.surface.resize(width, height) {
+            eprintln!("Couldn't resize the window buffer: {e}");
+            return;
+        }
+        let mut buffer = match self.surface.buffer_mut() {
+            Ok(buffer) => buffer,
+            Err(e) => {
+                eprintln!("Couldn't get the window buffer: {e}");
+                return;
+            }
+        };
+        self.renderer.render(
+            &mut BufferMutRef::new(
+                bytemuck::cast_slice_mut(&mut buffer),
+                width.get() as usize,
+                height.get() as usize,
+            ),
+            primitives,
+            &self.textures,
+            pixels_per_point,
+        );
+        self.textures.clear();
+        if let Err(e) = buffer.present() {
+            eprintln!("Couldn't show the frame: {e}");
         }
     }
 }
@@ -236,6 +272,15 @@ impl<A: App> ApplicationHandler<Repaint> for Runner<A> {
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, Repaint(when): Repaint) {
+        // A minimized window may get no redraw events, but a running batch
+        // still has to be followed for the taskbar progress.
+        if when <= Instant::now()
+            && let Some(running) = &self.running
+            && running.window.is_minimized() == Some(true)
+        {
+            self.redraw();
+            return;
+        }
         self.schedule(when);
     }
 

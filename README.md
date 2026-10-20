@@ -113,6 +113,9 @@ with a paid certificate, so the first launch needs one extra step:
   capture order. It also holds the tuning options from the command line.
   They are off by default and reset every time the app starts, so results
   always match the original screenshot unless you change them.
+- While converting, the Windows taskbar button shows the progress, and the
+  button flashes (the Dock icon bounces on macOS) when a batch finishes
+  while you're in another window.
 - The window is drawn on the CPU and only redraws when something changes,
   so it uses almost no CPU or GPU while idle and doesn't flicker on variable
   refresh rate monitors (G-Sync, FreeSync).

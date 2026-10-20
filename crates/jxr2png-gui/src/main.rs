@@ -6,6 +6,7 @@ mod convert;
 mod macos;
 mod single;
 mod storage;
+mod taskbar;
 mod window;
 
 use std::path::{Path, PathBuf};
@@ -452,6 +453,13 @@ impl App {
             }
         }
         if done {
+            // Flash the taskbar button (bounce the Dock icon on macOS) if
+            // the user switched to something else meanwhile.
+            if !ctx.input(|i| i.focused) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                    egui::UserAttentionType::Informational,
+                ));
+            }
             let failed = self
                 .files
                 .iter()
@@ -1104,6 +1112,11 @@ impl window::App for App {
 
     fn on_exit(&mut self) {
         storage::save(SETTINGS_KEY, &self.settings);
+    }
+
+    fn taskbar_progress(&self) -> Option<f32> {
+        let (done, total) = self.progress;
+        self.running().then(|| done as f32 / total.max(1) as f32)
     }
 
     fn paste_files(&mut self, files: Vec<PathBuf>) {

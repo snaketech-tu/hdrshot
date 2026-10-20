@@ -19,6 +19,9 @@
 - On macOS, jxr2png appears in Finder's "Open With" menu for `.jxr` and
   `.wdp` files, can be made their default app in "Get Info", and accepts
   screenshots dropped onto its Dock icon.
+- The desktop app shows conversion progress on its Windows taskbar button
+  and, when a batch finishes in the background, flashes the taskbar button
+  (bounces the Dock icon on macOS).
 - A "Made with ♥ by snake.tech" line at the bottom of the desktop app,
   linking to Ko-fi.
 
