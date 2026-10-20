@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Releases offer the desktop app and the command-line tool as separate
+  downloads for each platform: bare `.exe` files on Windows, a disk image
+  for the macOS app, and `.tar.gz` archives for the macOS command line and
+  for Linux. File names no longer contain the version, and a
+  `SHA256SUMS.txt` lists the checksums.
+
 ## [1.1.0] - 2026-10-20
 
 ### Added

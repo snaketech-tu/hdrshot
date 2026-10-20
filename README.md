@@ -48,17 +48,21 @@ the screenshot looks.
 
 ## Download
 
-Download the archive for your system from the
+The desktop app and the `jxr2png` command-line tool are separate downloads.
+These links always point to the
 [latest release](https://github.com/snaketech-tu/jxr2png/releases/latest).
-Each one contains the desktop app and the `jxr2png` command-line tool.
 
-| Platform | File | Desktop app |
+| Platform | Desktop app | Command line |
 | --- | --- | --- |
-| Windows 10/11 (x64) | `jxr2png-vX.Y.Z-windows-x64.zip` | `jxr2png-gui.exe` |
-| macOS 11+ (Apple silicon and Intel) | `jxr2png-vX.Y.Z-macos-universal.zip` | `jxr2png.app` |
-| Linux (x64) | `jxr2png-vX.Y.Z-linux-x64.tar.gz` | `jxr2png-gui` |
+| Windows 10/11 (x64) | [`jxr2png-gui.exe`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png-gui.exe) | [`jxr2png.exe`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png.exe) |
+| macOS 11+ (Apple silicon and Intel) | [`jxr2png-gui-macos.dmg`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png-gui-macos.dmg) | [`jxr2png-cli-macos.tar.gz`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png-cli-macos.tar.gz) |
+| Linux (x64) | [`jxr2png-gui-linux-x64.tar.gz`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png-gui-linux-x64.tar.gz) | [`jxr2png-cli-linux-x64.tar.gz`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png-cli-linux-x64.tar.gz) |
 
-No installer is needed: unpack it and run the app. The builds aren't signed
+`SHA256SUMS.txt` in each release lists the checksums of all downloads.
+
+No installer is needed. On Windows, run the `.exe` directly. On macOS, open
+the disk image and drag jxr2png to Applications. On Linux and for the macOS
+command line, unpack the archive. The builds aren't signed
 with a paid certificate, so the first launch needs one extra step:
 
 - **Windows**: if SmartScreen says "Windows protected your PC", choose
@@ -66,13 +70,16 @@ with a paid certificate, so the first launch needs one extra step:
 - **macOS**: if the app "can't be opened", open **System Settings → Privacy
   & Security** and choose **Open Anyway** next to jxr2png (on older macOS,
   right-click the app and choose **Open**). Or remove the download
-  quarantine in Terminal: `xattr -dr com.apple.quarantine jxr2png.app jxr2png`.
+  quarantine in Terminal:
+  `xattr -dr com.apple.quarantine /Applications/jxr2png.app`,
+  or `xattr -d com.apple.quarantine jxr2png` for the command-line tool.
 
 On Linux, to list the app in your application menu and open `.jxr` files
-with it, install the files from the unpacked folder:
+with it, install the files from the unpacked folder (and copy `jxr2png`
+from the command-line archive to `~/.local/bin` as well, if you want it):
 
 ```sh
-install -Dm755 jxr2png jxr2png-gui -t ~/.local/bin
+install -Dm755 jxr2png-gui -t ~/.local/bin
 install -Dm644 jxr2png.desktop -t ~/.local/share/applications
 install -Dm644 jxr2png.png -t ~/.local/share/icons/hicolor/256x256/apps
 ```
@@ -181,9 +188,10 @@ Everything is automatic; these options are only for tuning:
 
 Run `jxr2png --help` for the full list.
 
-The macOS and Linux archives include shell completions for bash, zsh and
-fish in `completions/`, and a man page in `man/jxr2png.1`. The Windows
-archive has a PowerShell completion script, `completions/_jxr2png.ps1`; add
+The macOS and Linux command-line archives include shell completions for
+bash, zsh and fish in `completions/`, and a man page in `man/jxr2png.1`. On
+Windows, create the PowerShell completion script with
+`jxr2png --generate powershell > _jxr2png.ps1`, then add
 `. path\to\_jxr2png.ps1` to your PowerShell profile to load it.
 
 ## How it works
