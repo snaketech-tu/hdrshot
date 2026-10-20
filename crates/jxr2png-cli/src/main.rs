@@ -13,7 +13,7 @@ use rayon::prelude::*;
 struct Args {
     /// Input .jxr files or folders. Wildcards such as *.jxr also work in
     /// cmd and PowerShell.
-    #[arg(required = true)]
+    #[arg(required_unless_present = "hold_clipboard")]
     inputs: Vec<PathBuf>,
 
     /// Also convert .jxr files in subfolders of the given folders.
@@ -76,6 +76,22 @@ struct Args {
     /// Print one JSON object per input file instead of text.
     #[arg(long)]
     json: bool,
+
+    /// Copy the last file's PNG (the HDR one if made) to the clipboard, to
+    /// paste into Discord or a folder. The copy leaves out the cICP chunk,
+    /// which Discord turns yellow.
+    #[arg(long)]
+    copy: bool,
+
+    /// Like --copy, but if the PNG is over Discord's 10 MB limit, copy it
+    /// at 1440p or lower so it fits. The saved PNGs stay as they are.
+    #[arg(long)]
+    copy_small: bool,
+
+    /// Internal: keeps a copied file on the Linux clipboard, which only
+    /// holds it while a program offers it.
+    #[arg(long, hide = true, value_name = "PNG")]
+    hold_clipboard: Option<PathBuf>,
 }
 
 /// How many files to convert at once. Decoding and PNG compression are
@@ -86,6 +102,9 @@ const MAX_PARALLEL_FILES: usize = 8;
 fn main() -> ExitCode {
     // Windows shells pass wildcards through unexpanded; `wild` expands them.
     let args = Args::parse_from(wild::args_os());
+    if let Some(png) = &args.hold_clipboard {
+        return clipboard::hold(png);
+    }
     let mode = match (args.hdr, args.sdr) {
         (true, false) => OutputMode::Hdr,
         (false, true) => OutputMode::Sdr,
@@ -143,14 +162,44 @@ fn main() -> ExitCode {
         .num_threads(threads)
         .build()
         .expect("thread pool");
-    pool.install(|| {
-        files.par_iter().with_max_len(1).for_each(|input| {
-            let result = jxr2png_core::convert_file(input, &options);
-            report.file(input, result);
-        });
+    let results: Vec<Option<Outputs>> = pool.install(|| {
+        files
+            .par_iter()
+            .with_max_len(1)
+            .map(|input| {
+                let result = jxr2png_core::convert_file(input, &options);
+                let outputs = result.as_ref().ok().cloned();
+                report.file(input, result);
+                outputs
+            })
+            .collect()
     });
     let failed = report.finish();
-    if failed > 0 || missing {
+    let mut copy_failed = false;
+    if args.copy || args.copy_small {
+        let last = files
+            .iter()
+            .zip(&results)
+            .rev()
+            .find_map(|(input, outputs)| {
+                Some((input, clipboard::pick(input, outputs.as_ref()?, &options)?))
+            });
+        let message = match last {
+            Some((input, (png, hdr))) => {
+                clipboard::copy(input, &png, hdr, &options, args.copy_small)
+            }
+            None => Err("nothing to copy".into()),
+        };
+        match message {
+            Ok(message) if !args.quiet && !args.json => eprintln!("{message}"),
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("--copy: {e}");
+                copy_failed = true;
+            }
+        }
+    }
+    if failed > 0 || missing || copy_failed {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
@@ -255,6 +304,122 @@ impl<'a> Report<'a> {
             eprintln!("Converted {} files", self.total);
         }
         failed
+    }
+}
+
+mod clipboard {
+    use std::path::{Path, PathBuf};
+    use std::process::ExitCode;
+
+    use jxr2png_core::share::{self, DISCORD_LIMIT, megabytes};
+    use jxr2png_core::{ConvertOptions, Outputs};
+
+    /// The PNG of `input` to copy, preferring the HDR one, and whether it
+    /// is HDR. A PNG skipped because it already existed counts too.
+    pub fn pick(
+        input: &Path,
+        outputs: &Outputs,
+        options: &ConvertOptions,
+    ) -> Option<(PathBuf, bool)> {
+        let planned = jxr2png_core::output_paths(input, options);
+        let made = |written: &Option<PathBuf>, planned: Option<PathBuf>| {
+            written
+                .clone()
+                .or(planned.filter(|p| outputs.skipped.contains(p)))
+        };
+        let hdr = (!outputs.sdr_input)
+            .then(|| made(&outputs.hdr, planned.hdr))
+            .flatten();
+        match hdr {
+            Some(hdr) => Some((hdr, true)),
+            None => made(&outputs.sdr, planned.sdr).map(|sdr| (sdr, false)),
+        }
+    }
+
+    /// Copies `png`, made from `input`, to the clipboard; with `small`, a
+    /// version that fits Discord's limit. Returns the message to print.
+    pub fn copy(
+        input: &Path,
+        png: &Path,
+        hdr: bool,
+        options: &ConvertOptions,
+        small: bool,
+    ) -> Result<String, String> {
+        let name = png.file_name().unwrap_or_default().to_string_lossy();
+        let bytes = std::fs::read(png).map_err(|e| format!("{}: {e}", png.display()))?;
+        let size = if hdr {
+            jxr2png_core::for_discord(&bytes).len()
+        } else {
+            bytes.len()
+        } as u64;
+        let (bytes, message) = if size <= DISCORD_LIMIT {
+            (bytes, format!("Copied {name} to the clipboard"))
+        } else if small {
+            let smaller = share::smaller_png(input, options, hdr, DISCORD_LIMIT)
+                .map_err(|e| e.to_string())?
+                .ok_or("even a 720p copy is larger than 10 MB")?;
+            let message = format!(
+                "Copied {name} at {}×{} ({}) to the clipboard",
+                smaller.width,
+                smaller.height,
+                megabytes(smaller.png.len() as u64)
+            );
+            (smaller.png, message)
+        } else {
+            let message = format!(
+                "Copied {name} to the clipboard; at {} it is over Discord's 10 MB limit \
+                 (--copy-small copies a smaller version)",
+                megabytes(size)
+            );
+            (bytes, message)
+        };
+        let file = share::clipboard_file(&name, &bytes, hdr).map_err(|e| e.to_string())?;
+        set(&file)?;
+        Ok(message)
+    }
+
+    /// Windows and macOS keep the file on the clipboard after jxr2png exits.
+    #[cfg(not(target_os = "linux"))]
+    fn set(file: &Path) -> Result<(), String> {
+        arboard::Clipboard::new()
+            .and_then(|mut c| c.set().file_list(&[file]))
+            .map_err(|e| e.to_string())
+    }
+
+    /// On Linux the clipboard only holds what a running program offers, so
+    /// a background copy of jxr2png offers the file until something else
+    /// is copied.
+    #[cfg(target_os = "linux")]
+    fn set(file: &Path) -> Result<(), String> {
+        use std::process::{Command, Stdio};
+        // Fails fast when there is no display to copy to.
+        arboard::Clipboard::new().map_err(|e| e.to_string())?;
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        Command::new(exe)
+            .arg("--hold-clipboard")
+            .arg(file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Offers `file` on the clipboard until something else is copied.
+    pub fn hold(file: &Path) -> ExitCode {
+        #[cfg(target_os = "linux")]
+        {
+            use arboard::SetExtLinux;
+            let held =
+                arboard::Clipboard::new().and_then(|mut c| c.set().wait().file_list(&[file]));
+            if held.is_err() {
+                return ExitCode::FAILURE;
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = file;
+        ExitCode::SUCCESS
     }
 }
 

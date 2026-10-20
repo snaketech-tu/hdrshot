@@ -88,7 +88,10 @@ with a paid certificate, so the first launch needs one extra step:
   browser upload or a folder gives the full file. Each converted image also
   has its own **Copy for Discord** button. The copy leaves out the `cICP`
   chunk, which makes Discord turn HDR images yellow; the saved file keeps it
-  for Windows Photos and HDR viewers.
+  for Windows Photos and HDR viewers. When the copy is larger than
+  Discord's 10 MB upload limit, the app offers **Copy a smaller version**,
+  which copies it at 1440p, or 1080p or 720p if needed, so it fits. The
+  saved PNGs stay at full size.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
   preview. When the Advanced settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.
@@ -162,6 +165,8 @@ Everything is automatic; these options are only for tuning:
 | `--max-height <PIXELS>` | Scale taller images down to this height, averaging in linear light |
 | `--overwrite` | Replace PNGs that already exist; by default they are skipped |
 | `--no-keep-date` | Give the PNGs the current time instead of the screenshot's date |
+| `--copy` | Copy the last file's PNG (the HDR one if made) to the clipboard, ready for Discord |
+| `--copy-small` | Like `--copy`, but scale the copy down if it is over Discord's 10 MB limit |
 | `-q, --quiet` | Print only errors |
 | `--json` | Print one JSON object per input file, for scripts |
 
@@ -199,7 +204,7 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   instead of a washed-out one.
 - **Discord**: its image service converts PNGs with a `cICP` chunk to SDR
   with wrong colors (warm scenes turn yellow) but shows them correctly
-  without it, so the app's clipboard copy leaves the chunk out (and `mDCV`,
+  without it, so the clipboard copy leaves the chunk out (and `mDCV`,
   which the PNG spec only allows together with `cICP`).
 - **SDR**: scRGB 1.0 (80 nits) becomes SDR white by default, matching how
   Windows shows these screenshots in SDR viewers. Highlights above that roll

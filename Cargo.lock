@@ -1339,6 +1339,7 @@ dependencies = [
 name = "jxr2png"
 version = "1.0.0"
 dependencies = [
+ "arboard",
  "clap",
  "jxr2png-core",
  "rayon",

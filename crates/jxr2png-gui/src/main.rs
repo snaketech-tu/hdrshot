@@ -18,7 +18,7 @@ use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
 use jxr2png_core::{ConvertOptions, Existing, HdrOptions, Naming, OutputMode, Outputs, SdrOptions};
 use serde::{Deserialize, Serialize};
 
-use convert::{Event, Job, SharedClipboard};
+use convert::{Copied, Event, Job, SharedClipboard, TooBig};
 use previews::{Previews, THUMB_SIZE, Thumb};
 
 /// The app icon, 256 px. Windows also gets `assets/icon.ico` embedded in
@@ -203,7 +203,10 @@ struct App {
     clipboard: SharedClipboard,
     toast: Option<Toast>,
     /// Messages from clipboard copies running in the background.
-    copied: (Sender<String>, Receiver<String>),
+    copied: (Sender<Copied>, Receiver<Copied>),
+    /// A copy over Discord's size limit, and whether a smaller one is
+    /// being made.
+    too_big: Option<(TooBig, bool)>,
     /// Whether jxr2png opens `.jxr` files; rechecked when the window
     /// regains focus, since the choice is made in the system's settings.
     is_default_app: bool,
@@ -231,7 +234,8 @@ enum RowAction {
     Select(usize),
     Open(PathBuf),
     ShowInFolder(PathBuf),
-    Copy(Outputs),
+    /// Copy the PNGs made from a file.
+    Copy(PathBuf, Outputs),
     Retry(usize),
     Remove(usize),
 }
@@ -272,6 +276,7 @@ impl App {
             clipboard: SharedClipboard::default(),
             toast: None,
             copied: channel(),
+            too_big: None,
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
             selected: None,
@@ -490,8 +495,8 @@ impl App {
                 }
                 Event::Done(copied) => {
                     done = true;
-                    if let Some(text) = copied {
-                        self.show_toast(text, ctx);
+                    if let Some(copied) = copied {
+                        self.copied_ui(copied, ctx);
                     }
                 }
             }
@@ -598,9 +603,82 @@ impl App {
         });
     }
 
+    /// Shows the outcome of a clipboard copy. One too large for Discord
+    /// stays up with an offer to copy a smaller version.
+    fn copied_ui(&mut self, copied: Copied, ctx: &egui::Context) {
+        self.too_big = copied.too_big.map(|too_big| (too_big, false));
+        self.show_toast(copied.message, ctx);
+    }
+
+    fn too_big_ui(&mut self, ctx: &egui::Context) {
+        let Some((too_big, working)) = &self.too_big else {
+            return;
+        };
+        let mut make_smaller = false;
+        let mut close = false;
+        egui::Area::new(egui::Id::unique("too big"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 56.0))
+            .show(ctx, |ui| {
+                let visuals = ui.visuals();
+                egui::Frame::new()
+                    .fill(visuals.extreme_bg_color)
+                    .stroke(visuals.window_stroke)
+                    .corner_radius(8.0)
+                    .shadow(visuals.popup_shadow)
+                    .inner_margin(egui::Margin::symmetric(14, 10))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Copied {}, but at {} it is over Discord's 10 MB limit.",
+                                    too_big.name,
+                                    jxr2png_core::share::megabytes(too_big.size)
+                                ))
+                                .size(14.0),
+                            );
+                            close = ui
+                                .small_button("×")
+                                .on_hover_text("Keep this copy")
+                                .clicked();
+                        });
+                        ui.horizontal(|ui| {
+                            if *working {
+                                ui.spinner();
+                                ui.label("Making a smaller copy…");
+                            } else {
+                                make_smaller = ui
+                                    .button("Copy a smaller version")
+                                    .on_hover_text(
+                                        "Copy it at 1440p, or lower if needed, so it fits \
+                                         in 10 MB. The saved PNGs stay as they are.",
+                                    )
+                                    .clicked();
+                            }
+                        });
+                    });
+            });
+        if close {
+            self.too_big = None;
+            self.toast = None;
+        } else if make_smaller {
+            let clipboard = self.clipboard.clone();
+            let options = self.convert_options(Existing::Replace);
+            let too_big = too_big.clone();
+            self.too_big = Some((too_big.clone(), true));
+            convert::in_background(self.copied.0.clone(), ctx.clone(), move || {
+                Copied::from(convert::copy_smaller(&clipboard, &too_big, &options))
+            });
+        }
+    }
+
     fn toast_ui(&mut self, ctx: &egui::Context) {
-        while let Ok(text) = self.copied.1.try_recv() {
-            self.show_toast(text, ctx);
+        while let Ok(copied) = self.copied.1.try_recv() {
+            self.copied_ui(copied, ctx);
+        }
+        if self.too_big.is_some() {
+            self.too_big_ui(ctx);
+            return;
         }
         let Some(toast) = &self.toast else { return };
         let left = toast.until - ctx.input(|i| i.time);
@@ -828,7 +906,7 @@ impl App {
                                 )
                                 .clicked()
                         {
-                            action = Some(RowAction::Copy(outputs.clone()));
+                            action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
                         }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                             if thumb_ui(ui, &entry.thumb, self.shown.as_ref().filter(|s| s.path == entry.path)) {
@@ -848,12 +926,12 @@ impl App {
             Some(RowAction::Select(i)) => self.selected = Some(i),
             Some(RowAction::Open(path)) => open(&path),
             Some(RowAction::ShowInFolder(path)) => show_in_folder(&path),
-            Some(RowAction::Copy(outputs)) => convert::copy_in_background(
-                self.clipboard.clone(),
-                outputs,
-                self.copied.0.clone(),
-                ctx,
-            ),
+            Some(RowAction::Copy(input, outputs)) => {
+                let clipboard = self.clipboard.clone();
+                convert::in_background(self.copied.0.clone(), ctx, move || {
+                    convert::copy(&clipboard, &input, &outputs)
+                });
+            }
             Some(RowAction::Retry(i)) => self.start_some(vec![i], &ctx),
             Some(RowAction::Remove(i)) => self.remove(i),
         }
@@ -1365,7 +1443,7 @@ fn row_menu(ui: &mut egui::Ui, i: usize, entry: &Entry, running: bool) -> Option
     if let Some(outputs) = outputs
         && ui.button("Copy for Discord").clicked()
     {
-        action = Some(RowAction::Copy(outputs.clone()));
+        action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
     }
     ui.separator();
     if ui.button("Show in folder").clicked() {

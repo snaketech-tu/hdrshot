@@ -16,6 +16,7 @@ pub mod decode;
 pub mod encode;
 pub mod icc;
 pub mod resize;
+pub mod share;
 
 use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode, dimensions};
