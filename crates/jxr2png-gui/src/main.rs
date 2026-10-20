@@ -155,6 +155,18 @@ struct App {
     /// regains focus, since the choice is made in the system's settings.
     is_default_app: bool,
     was_focused: bool,
+    /// Row picked by clicking it, for the keyboard shortcuts.
+    selected: Option<usize>,
+}
+
+/// Something done to one row of the file list.
+enum RowAction {
+    Select(usize),
+    Open(PathBuf),
+    ShowInFolder(PathBuf),
+    Copy(Outputs),
+    Retry(usize),
+    Remove(usize),
 }
 
 struct Toast {
@@ -187,6 +199,7 @@ impl App {
             copied: channel(),
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
+            selected: None,
         };
         if assoc::SUPPORTED {
             assoc::refresh();
@@ -263,14 +276,22 @@ impl App {
             && (!self.settings.save_to_folder || self.settings.output_dir.is_some())
     }
 
+    /// Converts every listed file.
     fn start(&mut self, ctx: &egui::Context) {
-        let files: Vec<_> = self
-            .files
-            .iter_mut()
-            .enumerate()
-            .map(|(i, e)| {
-                e.status = Status::Waiting;
-                (i, e.path.clone())
+        self.start_some((0..self.files.len()).collect(), ctx);
+    }
+
+    /// Converts the files at `indices`, leaving the other rows as they are.
+    fn start_some(&mut self, indices: Vec<usize>, ctx: &egui::Context) {
+        if indices.is_empty() {
+            return;
+        }
+        let files: Vec<_> = indices
+            .into_iter()
+            .map(|i| {
+                let entry = &mut self.files[i];
+                entry.status = Status::Waiting;
+                (i, entry.path.clone())
             })
             .collect();
         self.progress = (0, files.len());
@@ -285,6 +306,60 @@ impl App {
             clipboard,
             ctx.clone(),
         ));
+    }
+
+    fn failed(&self) -> Vec<usize> {
+        (0..self.files.len())
+            .filter(|&i| matches!(self.files[i].status, Status::Failed(_)))
+            .collect()
+    }
+
+    fn remove(&mut self, i: usize) {
+        self.files.remove(i);
+        self.selected = after_removal(self.selected, i);
+        self.notice = None;
+    }
+
+    /// Removes the files that converted, keeping the rest to retry or add to.
+    fn clear_finished(&mut self) {
+        let selected = self.selected.map(|i| self.files[i].path.clone());
+        self.files.retain(|e| !matches!(e.status, Status::Done(_)));
+        self.selected = selected.and_then(|p| self.files.iter().position(|e| e.path == p));
+        self.progress = (0, 0);
+        self.notice = None;
+    }
+
+    /// Delete removes the selected row, Enter converts, and the arrow keys
+    /// move the selection; not while a text field has focus or a batch runs.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        if self.running() || ctx.memory(|m| m.focused().is_some()) {
+            return;
+        }
+        let pressed = |key| ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
+        if let Some(i) = self.selected
+            && (pressed(egui::Key::Delete) || pressed(egui::Key::Backspace))
+        {
+            self.remove(i);
+        }
+        if pressed(egui::Key::Enter) && self.can_convert() {
+            self.start(ctx);
+        }
+        let last = self.files.len().checked_sub(1);
+        if pressed(egui::Key::ArrowDown) {
+            self.selected = match self.selected {
+                Some(i) => last.map(|l| (i + 1).min(l)),
+                None => last.map(|_| 0),
+            };
+        }
+        if pressed(egui::Key::ArrowUp) {
+            self.selected = match self.selected {
+                Some(i) => Some(i.saturating_sub(1)),
+                None => last,
+            };
+        }
+        if pressed(egui::Key::Escape) {
+            self.selected = None;
+        }
     }
 
     fn poll_job(&mut self, ctx: &egui::Context) {
@@ -488,19 +563,43 @@ impl App {
 
     fn file_list(&mut self, ui: &mut egui::Ui) {
         let running = self.running();
-        let mut remove = None;
-        let mut copy = None;
+        let mut action = None;
         let stripe = ui.visuals().faint_bg_color;
+        let selection = ui.visuals().selection.bg_fill.gamma_multiply(0.35);
+        let hover = ui.visuals().widgets.hovered.weak_bg_fill;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for (i, entry) in self.files.iter().enumerate() {
-                    let (rect, _) = ui
-                        .allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::hover());
-                    if i % 2 == 0 {
+                    let (rect, row) = ui
+                        .allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::click());
+                    if self.selected == Some(i) {
+                        ui.painter().rect_filled(rect, 4.0, selection);
+                    } else if row.hovered() {
+                        ui.painter().rect_filled(rect, 4.0, hover);
+                    } else if i % 2 == 0 {
                         ui.painter().rect_filled(rect, 4.0, stripe);
                     }
+                    let outputs = match &entry.status {
+                        Status::Done(outputs) => Some(outputs),
+                        _ => None,
+                    };
+                    let primary = outputs.and_then(|o| o.hdr.as_ref().or(o.sdr.as_ref()));
+                    if row.clicked() || row.secondary_clicked() {
+                        action = Some(RowAction::Select(i));
+                    }
+                    if row.double_clicked()
+                        && let Some(path) = primary
+                    {
+                        action = Some(RowAction::Open(path.clone()));
+                    }
+                    row.context_menu(|ui| {
+                        if let Some(menu) = row_menu(ui, i, entry, running) {
+                            action = Some(menu);
+                        }
+                    });
+
                     let inner = egui::UiBuilder::new()
                         .max_rect(rect.shrink2(Vec2::new(8.0, 0.0)))
                         .layout(egui::Layout::right_to_left(egui::Align::Center));
@@ -512,10 +611,10 @@ impl App {
                                 .on_hover_text("Remove from the list")
                                 .clicked()
                         {
-                            remove = Some(i);
+                            action = Some(RowAction::Remove(i));
                         }
                         status_ui(ui, &entry.status);
-                        if let Status::Done(outputs) = &entry.status
+                        if let Some(outputs) = outputs
                             && ui
                                 .small_button("Copy for Discord")
                                 .on_hover_text(
@@ -524,26 +623,30 @@ impl App {
                                 )
                                 .clicked()
                         {
-                            copy = Some(outputs.clone());
+                            action = Some(RowAction::Copy(outputs.clone()));
                         }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                             let name = entry.path.file_name().unwrap_or_default().to_string_lossy();
-                            ui.add(egui::Label::new(name.as_ref()).truncate())
+                            ui.add(egui::Label::new(name.as_ref()).truncate().selectable(false))
                                 .on_hover_text(entry.path.display().to_string());
                         });
                     });
                 }
             });
-        if let Some(i) = remove {
-            self.files.remove(i);
-        }
-        if let Some(outputs) = copy {
-            convert::copy_in_background(
+        let ctx = ui.ctx().clone();
+        match action {
+            None => {}
+            Some(RowAction::Select(i)) => self.selected = Some(i),
+            Some(RowAction::Open(path)) => open(&path),
+            Some(RowAction::ShowInFolder(path)) => show_in_folder(&path),
+            Some(RowAction::Copy(outputs)) => convert::copy_in_background(
                 self.clipboard.clone(),
                 outputs,
                 self.copied.0.clone(),
-                ui.ctx().clone(),
-            );
+                ctx,
+            ),
+            Some(RowAction::Retry(i)) => self.start_some(vec![i], &ctx),
+            Some(RowAction::Remove(i)) => self.remove(i),
         }
     }
 
@@ -719,13 +822,37 @@ impl App {
 
         ui.horizontal(|ui| {
             if !self.running() {
-                if ui
-                    .add_enabled(!self.files.is_empty(), egui::Button::new("Clear list"))
-                    .clicked()
+                let finished = self
+                    .files
+                    .iter()
+                    .any(|e| matches!(e.status, Status::Done(_)));
+                ui.add_enabled_ui(!self.files.is_empty(), |ui| {
+                    ui.menu_button("Clear", |ui| {
+                        if ui.button("All files").clicked() {
+                            self.files.clear();
+                            self.selected = None;
+                            self.progress = (0, 0);
+                            self.notice = None;
+                        }
+                        if ui
+                            .add_enabled(finished, egui::Button::new("Converted files"))
+                            .on_hover_text("Keep the files still waiting or failed")
+                            .clicked()
+                        {
+                            self.clear_finished();
+                        }
+                    })
+                    .response
+                    .on_hover_text("Remove files from the list");
+                });
+                let failed = self.failed();
+                if !failed.is_empty()
+                    && ui
+                        .add_enabled(self.can_convert(), egui::Button::new("Retry failed"))
+                        .on_hover_text("Convert the files that failed again")
+                        .clicked()
                 {
-                    self.files.clear();
-                    self.progress = (0, 0);
-                    self.notice = None;
+                    self.start_some(failed, &ctx);
                 }
                 if let Some(dir) = self.output_folder()
                     && ui
@@ -739,7 +866,7 @@ impl App {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let big = |text: &str| {
                     egui::Button::new(RichText::new(text).strong().size(15.0))
-                        .min_size(Vec2::new(150.0, 32.0))
+                        .min_size(Vec2::new(130.0, 32.0))
                 };
                 if let Some(job) = &self.job {
                     let stopping = job.is_cancelled();
@@ -792,6 +919,7 @@ impl window::App for App {
         if !dropped.is_empty() && !self.running() {
             self.add_paths(dropped);
         }
+        self.shortcuts(&ctx);
 
         let margin = egui::Margin::same(16);
         let panel_fill = ui.visuals().panel_fill;
@@ -829,6 +957,12 @@ impl window::App for App {
     fn on_exit(&mut self) {
         storage::save(SETTINGS_KEY, &self.settings);
     }
+
+    fn paste_files(&mut self, files: Vec<PathBuf>) {
+        if !self.running() {
+            self.add_paths(files);
+        }
+    }
 }
 
 /// What size the listed files come out at with a given height limit.
@@ -853,6 +987,66 @@ fn output_size(files: &[Entry], max_height: Option<u32>) -> OutputSize {
     } else {
         OutputSize::Varies
     }
+}
+
+/// The selected row once row `removed` is gone.
+fn after_removal(selected: Option<usize>, removed: usize) -> Option<usize> {
+    match selected {
+        Some(s) if s == removed => None,
+        Some(s) if s > removed => Some(s - 1),
+        s => s,
+    }
+}
+
+/// The right-click menu of a row.
+fn row_menu(ui: &mut egui::Ui, i: usize, entry: &Entry, running: bool) -> Option<RowAction> {
+    let mut action = None;
+    let outputs = match &entry.status {
+        Status::Done(outputs) => Some(outputs),
+        _ => None,
+    };
+    let hdr = outputs.and_then(|o| o.hdr.clone());
+    let sdr = outputs.and_then(|o| o.sdr.clone());
+    if ui
+        .add_enabled(hdr.is_some(), egui::Button::new("Open HDR PNG"))
+        .clicked()
+    {
+        action = hdr.clone().map(RowAction::Open);
+    }
+    if ui
+        .add_enabled(sdr.is_some(), egui::Button::new("Open SDR PNG"))
+        .clicked()
+    {
+        action = sdr.clone().map(RowAction::Open);
+    }
+    if let Some(outputs) = outputs
+        && ui.button("Copy for Discord").clicked()
+    {
+        action = Some(RowAction::Copy(outputs.clone()));
+    }
+    ui.separator();
+    if ui.button("Show in folder").clicked() {
+        // The PNG once there is one, else the JXR itself.
+        let path = hdr.or(sdr).unwrap_or_else(|| entry.path.clone());
+        action = Some(RowAction::ShowInFolder(path));
+    }
+    if !running {
+        let again = if outputs.is_some() {
+            "Convert again"
+        } else {
+            "Convert"
+        };
+        if ui.button(again).clicked() {
+            action = Some(RowAction::Retry(i));
+        }
+        if ui.button("Remove from list").clicked() {
+            action = Some(RowAction::Remove(i));
+        }
+    }
+    if action.is_some() {
+        ui.close();
+    }
+    action
 }
 
 fn status_ui(ui: &mut egui::Ui, status: &Status) {
@@ -961,6 +1155,60 @@ fn reveal(dir: &Path) {
     let _ = Command::new(program).arg(dir).spawn();
 }
 
+/// Open `file` in the app the system uses for it.
+fn open(file: &Path) {
+    #[cfg(windows)]
+    let mut command = {
+        // `start` needs an empty window title before a quoted path.
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", ""]).arg(file);
+        hide_console(&mut command);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg(file);
+        command
+    };
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(file);
+        command
+    };
+    let _ = command.spawn();
+}
+
+/// Show `file` selected in the system's file manager, or its folder where
+/// selecting isn't supported.
+fn show_in_folder(file: &Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Explorer reads its own command line, so the path is quoted by hand.
+        let _ = Command::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", file.display()))
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg("-R").arg(file).spawn();
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    if let Some(dir) = file.parent() {
+        reveal(dir);
+    }
+}
+
+/// Keeps `cmd` from flashing a console window.
+#[cfg(windows)]
+fn hide_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -971,6 +1219,14 @@ mod tests {
             status: Status::Waiting,
             size,
         }
+    }
+
+    #[test]
+    fn selection_follows_removal() {
+        assert_eq!(after_removal(Some(2), 2), None);
+        assert_eq!(after_removal(Some(3), 1), Some(2));
+        assert_eq!(after_removal(Some(1), 3), Some(1));
+        assert_eq!(after_removal(None, 0), None);
     }
 
     #[test]

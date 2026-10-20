@@ -8,6 +8,11 @@
   wildcards such as `*.jxr` itself, so they work in cmd and PowerShell.
 - `--quiet`, `--json`, a progress line on terminals, and a closing summary
   such as "3 of 20 files failed".
+- The desktop app's file list: double-click a converted image to open it,
+  right-click a row to open either PNG, show it in its folder, convert it
+  again or remove it, plus Clear converted files, Retry failed, keyboard
+  shortcuts (Delete, Enter, arrow keys) and pasting copied files with
+  Ctrl+V.
 - A "Made with ♥ by snake.tech" line at the bottom of the desktop app,
   linking to Ko-fi.
 
@@ -27,6 +32,8 @@
 
 ### Fixed
 
+- Debug builds of the desktop app no longer stop with a "Dropped
+  TexturesDelta" error after the first frame.
 - A failed conversion no longer leaves a half-written PNG behind. Files are
   written under a temporary name and renamed when complete.
 
