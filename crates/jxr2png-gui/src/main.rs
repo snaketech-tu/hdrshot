@@ -37,7 +37,7 @@ fn main() {
     let viewport = egui::ViewportBuilder::default()
         .with_title("jxr2png")
         .with_app_id("jxr2png")
-        .with_inner_size([560.0, 680.0])
+        .with_inner_size([560.0, 760.0])
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());
@@ -207,6 +207,10 @@ struct App {
     /// A copy over Discord's size limit, and whether a smaller one is
     /// being made.
     too_big: Option<(TooBig, bool)>,
+    /// Height of the bottom panel without the Advanced settings' scroll
+    /// area, and of that area, from the last frame.
+    bottom_rest: f32,
+    advanced_height: f32,
     /// Whether jxr2png opens `.jxr` files; rechecked when the window
     /// regains focus, since the choice is made in the system's settings.
     is_default_app: bool,
@@ -248,6 +252,12 @@ struct Toast {
 
 const TOAST_SECONDS: f64 = 3.0;
 
+/// Height kept for the title, drop area and a few rows of the file list
+/// when the Advanced settings are open.
+const MIN_LIST_AREA: f32 = 220.0;
+/// The Advanced settings never shrink below this; they scroll instead.
+const MIN_ADVANCED_HEIGHT: f32 = 120.0;
+
 const SETTINGS_KEY: &str = "settings";
 
 impl App {
@@ -277,6 +287,8 @@ impl App {
             toast: None,
             copied: channel(),
             too_big: None,
+            bottom_rest: 330.0,
+            advanced_height: 0.0,
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
             selected: None,
@@ -628,20 +640,16 @@ impl App {
                     .shadow(visuals.popup_shadow)
                     .inner_margin(egui::Margin::symmetric(14, 10))
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(format!(
-                                    "Copied {}, but at {} it is over Discord's 10 MB limit.",
-                                    too_big.name,
-                                    jxr2png_core::share::megabytes(too_big.size)
-                                ))
-                                .size(14.0),
-                            );
-                            close = ui
-                                .small_button("×")
-                                .on_hover_text("Keep this copy")
-                                .clicked();
-                        });
+                        ui.set_max_width(card_width(ctx));
+                        ui.label(
+                            RichText::new(format!(
+                                "Copied {}. At {} it is over Discord's 10 MB limit.",
+                                too_big.name,
+                                jxr2png_core::share::megabytes(too_big.size)
+                            ))
+                            .size(14.0),
+                        );
+                        ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             if *working {
                                 ui.spinner();
@@ -653,6 +661,10 @@ impl App {
                                         "Copy it at 1440p, or lower if needed, so it fits \
                                          in 10 MB. The saved PNGs stay as they are.",
                                     )
+                                    .clicked();
+                                close = ui
+                                    .button("Keep this one")
+                                    .on_hover_text("Keep the full-size copy on the clipboard")
                                     .clicked();
                             }
                         });
@@ -702,6 +714,7 @@ impl App {
                     .shadow(visuals.popup_shadow)
                     .inner_margin(egui::Margin::symmetric(14, 10))
                     .show(ui, |ui| {
+                        ui.set_max_width(card_width(ctx));
                         ui.label(RichText::new(&toast.text).size(14.0));
                     });
             });
@@ -1056,11 +1069,14 @@ impl App {
         egui::CollapsingHeader::new(title)
             .id_salt("advanced")
             .show(ui, |ui| {
-                // Scrolls, so opening it doesn't squeeze the file list away.
-                egui::ScrollArea::vertical()
-                    .max_height(170.0)
+                // Scrolls only when the window is too short for it, so
+                // opening it never squeezes the file list away.
+                let room = ui.ctx().content_rect().height() - MIN_LIST_AREA - self.bottom_rest;
+                let shown = egui::ScrollArea::vertical()
+                    .max_height(room.max(MIN_ADVANCED_HEIGHT))
                     .auto_shrink([false, true])
                     .show(ui, |ui| self.advanced_ui(ui));
+                self.advanced_height = shown.inner_rect.height();
             });
     }
 
@@ -1276,7 +1292,8 @@ impl window::App for App {
 
         let margin = egui::Margin::same(16);
         let panel_fill = ui.visuals().panel_fill;
-        egui::Panel::bottom("actions")
+        self.advanced_height = 0.0;
+        let bottom = egui::Panel::bottom("actions")
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
             .show(ui, |ui| {
                 ui.add_enabled_ui(!self.running(), |ui| self.settings_ui(ui));
@@ -1285,6 +1302,7 @@ impl window::App for App {
                 ui.add_space(2.0);
                 credit(ui);
             });
+        self.bottom_rest = bottom.response.rect.height() - self.advanced_height;
         egui::CentralPanel::default()
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
             .show(ui, |ui| {
@@ -1417,6 +1435,12 @@ fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) -> bool {
         });
     }
     hovered
+}
+
+/// Widest a toast may be: the window's width less a margin on each side,
+/// so long file names wrap instead of running off the window.
+fn card_width(ctx: &egui::Context) -> f32 {
+    (ctx.content_rect().width() - 2.0 * 16.0 - 2.0 * 14.0).max(120.0)
 }
 
 /// The right-click menu of a row.
