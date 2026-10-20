@@ -70,9 +70,10 @@ with a paid certificate, so the first launch needs one extra step:
 
 ## Desktop app
 
-1. Drop `.jxr` files or folders onto the window, or click the drop area to
-   choose files. On Windows and Linux, files dropped onto the program's icon
-   are added too.
+1. Drop `.jxr` files or folders onto the window, click the drop area to
+   choose files, or paste files copied in Explorer or Finder with Ctrl+V.
+   On Windows and Linux, files dropped onto the program's icon are added
+   too.
 2. Choose **HDR + SDR**, **HDR only** or **SDR only**, and whether to save
    next to each image or into one folder.
 3. Press **Convert**.
@@ -86,6 +87,12 @@ with a paid certificate, so the first launch needs one extra step:
   has its own **Copy for Discord** button. The copy leaves out the `cICP`
   chunk, which makes Discord turn HDR images yellow; the saved file keeps it
   for Windows Photos and HDR viewers.
+- **The file list.** Double-click a converted image to open it.
+  Right-click a row to open the HDR or SDR PNG, show it in its folder,
+  convert it again or remove it. **Clear** removes all files or only the
+  converted ones, and **Retry failed** converts the failed ones again.
+  Click a row to select it; Delete removes it, Enter converts the list and
+  the arrow keys move the selection.
 - **Resolution** scales the output down to 2160p, 1440p, 1080p or 720p,
   keeping the aspect ratio and never scaling up. It starts at Source every
   time.

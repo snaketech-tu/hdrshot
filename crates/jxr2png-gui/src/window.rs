@@ -23,6 +23,10 @@ pub trait App {
 
     /// Called once before the window closes.
     fn on_exit(&mut self) {}
+
+    /// Files pasted with Ctrl+V (Cmd+V on macOS), e.g. copied in Explorer.
+    /// egui only passes on pasted text, so the window reads files itself.
+    fn paste_files(&mut self, _files: Vec<std::path::PathBuf>) {}
 }
 
 /// Opens the window and runs until it is closed.
@@ -78,6 +82,10 @@ struct Running {
     egui_winit: egui_winit::State,
     renderer: EguiSoftwareRender,
     info: egui::ViewportInfo,
+    modifiers: winit::keyboard::ModifiersState,
+    /// Texture changes not yet handed to the renderer, kept when a frame
+    /// can't be drawn so the next one still gets them.
+    textures: egui::TexturesDelta,
     window: Arc<Window>,
 }
 
@@ -118,6 +126,8 @@ impl<A: App> Runner<A> {
             egui_winit,
             renderer: EguiSoftwareRender::new(ColorFieldOrder::Bgra),
             info,
+            modifiers: Default::default(),
+            textures: Default::default(),
             window,
         });
     }
@@ -171,6 +181,9 @@ impl<A: App> Runner<A> {
                     viewport.repaint_delay
                 });
 
+        running
+            .textures
+            .append(std::mem::take(&mut output.textures_delta));
         let primitives = self.ctx.tessellate(output.shapes, output.pixels_per_point);
         if let Err(e) = running.surface.resize(width, height) {
             eprintln!("Couldn't resize the window buffer: {e}");
@@ -190,9 +203,10 @@ impl<A: App> Runner<A> {
                 height.get() as usize,
             ),
             &primitives,
-            &output.textures_delta,
+            &running.textures,
             output.pixels_per_point,
         );
+        running.textures.clear();
         if let Err(e) = buffer.present() {
             eprintln!("Couldn't show the frame: {e}");
         }
@@ -237,6 +251,17 @@ impl<A: App> ApplicationHandler<Repaint> for Runner<A> {
                 event_loop.exit();
             }
             event => {
+                if let WindowEvent::ModifiersChanged(modifiers) = &event {
+                    running.modifiers = modifiers.state();
+                }
+                if is_paste(&event, running.modifiers)
+                    && let Ok(files) =
+                        arboard::Clipboard::new().and_then(|mut c| c.get().file_list())
+                    && !files.is_empty()
+                {
+                    self.app.paste_files(files);
+                    running.window.request_redraw();
+                }
                 if running
                     .egui_winit
                     .on_window_event(&running.window, &event)
@@ -254,4 +279,23 @@ impl<A: App> ApplicationHandler<Repaint> for Runner<A> {
             None => ControlFlow::Wait,
         });
     }
+}
+
+fn is_paste(event: &WindowEvent, modifiers: winit::keyboard::ModifiersState) -> bool {
+    use winit::keyboard::{Key, NamedKey};
+    let WindowEvent::KeyboardInput { event, .. } = event else {
+        return false;
+    };
+    let command = if cfg!(target_os = "macos") {
+        modifiers.super_key()
+    } else {
+        modifiers.control_key()
+    };
+    event.state.is_pressed()
+        && !event.repeat
+        && match &event.logical_key {
+            Key::Character(c) => command && c.eq_ignore_ascii_case("v"),
+            Key::Named(NamedKey::Paste) => true,
+            _ => false,
+        }
 }
