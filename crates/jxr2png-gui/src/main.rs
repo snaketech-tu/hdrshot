@@ -666,14 +666,14 @@ impl App {
         let Update::Available { releases, .. } = std::mem::take(&mut self.update) else {
             return;
         };
-        let Some(url) = releases[0].download.clone() else {
+        let Some(download) = releases[0].download.clone() else {
             return;
         };
         self.update = Update::Installing(releases);
         let sender = self.updates.0.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let _ = sender.send(UpdateMessage::Installed(update::install(&url)));
+            let _ = sender.send(UpdateMessage::Installed(update::install(&download)));
             ctx.request_repaint();
         });
     }

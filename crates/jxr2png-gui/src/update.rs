@@ -21,14 +21,16 @@ pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 /// one to quit before it claims the single-instance socket.
 pub const UPDATED_FLAG: &str = "--updated";
 
-/// The release download of the desktop app for this platform, as named by
-/// `release.yml`.
-const ASSET: Option<&str> = if cfg!(windows) {
-    Some("jxr2png-gui.exe")
+/// How the release download of the desktop app for this platform ends, as
+/// named by `release.yml`. Only the end is matched, so the update still
+/// finds it if the app is renamed; GitHub redirects the API of a renamed
+/// repository too.
+const ASSET_SUFFIX: Option<&str> = if cfg!(windows) {
+    Some("-gui.exe")
 } else if cfg!(target_os = "macos") {
-    Some("jxr2png-gui-macos.dmg")
+    Some("-gui-macos.dmg")
 } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-    Some("jxr2png-gui-linux-x64.tar.gz")
+    Some("-gui-linux-x64.tar.gz")
 } else {
     None
 };
@@ -38,8 +40,14 @@ pub struct Release {
     pub notes: String,
     /// The release's page on GitHub.
     pub page: String,
-    /// Where to download the app for this platform, if the release has it.
-    pub download: Option<String>,
+    /// The app for this platform, if the release has it.
+    pub download: Option<Download>,
+}
+
+#[derive(Clone)]
+pub struct Download {
+    pub name: String,
+    pub url: String,
 }
 
 pub enum Checked {
@@ -138,11 +146,14 @@ fn check_since(current: &str) -> Result<Checked, String> {
                 version: r.tag_name.trim_start_matches('v').to_owned(),
                 notes: r.body.unwrap_or_default(),
                 page: r.html_url,
-                download: ASSET.and_then(|name| {
+                download: ASSET_SUFFIX.and_then(|suffix| {
                     r.assets
                         .into_iter()
-                        .find(|a| a.name == name)
-                        .map(|a| a.browser_download_url)
+                        .find(|a| a.name.ends_with(suffix))
+                        .map(|a| Download {
+                            name: a.name,
+                            url: a.browser_download_url,
+                        })
                 }),
             })
             .collect(),
@@ -157,17 +168,17 @@ fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
-/// Downloads the app from `url` and puts it in place of this one.
-pub fn install(url: &str) -> Result<Installed, String> {
-    install_here(url).map_err(|e| format!("The update failed: {e}"))
+/// Downloads the new app and puts it in place of this one.
+pub fn install(download: &Download) -> Result<Installed, String> {
+    install_here(download).map_err(|e| format!("The update failed: {e}"))
 }
 
 #[cfg(windows)]
-fn install_here(url: &str) -> io::Result<Installed> {
+fn install_here(download: &Download) -> io::Result<Installed> {
     let exe = std::env::current_exe()?;
     let new = sibling(&exe, ".new");
     let old = sibling(&exe, ".old");
-    download(url, &new)?;
+    fetch(&download.url, &new)?;
     // A running executable can't be overwritten, but it can be renamed.
     let _ = std::fs::remove_file(&old);
     std::fs::rename(&exe, &old)?;
@@ -179,13 +190,13 @@ fn install_here(url: &str) -> io::Result<Installed> {
 }
 
 #[cfg(target_os = "macos")]
-fn install_here(url: &str) -> io::Result<Installed> {
+fn install_here(download: &Download) -> io::Result<Installed> {
     let dir = std::env::home_dir()
         .map(|home| home.join("Downloads"))
         .filter(|dir| dir.is_dir())
         .unwrap_or_else(std::env::temp_dir);
-    let dmg = dir.join("jxr2png-gui-macos.dmg");
-    download(url, &dmg)?;
+    let dmg = dir.join(&download.name);
+    fetch(&download.url, &dmg)?;
     let status = Command::new("open").arg(&dmg).status()?;
     if !status.success() {
         return Err(io::Error::other("couldn't open the disk image"));
@@ -194,13 +205,13 @@ fn install_here(url: &str) -> io::Result<Installed> {
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-fn install_here(url: &str) -> io::Result<Installed> {
+fn install_here(download: &Download) -> io::Result<Installed> {
     let exe = std::env::current_exe()?;
     let work = std::env::temp_dir().join(format!("jxr2png-update-{}", std::process::id()));
     std::fs::create_dir_all(&work)?;
     let result = (|| {
-        let archive = work.join("jxr2png-gui.tar.gz");
-        download(url, &archive)?;
+        let archive = work.join(&download.name);
+        fetch(&download.url, &archive)?;
         let status = Command::new("tar")
             .arg("-xzf")
             .arg(&archive)
@@ -210,7 +221,19 @@ fn install_here(url: &str) -> io::Result<Installed> {
         if !status.success() {
             return Err(io::Error::other("couldn't unpack the download"));
         }
-        let unpacked = work.join("jxr2png-gui-linux-x64").join("jxr2png-gui");
+        // The archive holds one folder named like it, with the app's
+        // executable ending in "-gui".
+        let folder = work.join(download.name.trim_end_matches(".tar.gz"));
+        let unpacked = std::fs::read_dir(&folder)?
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.is_file()
+                    && path
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().ends_with("-gui"))
+            })
+            .ok_or_else(|| io::Error::other("the download has no app in it"))?;
         // Copied next to the executable first, so the rename below is
         // atomic; the copy keeps the executable bit.
         let new = sibling(&exe, ".new");
@@ -233,7 +256,8 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
     path.with_file_name(name)
 }
 
-fn download(url: &str, to: &Path) -> io::Result<()> {
+/// Downloads `url` to the file `to`.
+fn fetch(url: &str, to: &Path) -> io::Result<()> {
     let result = (|| {
         let mut response = get(url, "application/octet-stream").map_err(io::Error::other)?;
         let mut file = File::create(to)?;
