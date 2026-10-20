@@ -7,8 +7,9 @@
 //! - **SDR**: tone-mapped 8-bit sRGB PNG.
 
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub mod color;
 pub mod decode;
@@ -70,7 +71,19 @@ impl Default for SdrOptions {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+/// What to do when an output file already exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Existing {
+    /// Leave the existing file alone and don't write that output.
+    #[default]
+    Skip,
+    /// Replace the existing file.
+    Replace,
+    /// Write to a new name, e.g. `shot_hdr (2).png`.
+    KeepBoth,
+}
+
+#[derive(Debug, Clone)]
 pub struct ConvertOptions {
     pub mode: OutputMode,
     /// Directory to write into; `None` writes next to the input file.
@@ -80,6 +93,24 @@ pub struct ConvertOptions {
     /// Scale images taller than this down to this height, keeping the
     /// aspect ratio. `None` (the default) keeps the source resolution.
     pub max_height: Option<u32>,
+    pub existing: Existing,
+    /// Give the PNGs the modified time of the JXR, so folders sorted by
+    /// date stay in capture order. On by default.
+    pub keep_date: bool,
+}
+
+impl Default for ConvertOptions {
+    fn default() -> Self {
+        Self {
+            mode: OutputMode::default(),
+            output_dir: None,
+            hdr: HdrOptions::default(),
+            sdr: SdrOptions::default(),
+            max_height: None,
+            existing: Existing::default(),
+            keep_date: true,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -101,9 +132,13 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Outputs {
     pub hdr: Option<PathBuf>,
     pub sdr: Option<PathBuf>,
+    /// Outputs that already existed and were left alone
+    /// ([`Existing::Skip`]).
+    pub skipped: Vec<PathBuf>,
 }
 
-/// Output paths that `convert_file` will write for `input`.
+/// Output paths that `convert_file` will write for `input`, before
+/// [`ConvertOptions::existing`] is applied.
 pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {
     let dir = options
         .output_dir
@@ -115,13 +150,84 @@ pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {
     Outputs {
         hdr: options.mode.hdr().then(|| path("_hdr")),
         sdr: options.mode.sdr().then(|| path("_sdr")),
+        skipped: Vec::new(),
     }
+}
+
+/// Applies `existing` to a planned output path: the path to write, or
+/// `None` to skip it.
+fn resolve_existing(path: PathBuf, existing: Existing) -> Option<PathBuf> {
+    if !path.exists() {
+        return Some(path);
+    }
+    match existing {
+        Existing::Skip => None,
+        Existing::Replace => Some(path),
+        Existing::KeepBoth => {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            let ext = path.extension().unwrap_or_default().to_string_lossy();
+            (2..)
+                .map(|n| path.with_file_name(format!("{stem} ({n}).{ext}")))
+                .find(|candidate| !candidate.exists())
+        }
+    }
+}
+
+/// Writes `path` through a temporary file in the same folder that is renamed
+/// into place only once complete, so a failed conversion never leaves a
+/// broken PNG behind.
+fn write_file(
+    path: &Path,
+    modified: Option<SystemTime>,
+    write: impl FnOnce(&mut BufWriter<File>) -> Result<()>,
+) -> Result<()> {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let result = (|| {
+        let mut writer = BufWriter::new(File::create(&temp)?);
+        write(&mut writer)?;
+        writer.flush()?;
+        let file = writer.into_inner().map_err(|e| e.into_error())?;
+        if let Some(time) = modified {
+            file.set_modified(time)?;
+        }
+        drop(file);
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
 }
 
 /// Convert one `.jxr` file according to `options`.
 pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
-    let outputs = output_paths(input, options);
-    let mut image = decode(&std::fs::read(input)?)?;
+    let planned = output_paths(input, options);
+    let mut outputs = Outputs::default();
+    for (planned, resolved) in [
+        (planned.hdr, &mut outputs.hdr),
+        (planned.sdr, &mut outputs.sdr),
+    ] {
+        if let Some(path) = planned {
+            *resolved = resolve_existing(path.clone(), options.existing);
+            if resolved.is_none() {
+                outputs.skipped.push(path);
+            }
+        }
+    }
+    if outputs.hdr.is_none() && outputs.sdr.is_none() {
+        return Ok(outputs);
+    }
+
+    let bytes = std::fs::read(input)?;
+    let modified = if options.keep_date {
+        std::fs::metadata(input)?.modified().ok()
+    } else {
+        None
+    };
+    let mut image = decode(&bytes)?;
+    drop(bytes);
     if let Some(max_height) = options.max_height {
         let (width, height) = resize::fit_height(image.width, image.height, max_height);
         image = resize::resize(&image, width, height);
@@ -131,21 +237,14 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
         std::fs::create_dir_all(dir)?;
     }
     if let Some(path) = &outputs.hdr {
-        write_hdr_png(
-            &image,
-            &levels,
-            &options.hdr,
-            &options.sdr,
-            BufWriter::new(File::create(path)?),
-        )?;
+        write_file(path, modified, |w| {
+            write_hdr_png(&image, &levels, &options.hdr, &options.sdr, w)
+        })?;
     }
     if let Some(path) = &outputs.sdr {
-        write_sdr_png(
-            &image,
-            &levels,
-            &options.sdr,
-            BufWriter::new(File::create(path)?),
-        )?;
+        write_file(path, modified, |w| {
+            write_sdr_png(&image, &levels, &options.sdr, w)
+        })?;
     }
     Ok(outputs)
 }
@@ -172,5 +271,57 @@ mod tests {
         let out = output_paths(Path::new("shots/game.jxr"), &opts);
         assert_eq!(out.hdr, None);
         assert_eq!(out.sdr, Some(PathBuf::from("out/game_sdr.png")));
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join("jxr2png-lib")
+            .join(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn resolve_existing_per_policy() {
+        let dir = temp_dir("existing");
+        let free = dir.join("free_hdr.png");
+        assert_eq!(resolve_existing(free.clone(), Existing::Skip), Some(free));
+
+        let taken = dir.join("shot_hdr.png");
+        std::fs::write(&taken, b"old").unwrap();
+        std::fs::write(dir.join("shot_hdr (2).png"), b"old").unwrap();
+        assert_eq!(resolve_existing(taken.clone(), Existing::Skip), None);
+        assert_eq!(
+            resolve_existing(taken.clone(), Existing::Replace),
+            Some(taken.clone())
+        );
+        assert_eq!(
+            resolve_existing(taken, Existing::KeepBoth),
+            Some(dir.join("shot_hdr (3).png"))
+        );
+    }
+
+    #[test]
+    fn failed_write_leaves_nothing_behind() {
+        let dir = temp_dir("failed");
+        let path = dir.join("shot_hdr.png");
+        let result = write_file(&path, None, |w| {
+            w.write_all(b"half a PNG")?;
+            Err(Error::Decode("simulated failure".into()))
+        });
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn write_sets_modified_time() {
+        let dir = temp_dir("modified");
+        let path = dir.join("shot_sdr.png");
+        let time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        write_file(&path, Some(time), |w| Ok(w.write_all(b"png")?)).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"png");
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), time);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
     }
 }
