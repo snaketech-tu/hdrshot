@@ -138,6 +138,11 @@ install -Dm644 jxr2png.png -t ~/.local/share/icons/hicolor/256x256/apps
   command line.
   They are off by default and reset every time the app starts, so results
   always match the original screenshot unless you change them.
+- **Check for updates**, at the bottom right, looks for a newer release on
+  GitHub and shows its release notes. **Update** downloads it: on Windows
+  and Linux it replaces the app and restarts it, on macOS it opens the new
+  disk image to drag to Applications. **Skip** keeps the current version.
+  The app only connects to GitHub when you press the button.
 - While converting, the Windows taskbar button shows the progress, and the
   button flashes (the Dock icon bounces on macOS) when a batch finishes
   while you're in another window.

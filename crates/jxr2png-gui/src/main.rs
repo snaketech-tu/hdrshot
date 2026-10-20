@@ -8,6 +8,7 @@ mod previews;
 mod single;
 mod storage;
 mod taskbar;
+mod update;
 mod window;
 
 use std::path::{Path, PathBuf};
@@ -28,7 +29,16 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 fn main() {
     // Files passed on the command line, e.g. by "Open with" or by dropping
     // them onto the program's icon.
-    let files: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    let mut files: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    // Started by the old version after an update; it quits right away.
+    let updated = files
+        .first()
+        .is_some_and(|f| f.as_os_str() == update::UPDATED_FLAG);
+    if updated {
+        files.remove(0);
+        single::wait_for_exit(std::time::Duration::from_secs(10));
+    }
+    update::clean_up();
     let listener = match single::claim(&files) {
         Some(single::Claim::HandedOff) => return,
         Some(single::Claim::First(listener)) => Some(listener),
@@ -41,7 +51,7 @@ fn main() {
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());
-    if let Err(e) = window::run(viewport, |ctx| App::new(ctx, files, listener)) {
+    if let Err(e) = window::run(viewport, |ctx| App::new(ctx, files, listener, updated)) {
         eprintln!("jxr2png: {e}");
         std::process::exit(1);
     }
@@ -225,6 +235,30 @@ struct App {
     /// A batch waiting for the user to say what to do with PNGs that
     /// already exist.
     asking: Option<Asking>,
+    update: Update,
+    /// Results of the update check and install, made in the background.
+    updates: (Sender<UpdateMessage>, Receiver<UpdateMessage>),
+}
+
+/// Where the check for a newer version stands.
+#[derive(Default)]
+enum Update {
+    #[default]
+    Idle,
+    Checking,
+    /// Newer releases, newest first, and why installing the newest failed.
+    Available {
+        releases: Vec<update::Release>,
+        error: Option<String>,
+    },
+    Installing(Vec<update::Release>),
+    /// The new disk image is open (macOS).
+    Opened,
+}
+
+enum UpdateMessage {
+    Checked(Result<update::Checked, String>),
+    Installed(Result<update::Installed, String>),
 }
 
 struct Asking {
@@ -261,7 +295,12 @@ const MIN_ADVANCED_HEIGHT: f32 = 120.0;
 const SETTINGS_KEY: &str = "settings";
 
 impl App {
-    fn new(ctx: &egui::Context, files: Vec<PathBuf>, listener: Option<single::Listener>) -> Self {
+    fn new(
+        ctx: &egui::Context,
+        files: Vec<PathBuf>,
+        listener: Option<single::Listener>,
+        updated: bool,
+    ) -> Self {
         let settings = storage::load(SETTINGS_KEY).unwrap_or_default();
         let (open, opened) = channel();
         if let Some(listener) = listener {
@@ -296,11 +335,16 @@ impl App {
             previews: Previews::new(ctx.clone()),
             shown: None,
             asking: None,
+            update: Update::Idle,
+            updates: channel(),
         };
         if assoc::SUPPORTED {
             assoc::refresh();
         }
         app.add_paths(files);
+        if updated {
+            app.show_toast(format!("Updated to jxr2png {}", update::CURRENT), ctx);
+        }
         app
     }
 
@@ -605,6 +649,271 @@ impl App {
             self.run(indices, existing, ctx);
         } else if cancel || modal.should_close() {
             self.asking = None;
+        }
+    }
+
+    fn check_for_updates(&mut self, ctx: &egui::Context) {
+        self.update = Update::Checking;
+        let sender = self.updates.0.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = sender.send(UpdateMessage::Checked(update::check()));
+            ctx.request_repaint();
+        });
+    }
+
+    fn install_update(&mut self, ctx: &egui::Context) {
+        let Update::Available { releases, .. } = std::mem::take(&mut self.update) else {
+            return;
+        };
+        let Some(download) = releases[0].download.clone() else {
+            return;
+        };
+        self.update = Update::Installing(releases);
+        let sender = self.updates.0.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = sender.send(UpdateMessage::Installed(update::install(&download)));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Saves the settings and ends the app, for an update.
+    fn quit(&mut self) -> ! {
+        storage::save(SETTINGS_KEY, &self.settings);
+        std::process::exit(0)
+    }
+
+    fn receive_update(&mut self, ctx: &egui::Context) {
+        while let Ok(message) = self.updates.1.try_recv() {
+            match message {
+                UpdateMessage::Checked(Ok(update::Checked::UpToDate)) => {
+                    self.update = Update::Idle;
+                    let text = format!("jxr2png {} is the latest version", update::CURRENT);
+                    self.show_toast(text, ctx);
+                }
+                UpdateMessage::Checked(Ok(update::Checked::Newer(releases))) => {
+                    self.update = Update::Available {
+                        releases,
+                        error: None,
+                    };
+                }
+                UpdateMessage::Checked(Err(e)) => {
+                    self.update = Update::Idle;
+                    self.show_toast(e, ctx);
+                }
+                UpdateMessage::Installed(Ok(update::Installed::Restart(exe))) => {
+                    match update::restart(&exe) {
+                        Ok(()) => self.quit(),
+                        Err(_) => {
+                            self.update = Update::Idle;
+                            let text = "The update is installed. Start jxr2png again to use it.";
+                            self.show_toast(text.into(), ctx);
+                        }
+                    }
+                }
+                UpdateMessage::Installed(Ok(update::Installed::Opened)) => {
+                    self.update = Update::Opened;
+                }
+                UpdateMessage::Installed(Err(e)) => {
+                    if let Update::Installing(releases) = std::mem::take(&mut self.update) {
+                        self.update = Update::Available {
+                            releases,
+                            error: Some(e),
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    /// The release notes of a newer version, with Update and Skip.
+    fn update_dialog(&mut self, ctx: &egui::Context) {
+        self.receive_update(ctx);
+        #[derive(Clone, Copy)]
+        enum Choice {
+            Update,
+            Page,
+            Skip,
+            Quit,
+        }
+        let mut choice = None;
+        let running = self.running();
+        let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(16);
+        match &self.update {
+            Update::Idle | Update::Checking => return,
+            Update::Available { releases, error } => {
+                let newest = &releases[0];
+                let modal = egui::Modal::new(egui::Id::unique("update"))
+                    .frame(frame)
+                    .show(ctx, |ui| {
+                        ui.set_max_width(420.0);
+                        ui.label(
+                            RichText::new(format!("jxr2png {} is available", newest.version))
+                                .strong()
+                                .size(15.0),
+                        );
+                        ui.weak(format!("You have version {}.", update::CURRENT));
+                        egui::ScrollArea::vertical()
+                            .max_height(300.0)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y = 4.0;
+                                for release in releases {
+                                    if releases.len() > 1 {
+                                        ui.add_space(4.0);
+                                        ui.label(
+                                            RichText::new(format!("Version {}", release.version))
+                                                .strong()
+                                                .size(14.0),
+                                        );
+                                    }
+                                    notes_ui(ui, &release.notes);
+                                }
+                            });
+                        if let Some(error) = error {
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                        }
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if newest.download.is_some() && error.is_none() {
+                                let hint = if cfg!(target_os = "macos") {
+                                    "Download the new version and open its disk image"
+                                } else {
+                                    "Download the new version and restart jxr2png"
+                                };
+                                if ui
+                                    .add_enabled(!running, egui::Button::new("Update"))
+                                    .on_hover_text(hint)
+                                    .on_disabled_hover_text("Wait for the conversion to finish")
+                                    .clicked()
+                                {
+                                    choice = Some(Choice::Update);
+                                }
+                            } else if ui
+                                .button("Open download page")
+                                .on_hover_text(&newest.page)
+                                .clicked()
+                            {
+                                choice = Some(Choice::Page);
+                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .button("Skip")
+                                        .on_hover_text("Keep this version for now")
+                                        .clicked()
+                                    {
+                                        choice = Some(Choice::Skip);
+                                    }
+                                },
+                            );
+                        });
+                    });
+                if choice.is_none() && modal.should_close() {
+                    choice = Some(Choice::Skip);
+                }
+                if let Some(Choice::Page) = choice {
+                    ctx.open_url(egui::OpenUrl::new_tab(&newest.page));
+                }
+            }
+            Update::Installing(releases) => {
+                egui::Modal::new(egui::Id::unique("update"))
+                    .frame(frame)
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(format!("Downloading jxr2png {}…", releases[0].version));
+                        });
+                    });
+            }
+            Update::Opened => {
+                let modal = egui::Modal::new(egui::Id::unique("update"))
+                    .frame(frame)
+                    .show(ctx, |ui| {
+                        ui.set_max_width(360.0);
+                        ui.label(
+                            RichText::new("The new version is ready")
+                                .strong()
+                                .size(15.0),
+                        );
+                        ui.label(
+                            "Quit jxr2png, then drag jxr2png from the opened disk image \
+                             to Applications and choose Replace.",
+                        );
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("Quit jxr2png").clicked() {
+                                choice = Some(Choice::Quit);
+                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.button("Close").clicked() {
+                                        choice = Some(Choice::Skip);
+                                    }
+                                },
+                            );
+                        });
+                    });
+                if choice.is_none() && modal.should_close() {
+                    choice = Some(Choice::Skip);
+                }
+            }
+        }
+        match choice {
+            Some(Choice::Update) => self.install_update(ctx),
+            Some(Choice::Page | Choice::Skip) => self.update = Update::Idle,
+            Some(Choice::Quit) => self.quit(),
+            None => {}
+        }
+    }
+
+    /// The small blue "Check for updates" button at the right end of the
+    /// credit line `row`.
+    fn update_button(&mut self, ui: &mut egui::Ui, row: egui::Rect) {
+        let checking = matches!(self.update, Update::Checking);
+        let text = if checking {
+            "Checking…"
+        } else {
+            "Check for updates"
+        };
+        let selection = ui.visuals().selection;
+        let label = RichText::new(text)
+            .font(egui::FontId::proportional(12.0))
+            .color(selection.stroke.color);
+        let width = ui
+            .painter()
+            .layout_no_wrap(
+                text.to_owned(),
+                egui::FontId::proportional(12.0),
+                Color32::PLACEHOLDER,
+            )
+            .size()
+            .x
+            + 24.0;
+        let right = ui.max_rect().right();
+        let rect = egui::Rect::from_center_size(
+            egui::pos2(right - width / 2.0, row.center().y),
+            Vec2::new(width, 22.0),
+        );
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
+            egui::Layout::centered_and_justified(egui::Direction::TopDown),
+        ));
+        let button = egui::Button::new(label)
+            .fill(selection.bg_fill)
+            .stroke(Stroke::NONE)
+            .corner_radius(6.0)
+            .wrap_mode(egui::TextWrapMode::Extend);
+        if child
+            .add_enabled(!checking, button)
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(format!("You have jxr2png {}", update::CURRENT))
+            .clicked()
+        {
+            let ctx = ui.ctx().clone();
+            self.check_for_updates(&ctx);
         }
     }
 
@@ -1299,8 +1608,11 @@ impl window::App for App {
                 ui.add_enabled_ui(!self.running(), |ui| self.settings_ui(ui));
                 ui.separator();
                 self.action_bar(ui);
-                ui.add_space(2.0);
-                credit(ui);
+                // Room for the update button, which is taller than the
+                // credit line it sits on.
+                ui.add_space(10.0);
+                let row = credit(ui);
+                self.update_button(ui, row);
             });
         self.bottom_rest = bottom.response.rect.height() - self.advanced_height;
         egui::CentralPanel::default()
@@ -1323,6 +1635,7 @@ impl window::App for App {
                 }
             });
         self.existing_dialog(&ctx);
+        self.update_dialog(&ctx);
         self.toast_ui(&ctx);
     }
 
@@ -1548,8 +1861,9 @@ fn ok_color(ui: &egui::Ui) -> Color32 {
 const KOFI_URL: &str = "https://ko-fi.com/snake_tech";
 
 /// "Made with ♥ by snake.tech", centered, opening the Ko-fi page when
-/// clicked. The bundled fonts have no heart glyph, so it's drawn.
-fn credit(ui: &mut egui::Ui) {
+/// clicked. The bundled fonts have no heart glyph, so it's drawn. Returns
+/// the line's rectangle.
+fn credit(ui: &mut egui::Ui) -> egui::Rect {
     let font = egui::FontId::proportional(11.5);
     let heart_size = 9.0;
     let gap = 4.0;
@@ -1585,7 +1899,34 @@ fn credit(ui: &mut egui::Ui) {
         if response.clicked() {
             ui.ctx().open_url(egui::OpenUrl::new_tab(KOFI_URL));
         }
-    });
+        rect
+    })
+    .inner
+}
+
+/// Release notes, as headings, list items and paragraphs.
+fn notes_ui(ui: &mut egui::Ui, notes: &str) {
+    for block in update::parse_notes(notes) {
+        match block {
+            update::Block::Heading(text) => {
+                ui.add_space(2.0);
+                ui.label(RichText::new(text).strong());
+            }
+            update::Block::Text(text) => {
+                ui.label(text);
+            }
+            update::Block::Item(text) => {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let height = ui.text_style_height(&egui::TextStyle::Body);
+                    let (rect, _) = ui.allocate_exact_size(Vec2::new(10.0, height), Sense::hover());
+                    let color = ui.visuals().text_color();
+                    ui.painter().circle_filled(rect.center(), 2.0, color);
+                    ui.add(egui::Label::new(text).wrap());
+                });
+            }
+        }
+    }
 }
 
 /// A filled heart `size` points wide, centered on `center`.

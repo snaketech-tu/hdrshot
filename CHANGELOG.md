@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- A **Check for updates** button in the desktop app shows the release
+  notes of a newer version and can install it: on Windows and Linux it
+  replaces the app and restarts it, on macOS it opens the new disk image.
+
 ### Changed
 
 - Releases offer the desktop app and the command-line tool as separate
