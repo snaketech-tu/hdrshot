@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+exr = "1.74"
+image = { version = "0.25", default-features = false, features = ["hdr"] }
 jxr = "=0.2.1"
 png = "0.18"
 rayon = "1.12.0"

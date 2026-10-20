@@ -1,6 +1,7 @@
-//! Conversion of HDR JPEG XR (`.jxr`) images to PNG.
+//! Conversion of HDR images to HDR and SDR PNG.
 //!
-//! Two outputs are supported:
+//! Inputs are JPEG XR (`.jxr`, as made by Windows HDR screenshots), OpenEXR,
+//! Radiance `.hdr` and HDR PNG; see [`input`]. Two outputs are supported:
 //! - **HDR**: 16-bit PNG in Rec.2020 primaries with the PQ (SMPTE ST 2084)
 //!   transfer function, tagged with a `cICP` chunk and an ICC profile
 //!   `cicp` tag so HDR-aware viewers display it in HDR.
@@ -15,12 +16,14 @@ pub mod color;
 pub mod decode;
 pub mod encode;
 pub mod icc;
+pub mod input;
 pub mod resize;
 pub mod share;
 
 use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode, dimensions};
 pub use encode::{LightLevels, for_discord, light_levels, sdr_rgb8, write_hdr_png, write_sdr_png};
+pub use input::{InputFormat, InputOptions, is_supported};
 
 /// Which PNG files to produce for each input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -126,6 +129,7 @@ impl Default for Naming {
 #[derive(Debug, Clone)]
 pub struct ConvertOptions {
     pub mode: OutputMode,
+    pub input: InputOptions,
     /// Directory to write into; `None` writes next to the input file.
     pub output_dir: Option<PathBuf>,
     pub naming: Naming,
@@ -144,6 +148,7 @@ impl Default for ConvertOptions {
     fn default() -> Self {
         Self {
             mode: OutputMode::default(),
+            input: InputOptions::default(),
             output_dir: None,
             naming: Naming::default(),
             hdr: HdrOptions::default(),
@@ -159,10 +164,16 @@ impl Default for ConvertOptions {
 pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("could not decode JXR: {0}")]
+    #[error("could not decode image: {0}")]
     Decode(String),
-    #[error("unsupported JXR pixel format: {0}")]
+    #[error("unsupported pixel format: {0}")]
     UnsupportedFormat(String),
+    #[error("not a supported image (JPEG XR, OpenEXR, Radiance HDR or HDR PNG)")]
+    UnknownFormat,
+    #[error("not an HDR image: {0}")]
+    NotHdr(String),
+    #[error("the output would replace the input file {}", .0.display())]
+    SameAsInput(PathBuf),
     #[error("could not write PNG: {0}")]
     Encode(#[from] png::EncodingError),
 }
@@ -177,20 +188,22 @@ pub struct Outputs {
     /// Outputs that already existed and were left alone
     /// ([`Existing::Skip`]).
     pub skipped: Vec<PathBuf>,
-    /// The input is an 8-bit SDR image, so no HDR PNG was made even if one
+    /// The input is an 8-bit SDR JPEG XR, so no HDR PNG was made even if one
     /// was asked for: it would only be the SDR picture in an HDR file.
     pub sdr_input: bool,
 }
 
 /// Whether `path` names a JPEG XR file (`.jxr` or `.wdp`).
 pub fn is_jxr(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("jxr") || e.eq_ignore_ascii_case("wdp"))
+    InputFormat::from_path(path) == Some(InputFormat::Jxr)
 }
 
-/// The JPEG XR files in `dir`, sorted by path; with `recursive`, also those
-/// in its subfolders. Unreadable folders are left out.
-pub fn find_jxr(dir: &Path, recursive: bool) -> Vec<PathBuf> {
+/// The images in `dir` to convert, sorted by path; with `recursive`, also
+/// those in its subfolders. Unreadable folders are left out.
+///
+/// PNGs are not included, since a folder of converted images holds the
+/// PNGs made from them; pass HDR PNGs by name instead.
+pub fn find_inputs(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     fn walk(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -201,7 +214,7 @@ pub fn find_jxr(dir: &Path, recursive: bool) -> Vec<PathBuf> {
                 if recursive {
                     walk(&path, recursive, out);
                 }
-            } else if is_jxr(&path) {
+            } else if InputFormat::from_path(&path).is_some_and(|f| f != InputFormat::Png) {
                 out.push(path);
             }
         }
@@ -297,17 +310,27 @@ pub struct Preview {
 }
 
 /// Decodes `input` and scales it to fit `max_width`×`max_height`.
-pub fn preview(input: &Path, max_width: u32, max_height: u32) -> Result<Preview> {
-    let image = decode(&std::fs::read(input)?)?;
+pub fn preview(
+    input: &Path,
+    options: &InputOptions,
+    max_width: u32,
+    max_height: u32,
+) -> Result<Preview> {
+    let image = input::decode_file(input, options)?;
     let levels = light_levels(&image);
     let (width, height) = resize::fit_box(image.width, image.height, max_width, max_height);
     let image = resize::resize(&image, width, height);
     Ok(Preview { image, levels })
 }
 
-/// Convert one `.jxr` file according to `options`.
+/// Convert one image file according to `options`.
 pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
     let planned = output_paths(input, options);
+    for path in [&planned.hdr, &planned.sdr].into_iter().flatten() {
+        if same_file(path, input) {
+            return Err(Error::SameAsInput(input.to_path_buf()));
+        }
+    }
     let mut outputs = Outputs::default();
     for (planned, resolved) in [
         (planned.hdr, &mut outputs.hdr),
@@ -330,7 +353,7 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
     } else {
         None
     };
-    let mut image = decode(&bytes)?;
+    let mut image = input::decode(&bytes, &options.input)?;
     drop(bytes);
     if !image.hdr {
         outputs.sdr_input = true;
@@ -377,6 +400,14 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
         })?;
     }
     Ok(outputs)
+}
+
+/// Whether `a` and `b` name the same file, also when only one exists yet.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 #[cfg(test)]
@@ -471,6 +502,40 @@ mod tests {
             resolve_existing(taken, Existing::KeepBoth),
             Some(dir.join("shot_hdr (3).png"))
         );
+    }
+
+    #[test]
+    fn refuses_to_replace_the_input() {
+        let dir = temp_dir("same");
+        let input = dir.join("shot.png");
+        std::fs::write(&input, b"png").unwrap();
+        let options = ConvertOptions {
+            mode: OutputMode::Hdr,
+            naming: Naming {
+                pattern: "{name}".into(),
+                subfolders: false,
+            },
+            existing: Existing::Replace,
+            ..Default::default()
+        };
+        assert!(matches!(
+            convert_file(&input, &options),
+            Err(Error::SameAsInput(_))
+        ));
+        assert_eq!(std::fs::read(&input).unwrap(), b"png");
+    }
+
+    #[test]
+    fn folder_scan_finds_inputs_but_not_pngs() {
+        let dir = temp_dir("scan");
+        for name in ["a.jxr", "b.EXR", "c.hdr", "d.png", "e.txt"] {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+        let names: Vec<_> = find_inputs(&dir, false)
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["a.jxr", "b.EXR", "c.hdr"]);
     }
 
     #[test]

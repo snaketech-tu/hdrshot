@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use jxr2png_core::{
-    ConvertOptions, Outputs, ScRgbImage, SdrOptions, convert_file, decode, for_discord, preview,
-    sdr_rgb8,
+    ConvertOptions, InputOptions, Outputs, ScRgbImage, SdrOptions, convert_file, decode,
+    for_discord, preview, sdr_rgb8,
 };
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/hdr64.jxr");
@@ -236,7 +236,7 @@ fn discord_copy_drops_cicp_and_mdcv_only() {
 
 #[test]
 fn preview_is_small_and_tone_maps_like_the_png() {
-    let preview = preview(Path::new(FIXTURE), 32, 16).unwrap();
+    let preview = preview(Path::new(FIXTURE), &InputOptions::default(), 32, 16).unwrap();
     assert_eq!((preview.image.width, preview.image.height), (16, 16));
     // Levels come from the full image, not the downscaled one.
     let full = jxr2png_core::light_levels(&fixture());
