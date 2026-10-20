@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Mutex;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use jxr2png_core::{ConvertOptions, Existing, HdrOptions, Naming, OutputMode, Outputs, SdrOptions};
 use rayon::prelude::*;
 
@@ -13,7 +13,7 @@ use rayon::prelude::*;
 struct Args {
     /// Input .jxr files or folders. Wildcards such as *.jxr also work in
     /// cmd and PowerShell.
-    #[arg(required_unless_present = "hold_clipboard")]
+    #[arg(required = true)]
     inputs: Vec<PathBuf>,
 
     /// Also convert .jxr files in subfolders of the given folders.
@@ -87,11 +87,45 @@ struct Args {
     /// at 1440p or lower so it fits. The saved PNGs stay as they are.
     #[arg(long)]
     copy_small: bool,
+}
 
-    /// Internal: keeps a copied file on the Linux clipboard, which only
-    /// holds it while a program offers it.
-    #[arg(long, hide = true, value_name = "PNG")]
-    hold_clipboard: Option<PathBuf>,
+// Internal commands, kept out of `Args` so they don't show up in the help,
+// completions or man page. Each is the first argument, followed by one
+// value.
+
+/// `--hold-clipboard <PNG>`: keeps a copied file on the Linux clipboard,
+/// which only holds it while a program offers it.
+const HOLD_CLIPBOARD: &str = "--hold-clipboard";
+/// `--generate <WHAT>`: prints a shell completion script (bash, zsh, fish,
+/// powershell, elvish) or the man page (man), for packaging.
+const GENERATE: &str = "--generate";
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum Generate {
+    Bash,
+    Zsh,
+    Fish,
+    Powershell,
+    Elvish,
+    Man,
+}
+
+/// Writes what `what` asks for to `out`.
+fn generate(what: Generate, out: &mut dyn Write) -> std::io::Result<()> {
+    use clap_complete::Shell;
+    let mut command = Args::command();
+    let shell = match what {
+        Generate::Bash => Shell::Bash,
+        Generate::Zsh => Shell::Zsh,
+        Generate::Fish => Shell::Fish,
+        Generate::Powershell => Shell::PowerShell,
+        Generate::Elvish => Shell::Elvish,
+        Generate::Man => {
+            return clap_mangen::Man::new(command).render(out);
+        }
+    };
+    clap_complete::generate(shell, &mut command, "jxr2png", out);
+    Ok(())
 }
 
 /// How many files to convert at once. Decoding and PNG compression are
@@ -101,10 +135,30 @@ const MAX_PARALLEL_FILES: usize = 8;
 
 fn main() -> ExitCode {
     // Windows shells pass wildcards through unexpanded; `wild` expands them.
-    let args = Args::parse_from(wild::args_os());
-    if let Some(png) = &args.hold_clipboard {
-        return clipboard::hold(png);
+    let raw: Vec<std::ffi::OsString> = wild::args_os().collect();
+    if let [_, command, value] = &raw[..] {
+        if command == HOLD_CLIPBOARD {
+            return clipboard::hold(Path::new(value));
+        }
+        if command == GENERATE {
+            use clap::ValueEnum;
+            let what = value
+                .to_str()
+                .and_then(|v| Generate::from_str(v, true).ok());
+            let Some(what) = what else {
+                eprintln!("{GENERATE}: unknown value {}", value.display());
+                return ExitCode::from(2);
+            };
+            return match generate(what, &mut std::io::stdout()) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
     }
+    let args = Args::parse_from(raw);
     let mode = match (args.hdr, args.sdr) {
         (true, false) => OutputMode::Hdr,
         (false, true) => OutputMode::Sdr,
@@ -396,7 +450,7 @@ mod clipboard {
         arboard::Clipboard::new().map_err(|e| e.to_string())?;
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         Command::new(exe)
-            .arg("--hold-clipboard")
+            .arg(super::HOLD_CLIPBOARD)
             .arg(file)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -445,6 +499,26 @@ fn json(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arguments_are_consistent() {
+        Args::command().debug_assert();
+    }
+
+    #[test]
+    fn generates_completions_and_man_page() {
+        for (what, expect) in [
+            (Generate::Bash, "--copy-small"),
+            (Generate::Powershell, "--copy-small"),
+            (Generate::Man, ".TH jxr2png"),
+        ] {
+            let mut out = Vec::new();
+            generate(what, &mut out).unwrap();
+            let text = String::from_utf8(out).unwrap();
+            assert!(text.contains(expect), "{what:?}");
+            assert!(!text.contains("hold-clipboard"), "{what:?}");
+        }
+    }
 
     #[test]
     fn json_escapes() {

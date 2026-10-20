@@ -36,6 +36,8 @@
   offers to copy a smaller version (1440p, or lower if needed). On the
   command line, `--copy` copies the last PNG for Discord and
   `--copy-small` also scales it down when it is too large.
+- Shell completions (bash, zsh, fish, PowerShell) and a man page in the
+  release archives, and a `.desktop` file with an icon in the Linux one.
 - A "Made with ♥ by snake.tech" line at the bottom of the desktop app,
   linking to Ko-fi.
 

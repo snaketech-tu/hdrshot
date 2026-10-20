@@ -53,6 +53,8 @@ jobs:
           dir="jxr2png-$TAG-${{ matrix.name }}"
           mkdir "$dir"
           cp target/release/jxr2png.exe target/release/jxr2png-gui.exe README.md LICENSE "$dir/"
+          mkdir "$dir/completions"
+          target/release/jxr2png.exe --generate powershell > "$dir/completions/_jxr2png.ps1"
           7z a "$dir.zip" "$dir" > /dev/null
           echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
 
@@ -71,6 +73,11 @@ jobs:
               "target/x86_64-apple-darwin/release/$bin"
           done
           cp target/jxr2png "$dir/"
+          mkdir "$dir/completions" "$dir/man"
+          target/jxr2png --generate bash > "$dir/completions/jxr2png.bash"
+          target/jxr2png --generate zsh > "$dir/completions/_jxr2png"
+          target/jxr2png --generate fish > "$dir/completions/jxr2png.fish"
+          target/jxr2png --generate man > "$dir/man/jxr2png.1"
           cp target/jxr2png-gui "$app/MacOS/"
           iconset="$RUNNER_TEMP/jxr2png.iconset"
           mkdir "$iconset"
@@ -140,6 +147,13 @@ jobs:
           dir="jxr2png-$TAG-${{ matrix.name }}"
           mkdir "$dir"
           cp target/release/jxr2png target/release/jxr2png-gui README.md LICENSE "$dir/"
+          mkdir "$dir/completions" "$dir/man"
+          target/release/jxr2png --generate bash > "$dir/completions/jxr2png.bash"
+          target/release/jxr2png --generate zsh > "$dir/completions/_jxr2png"
+          target/release/jxr2png --generate fish > "$dir/completions/jxr2png.fish"
+          target/release/jxr2png --generate man > "$dir/man/jxr2png.1"
+          cp packaging/linux/jxr2png.desktop "$dir/"
+          cp crates/jxr2png-gui/assets/icon.png "$dir/jxr2png.png"
           tar -czf "$dir.tar.gz" "$dir"
           echo "ASSET=$dir.tar.gz" >> "$GITHUB_ENV"
 
