@@ -870,7 +870,7 @@ impl App {
         }
     }
 
-    /// The small "Check for updates" button at the right end of the
+    /// The small blue "Check for updates" button at the right end of the
     /// credit line `row`.
     fn update_button(&mut self, ui: &mut egui::Ui, row: egui::Rect) {
         let checking = matches!(self.update, Update::Checking);
@@ -879,27 +879,36 @@ impl App {
         } else {
             "Check for updates"
         };
-        let font = egui::FontId::proportional(11.5);
+        let selection = ui.visuals().selection;
+        let label = RichText::new(text)
+            .font(egui::FontId::proportional(12.0))
+            .color(selection.stroke.color);
         let width = ui
             .painter()
-            .layout_no_wrap(text.to_owned(), font.clone(), Color32::PLACEHOLDER)
+            .layout_no_wrap(
+                text.to_owned(),
+                egui::FontId::proportional(12.0),
+                Color32::PLACEHOLDER,
+            )
             .size()
             .x
-            + 2.0 * ui.spacing().button_padding.x
-            + 4.0;
+            + 24.0;
         let right = ui.max_rect().right();
-        let rect = egui::Rect::from_min_max(
-            egui::pos2(right - width, row.top() - 2.0),
-            egui::pos2(right, row.bottom() + 2.0),
+        let rect = egui::Rect::from_center_size(
+            egui::pos2(right - width / 2.0, row.center().y),
+            Vec2::new(width, 22.0),
         );
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
             egui::Layout::centered_and_justified(egui::Direction::TopDown),
         ));
-        let button = egui::Button::new(RichText::new(text).font(font))
-            .small()
+        let button = egui::Button::new(label)
+            .fill(selection.bg_fill)
+            .stroke(Stroke::NONE)
+            .corner_radius(6.0)
             .wrap_mode(egui::TextWrapMode::Extend);
         if child
             .add_enabled(!checking, button)
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(format!("You have jxr2png {}", update::CURRENT))
             .clicked()
         {
@@ -1599,7 +1608,9 @@ impl window::App for App {
                 ui.add_enabled_ui(!self.running(), |ui| self.settings_ui(ui));
                 ui.separator();
                 self.action_bar(ui);
-                ui.add_space(2.0);
+                // Room for the update button, which is taller than the
+                // credit line it sits on.
+                ui.add_space(10.0);
                 let row = credit(ui);
                 self.update_button(ui, row);
             });
