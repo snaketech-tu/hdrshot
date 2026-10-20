@@ -195,7 +195,7 @@ jobs:
         run: |
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          test "$(wc -l < SHA256SUMS.txt)" -eq 7
+          test "$(wc -l < SHA256SUMS.txt)" -eq 6
       - name: Release notes from CHANGELOG.md
         if: github.event_name != 'pull_request'
         run: |
