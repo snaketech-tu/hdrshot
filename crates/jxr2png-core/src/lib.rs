@@ -83,11 +83,51 @@ pub enum Existing {
     KeepBoth,
 }
 
+/// How output files are named.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Naming {
+    /// File name without `.png`. `{name}` is replaced by the input's name
+    /// without extension, `{type}` by `hdr` or `sdr`.
+    pub pattern: String,
+    /// Put HDR and SDR PNGs into `hdr` and `sdr` subfolders.
+    pub subfolders: bool,
+}
+
+impl Naming {
+    pub const DEFAULT_PATTERN: &str = "{name}_{type}";
+
+    /// Why `self` can't name the outputs of `mode`, if it can't.
+    pub fn check(&self, mode: OutputMode) -> std::result::Result<(), String> {
+        if !self.pattern.contains("{name}") {
+            return Err("the name pattern needs {name}, or every file gets the same name".into());
+        }
+        if self.pattern.contains(['/', '\\']) {
+            return Err("the name pattern can't contain folders; use the output folder".into());
+        }
+        if mode == OutputMode::Both && !self.subfolders && !self.pattern.contains("{type}") {
+            return Err(
+                "with both HDR and SDR PNGs in one folder, the name pattern needs {type}".into(),
+            );
+        }
+        Ok(())
+    }
+}
+
+impl Default for Naming {
+    fn default() -> Self {
+        Self {
+            pattern: Self::DEFAULT_PATTERN.into(),
+            subfolders: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ConvertOptions {
     pub mode: OutputMode,
     /// Directory to write into; `None` writes next to the input file.
     pub output_dir: Option<PathBuf>,
+    pub naming: Naming,
     pub hdr: HdrOptions,
     pub sdr: SdrOptions,
     /// Scale images taller than this down to this height, keeping the
@@ -104,6 +144,7 @@ impl Default for ConvertOptions {
         Self {
             mode: OutputMode::default(),
             output_dir: None,
+            naming: Naming::default(),
             hdr: HdrOptions::default(),
             sdr: SdrOptions::default(),
             max_height: None,
@@ -179,10 +220,22 @@ pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {
         .or_else(|| input.parent().map(Path::to_path_buf))
         .unwrap_or_default();
     let stem = input.file_stem().unwrap_or_default().to_string_lossy();
-    let path = |suffix: &str| dir.join(format!("{stem}{suffix}.png"));
+    let naming = &options.naming;
+    let path = |kind: &str| {
+        let name = naming
+            .pattern
+            .replace("{name}", &stem)
+            .replace("{type}", kind);
+        let dir = if naming.subfolders {
+            dir.join(kind)
+        } else {
+            dir.clone()
+        };
+        dir.join(format!("{name}.png"))
+    };
     Outputs {
-        hdr: options.mode.hdr().then(|| path("_hdr")),
-        sdr: options.mode.sdr().then(|| path("_sdr")),
+        hdr: options.mode.hdr().then(|| path("hdr")),
+        sdr: options.mode.sdr().then(|| path("sdr")),
         ..Outputs::default()
     }
 }
@@ -307,8 +360,10 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
         image = resize::resize(&image, width, height);
     }
     let levels = light_levels(&image);
-    if let Some(dir) = &options.output_dir {
-        std::fs::create_dir_all(dir)?;
+    for path in [&outputs.hdr, &outputs.sdr].into_iter().flatten() {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
     }
     if let Some(path) = &outputs.hdr {
         write_file(path, modified, |w| {
@@ -333,6 +388,47 @@ mod tests {
         let out = output_paths(Path::new("shots/game.jxr"), &opts);
         assert_eq!(out.hdr, Some(PathBuf::from("shots/game_hdr.png")));
         assert_eq!(out.sdr, Some(PathBuf::from("shots/game_sdr.png")));
+    }
+
+    #[test]
+    fn output_paths_follow_naming() {
+        let both = |pattern: &str, subfolders| {
+            let opts = ConvertOptions {
+                naming: Naming {
+                    pattern: pattern.into(),
+                    subfolders,
+                },
+                ..Default::default()
+            };
+            let out = output_paths(Path::new("shots/game.jxr"), &opts);
+            (out.hdr.unwrap(), out.sdr.unwrap())
+        };
+        assert_eq!(
+            both("{type}-{name}", false),
+            ("shots/hdr-game.png".into(), "shots/sdr-game.png".into())
+        );
+        assert_eq!(
+            both("{name}", true),
+            ("shots/hdr/game.png".into(), "shots/sdr/game.png".into())
+        );
+    }
+
+    #[test]
+    fn naming_check() {
+        let naming = |pattern: &str, subfolders| Naming {
+            pattern: pattern.into(),
+            subfolders,
+        };
+        assert!(Naming::default().check(OutputMode::Both).is_ok());
+        assert!(naming("{name}", false).check(OutputMode::Hdr).is_ok());
+        assert!(naming("{name}", true).check(OutputMode::Both).is_ok());
+        assert!(naming("{name}", false).check(OutputMode::Both).is_err());
+        assert!(
+            naming("shot_{type}", false)
+                .check(OutputMode::Both)
+                .is_err()
+        );
+        assert!(naming("out/{name}", false).check(OutputMode::Sdr).is_err());
     }
 
     #[test]
