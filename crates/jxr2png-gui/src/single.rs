@@ -7,7 +7,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::Sender;
 
 use interprocess::local_socket::{
     GenericNamespaced, ListenerOptions, Name, Stream, ToNsName, prelude::*,
@@ -45,11 +45,10 @@ pub fn claim(files: &[PathBuf]) -> Option<Claim> {
 }
 
 impl Listener {
-    /// Receives the file lists of later instances on a background thread.
-    /// An empty list means the app was started again without files; either
-    /// way the window should come to the front.
-    pub fn serve(self, ctx: egui::Context) -> Receiver<Vec<PathBuf>> {
-        let (tx, rx) = channel();
+    /// Sends the file lists of later instances to `opened`, from a
+    /// background thread. An empty list means the app was started again
+    /// without files; either way the window should come to the front.
+    pub fn serve(self, opened: Sender<Vec<PathBuf>>, ctx: egui::Context) {
         std::thread::spawn(move || {
             for stream in self.0.incoming().flatten() {
                 let files: Vec<PathBuf> = BufReader::new(stream)
@@ -58,13 +57,12 @@ impl Listener {
                     .filter(|line| !line.is_empty())
                     .map(PathBuf::from)
                     .collect();
-                if tx.send(files).is_err() {
+                if opened.send(files).is_err() {
                     break;
                 }
                 ctx.request_repaint();
             }
         });
-        rx
     }
 }
 

@@ -16,6 +16,9 @@
 - The desktop app runs once per user: files opened while it is already
   running, such as several screenshots opened with "Open with", are added
   to the open window instead of each opening a new one.
+- On macOS, jxr2png appears in Finder's "Open With" menu for `.jxr` and
+  `.wdp` files, can be made their default app in "Get Info", and accepts
+  screenshots dropped onto its Dock icon.
 - A "Made with ♥ by snake.tech" line at the bottom of the desktop app,
   linking to Ko-fi.
 
