@@ -93,15 +93,21 @@ with a paid certificate, so the first launch needs one extra step:
   converted ones, and **Retry failed** converts the failed ones again.
   Click a row to select it; Delete removes it, Enter converts the list and
   the arrow keys move the selection.
+- **PNGs that already exist.** When some of the PNGs a batch would make
+  are already there, the app asks once per batch whether to replace them,
+  keep both (the new ones get a number, e.g. `shot_hdr (2).png`) or skip
+  them.
 - **Resolution** scales the output down to 2160p, 1440p, 1080p or 720p,
   keeping the aspect ratio and never scaling up. It starts at Source every
   time.
 - **Open .jxr files with jxr2png** (Windows and Linux) makes a double-click
   on a screenshot open it in the app. Windows asks you to confirm the choice
   in Settings.
-- **Advanced** holds the tuning options from the command line. They are off
-  by default and reset every time the app starts, so results always match
-  the original screenshot unless you change them.
+- **Advanced** has **Keep the capture date** (on by default), which gives
+  each PNG the date of its screenshot so folders sorted by date stay in
+  capture order. It also holds the tuning options from the command line.
+  They are off by default and reset every time the app starts, so results
+  always match the original screenshot unless you change them.
 - The window is drawn on the CPU and only redraws when something changes,
   so it uses almost no CPU or GPU while idle and doesn't flicker on variable
   refresh rate monitors (G-Sync, FreeSync).

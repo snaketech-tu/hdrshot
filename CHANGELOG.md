@@ -23,12 +23,15 @@
   and the G-Sync flicker stays fixed without redrawing every frame.
 - The Resolution menu shows the size the listed files come out at, such as
   "1080p (2580×1080)" for ultrawide screenshots.
+- The desktop app no longer replaces PNGs that already exist without
+  asking. It asks once per batch: Replace, Keep both or Skip.
 - The command line no longer replaces PNGs that already exist. It skips
   them and says so; `--overwrite` replaces them as before.
 - The command line converts several files at once, about three times as
   fast on a 4-core PC.
 - PNGs get the screenshot's modified date, so folders sorted by date stay
-  in capture order. `--no-keep-date` turns this off.
+  in capture order. `--no-keep-date` or the app's **Keep the capture date**
+  setting turns this off.
 
 ### Fixed
 
