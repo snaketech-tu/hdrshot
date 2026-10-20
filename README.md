@@ -89,6 +89,9 @@ with a paid certificate, so the first launch needs one extra step:
   has its own **Copy for Discord** button. The copy leaves out the `cICP`
   chunk, which makes Discord turn HDR images yellow; the saved file keeps it
   for Windows Photos and HDR viewers.
+- **Previews.** Each file gets a thumbnail; hover it for a larger SDR
+  preview. When the Advanced settings are changed, the preview shows the
+  automatic result and the result with your settings, so you can compare.
 - **The file list.** Double-click a converted image to open it.
   Right-click a row to open the HDR or SDR PNG, show it in its folder,
   convert it again or remove it. **Clear** removes all files or only the

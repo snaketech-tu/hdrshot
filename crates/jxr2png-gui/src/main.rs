@@ -4,6 +4,7 @@ mod assoc;
 mod convert;
 #[cfg(target_os = "macos")]
 mod macos;
+mod previews;
 mod single;
 mod storage;
 mod taskbar;
@@ -18,6 +19,7 @@ use jxr2png_core::{ConvertOptions, Existing, HdrOptions, OutputMode, Outputs, Sd
 use serde::{Deserialize, Serialize};
 
 use convert::{Event, Job, SharedClipboard};
+use previews::{Previews, THUMB_SIZE, Thumb};
 
 /// The app icon, 256 px. Windows also gets `assets/icon.ico` embedded in
 /// the executable by `build.rs`.
@@ -148,6 +150,16 @@ struct Entry {
     status: Status,
     /// Source width and height, if the file's header could be read.
     size: Option<(u32, u32)>,
+    thumb: Thumb,
+}
+
+/// The large preview of the row under the mouse, tone-mapped automatically
+/// and, if the Advanced settings are changed, with them.
+struct Shown {
+    path: PathBuf,
+    sdr: SdrOptions,
+    auto: egui::TextureHandle,
+    tuned: Option<egui::TextureHandle>,
 }
 
 struct App {
@@ -173,6 +185,8 @@ struct App {
     was_focused: bool,
     /// Row picked by clicking it, for the keyboard shortcuts.
     selected: Option<usize>,
+    previews: Previews,
+    shown: Option<Shown>,
     /// Files opened while the app was already running, and on macOS all
     /// files opened from Finder.
     opened: Receiver<Vec<PathBuf>>,
@@ -237,6 +251,8 @@ impl App {
             was_focused: true,
             selected: None,
             opened,
+            previews: Previews::new(ctx.clone()),
+            shown: None,
             asking: None,
         };
         if assoc::SUPPORTED {
@@ -290,10 +306,12 @@ impl App {
     fn add_file(&mut self, path: PathBuf) {
         if !self.files.iter().any(|e| e.path == path) {
             let size = jxr2png_core::dimensions(&path).ok();
+            self.previews.request(&path);
             self.files.push(Entry {
                 path,
                 status: Status::Waiting,
                 size,
+                thumb: Thumb::Loading,
             });
         }
     }
@@ -709,6 +727,7 @@ impl App {
     fn file_list(&mut self, ui: &mut egui::Ui) {
         let running = self.running();
         let mut action = None;
+        let mut hovered_thumb = None;
         let stripe = ui.visuals().faint_bg_color;
         let selection = ui.visuals().selection.bg_fill.gamma_multiply(0.35);
         let hover = ui.visuals().widgets.hovered.weak_bg_fill;
@@ -718,7 +737,7 @@ impl App {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for (i, entry) in self.files.iter().enumerate() {
                     let (rect, row) = ui
-                        .allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::click());
+                        .allocate_exact_size(Vec2::new(ui.available_width(), 38.0), Sense::click());
                     if self.selected == Some(i) {
                         ui.painter().rect_filled(rect, 4.0, selection);
                     } else if row.hovered() {
@@ -773,6 +792,9 @@ impl App {
                             action = Some(RowAction::Copy(outputs.clone()));
                         }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            if thumb_ui(ui, &entry.thumb, self.shown.as_ref().filter(|s| s.path == entry.path)) {
+                                hovered_thumb = Some(i);
+                            }
                             let name = entry.path.file_name().unwrap_or_default().to_string_lossy();
                             ui.add(egui::Label::new(name.as_ref()).truncate().selectable(false))
                                 .on_hover_text(entry.path.display().to_string());
@@ -781,6 +803,7 @@ impl App {
                 }
             });
         let ctx = ui.ctx().clone();
+        self.update_shown(hovered_thumb, &ctx);
         match action {
             None => {}
             Some(RowAction::Select(i)) => self.selected = Some(i),
@@ -795,6 +818,33 @@ impl App {
             Some(RowAction::Retry(i)) => self.start_some(vec![i], &ctx),
             Some(RowAction::Remove(i)) => self.remove(i),
         }
+    }
+
+    /// Prepares the large preview of row `hovered` with the current
+    /// settings; it shows from the next frame.
+    fn update_shown(&mut self, hovered: Option<usize>, ctx: &egui::Context) {
+        let Some(entry) = hovered.map(|i| &self.files[i]) else {
+            return;
+        };
+        let Thumb::Ready { preview, .. } = &entry.thumb else {
+            return;
+        };
+        let sdr = self.convert_options(Existing::Skip).sdr;
+        if self
+            .shown
+            .as_ref()
+            .is_some_and(|s| s.path == entry.path && s.sdr == sdr)
+        {
+            return;
+        }
+        let auto = SdrOptions::default();
+        self.shown = Some(Shown {
+            path: entry.path.clone(),
+            sdr,
+            auto: previews::texture(ctx, "preview", preview, &auto),
+            tuned: (sdr != auto).then(|| previews::texture(ctx, "preview-tuned", preview, &sdr)),
+        });
+        ctx.request_repaint();
     }
 
     fn settings_ui(&mut self, ui: &mut egui::Ui) {
@@ -1075,6 +1125,11 @@ impl window::App for App {
         }
         self.shortcuts(&ctx);
         self.receive_opened(&ctx);
+        for (path, thumb) in self.previews.finished(&ctx) {
+            if let Some(entry) = self.files.iter_mut().find(|e| e.path == path) {
+                entry.thumb = thumb;
+            }
+        }
 
         let margin = egui::Margin::same(16);
         let panel_fill = ui.visuals().panel_fill;
@@ -1172,6 +1227,47 @@ fn after_removal(selected: Option<usize>, removed: usize) -> Option<usize> {
         Some(s) if s > removed => Some(s - 1),
         s => s,
     }
+}
+
+/// The thumbnail at the start of a row, with the large preview `shown` (if
+/// it is this row's) when hovered. Returns whether it is hovered.
+fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) -> bool {
+    let box_size = Vec2::new(THUMB_SIZE.0 as f32, THUMB_SIZE.1 as f32);
+    let Thumb::Ready { texture, .. } = thumb else {
+        let (rect, _) = ui.allocate_exact_size(box_size, Sense::hover());
+        if matches!(thumb, Thumb::Loading) {
+            ui.painter()
+                .rect_filled(rect.shrink(2.0), 3.0, ui.visuals().faint_bg_color);
+        }
+        return false;
+    };
+    let [w, h] = texture.size();
+    let (w, h) = jxr2png_core::resize::fit_box(w as u32, h as u32, THUMB_SIZE.0, THUMB_SIZE.1);
+    let (rect, response) = ui.allocate_exact_size(box_size, Sense::hover());
+    let image_rect = egui::Rect::from_center_size(rect.center(), Vec2::new(w as f32, h as f32));
+    egui::Image::new((texture.id(), image_rect.size()))
+        .corner_radius(2.0)
+        .paint_at(ui, image_rect);
+    let hovered = response.hovered();
+    if let Some(shown) = shown {
+        response.on_hover_ui(|ui| {
+            let show = |ui: &mut egui::Ui, texture: &egui::TextureHandle| {
+                let [w, h] = texture.size();
+                ui.image((texture.id(), Vec2::new(w as f32, h as f32)));
+            };
+            match &shown.tuned {
+                Some(tuned) => {
+                    ui.label("Automatic");
+                    show(ui, &shown.auto);
+                    ui.label("With your Advanced settings");
+                    show(ui, tuned);
+                }
+                None => show(ui, &shown.auto),
+            }
+            ui.weak("SDR preview; the HDR PNG keeps the full brightness.");
+        });
+    }
+    hovered
 }
 
 /// The right-click menu of a row.
@@ -1408,6 +1504,7 @@ mod tests {
             path: PathBuf::new(),
             status: Status::Waiting,
             size,
+            thumb: Thumb::Failed,
         }
     }
 
