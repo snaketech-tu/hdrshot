@@ -430,6 +430,7 @@ impl App {
             naming: self.settings.naming(),
             hdr: HdrOptions {
                 peak_nits: t.limit_hdr_peak.then_some(t.hdr_peak),
+                ..Default::default()
             },
             sdr: SdrOptions {
                 white_nits: t.sdr_white,

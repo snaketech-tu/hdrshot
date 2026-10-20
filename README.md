@@ -31,6 +31,8 @@ the screenshot looks.
 - **HDR PNG.** Rec.2020 PQ with the brightness of the original
   screenshot, shown in HDR by Windows Photos, Chrome, Edge and HDR image
   viewers.
+- **HDR AVIF.** Optionally the same HDR picture as a 10-bit AVIF, about a
+  twentieth of the PNG's size, shown in HDR by Chrome, Edge and Firefox.
 - **SDR PNG.** Tone-mapped the way Windows shows the
   screenshot on an SDR screen, with highlights that roll off smoothly and
   colors that keep their hue.
@@ -180,11 +182,15 @@ Everything is automatic; these options are only for tuning:
 | `--hdr` / `--sdr` | Make only the HDR or only the SDR PNG |
 | `-r, --recursive` | Also convert files in subfolders of the given folders |
 | `-o, --output <DIR>` | Save into this folder instead of next to each input |
+| `--format <png\|avif>` | File format of the HDR output (default `png`) |
+| `--avif-quality <1-100>` | AVIF quality (default 90); lower is smaller |
+| `--avif-speed <0-10>` | AVIF encoder speed (default 8); 10 is faster but larger |
+| `--avif-420` | Store AVIF color at half resolution: smaller, softer colored edges |
 | `--hdr-peak <NITS>` | Limit the HDR PNG's brightest highlight, rolling off anything brighter |
 | `--sdr-white <NITS>` | HDR brightness that becomes SDR white (default 80; lower is brighter) |
 | `--sdr-peak <NITS>` | Brightness that maps to full SDR white, instead of the 99.9th percentile |
 | `--input-white <NITS>` | Brightness of 1.0 in OpenEXR, Radiance and float JPEG XL files (default: the file's own value, or 80) |
-| `--name <PATTERN>` | Output file name without `.png`: `{name}` is the input's name, `{type}` is `hdr` or `sdr` (default `{name}_{type}`) |
+| `--name <PATTERN>` | Output file name without extension: `{name}` is the input's name, `{type}` is `hdr` or `sdr` (default `{name}_{type}`) |
 | `--subfolders` | Put the PNGs in `hdr` and `sdr` subfolders of the output folder |
 | `--max-height <PIXELS>` | Scale taller images down to this height, averaging in linear light |
 | `--overwrite` | Replace PNGs that already exist; by default they are skipped |
@@ -232,6 +238,12 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   Photo Viewer) use the profile's lookup table instead, which applies the
   same SDR tone mapping as the SDR output, so they show a normal picture
   instead of a washed-out one.
+- **AVIF**: the same BT.2020 PQ pixels as the HDR PNG, converted to
+  10-bit full-range BT.2020 YCbCr (4:4:4 by default) and encoded with
+  [`rav1e`](https://crates.io/crates/rav1e) in pure Rust. The container
+  carries the matching `nclx` color box and `clli`/`mdcv` light levels.
+  A 3440×1440 capture becomes about 450 KB instead of 11 MB. Encoding takes
+  a few seconds per image.
 - **Discord**: its image service converts PNGs with a `cICP` chunk to SDR
   with wrong colors (warm scenes turn yellow) but shows them correctly
   without it, so the clipboard copy leaves the chunk out (and `mDCV`,

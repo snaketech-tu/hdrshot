@@ -5,7 +5,8 @@ use std::sync::Mutex;
 
 use clap::{CommandFactory, Parser};
 use jxr2png_core::{
-    ConvertOptions, Existing, HdrOptions, InputOptions, Naming, OutputMode, Outputs, SdrOptions,
+    AvifOptions, ConvertOptions, Existing, HdrFormat, HdrOptions, InputOptions, Naming, OutputMode,
+    Outputs, SdrOptions,
 };
 use rayon::prelude::*;
 
@@ -32,12 +33,33 @@ struct Args {
     #[arg(long)]
     sdr: bool,
 
+    /// File format of the HDR output: png (16-bit, lossless) or avif
+    /// (10-bit, about a tenth of the size).
+    #[arg(long, value_enum, default_value_t = Format::Png)]
+    format: Format,
+
+    /// AVIF quality from 1 to 100; higher is closer to the original and
+    /// larger.
+    #[arg(long, value_name = "1-100", default_value_t = AvifOptions::default().quality,
+          value_parser = clap::value_parser!(u8).range(1..=100))]
+    avif_quality: u8,
+
+    /// AVIF encoder speed from 0 (slowest, smallest file) to 10 (fastest).
+    #[arg(long, value_name = "0-10", default_value_t = AvifOptions::default().speed,
+          value_parser = clap::value_parser!(u8).range(0..=10))]
+    avif_speed: u8,
+
+    /// Store AVIF color at half resolution (4:2:0): smaller, but colored
+    /// text and thin colored edges get softer.
+    #[arg(long)]
+    avif_420: bool,
+
     /// Output directory (defaults to each input's directory).
     #[arg(short, long)]
     output: Option<PathBuf>,
 
-    /// Output file name without .png: {name} is the input's name, {type}
-    /// is hdr or sdr.
+    /// Output file name without extension: {name} is the input's name,
+    /// {type} is hdr or sdr.
     #[arg(long, value_name = "PATTERN", default_value = Naming::DEFAULT_PATTERN)]
     name: String,
 
@@ -109,6 +131,12 @@ const HOLD_CLIPBOARD: &str = "--hold-clipboard";
 /// `--generate <WHAT>`: prints a shell completion script (bash, zsh, fish,
 /// powershell, elvish) or the man page (man), for packaging.
 const GENERATE: &str = "--generate";
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum Format {
+    Png,
+    Avif,
+}
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum Generate {
@@ -185,6 +213,15 @@ fn main() -> ExitCode {
             subfolders: args.subfolders,
         },
         hdr: HdrOptions {
+            format: match args.format {
+                Format::Png => HdrFormat::Png,
+                Format::Avif => HdrFormat::Avif,
+            },
+            avif: AvifOptions {
+                quality: args.avif_quality,
+                speed: args.avif_speed,
+                full_color: !args.avif_420,
+            },
             peak_nits: args.hdr_peak,
         },
         sdr: SdrOptions {
@@ -381,7 +418,7 @@ mod clipboard {
     use jxr2png_core::share::{self, DISCORD_LIMIT, megabytes};
     use jxr2png_core::{ConvertOptions, Outputs};
 
-    /// The PNG of `input` to copy, preferring the HDR one, and whether it
+    /// The image of `input` to copy, preferring the HDR one, and whether it
     /// is HDR. A PNG skipped because it already existed counts too.
     pub fn pick(
         input: &Path,
@@ -419,9 +456,12 @@ mod clipboard {
         } else {
             bytes.len()
         } as u64;
+        let is_png = png
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("png"));
         let (bytes, message) = if size <= DISCORD_LIMIT {
             (bytes, format!("Copied {name} to the clipboard"))
-        } else if small {
+        } else if small && is_png {
             let smaller = share::smaller_png(input, options, hdr, DISCORD_LIMIT)
                 .map_err(|e| e.to_string())?
                 .ok_or("even a 720p copy is larger than 10 MB")?;

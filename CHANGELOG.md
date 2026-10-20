@@ -14,11 +14,15 @@
 - JPEG XL (`.jxl`) input, decoded in pure Rust: PQ and HLG files keep their
   brightness, float files are read like OpenEXR, and SDR files give the SDR
   PNG only.
+- `--format avif` writes the HDR output as a 10-bit BT.2020 PQ AVIF with
+  `clli` and `mdcv` light levels, about a twentieth of the PNG's size.
+  `--avif-quality`, `--avif-speed` and `--avif-420` tune it.
 
 ### Fixed
 
 - A conversion that would write its PNG over the input file now fails
   instead.
+- Copying a file that is not a PNG to the clipboard no longer alters it.
 
 ## [1.2.0] - 2026-10-20
 

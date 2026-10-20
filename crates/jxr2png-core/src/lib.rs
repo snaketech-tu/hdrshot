@@ -12,6 +12,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+pub mod avif;
 pub mod color;
 pub mod decode;
 pub mod encode;
@@ -20,6 +21,7 @@ pub mod input;
 pub mod resize;
 pub mod share;
 
+pub use avif::{AvifOptions, write_hdr_avif};
 use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode, dimensions};
 pub use encode::{LightLevels, for_discord, light_levels, sdr_rgb8, write_hdr_png, write_sdr_png};
@@ -44,9 +46,32 @@ impl OutputMode {
     }
 }
 
+/// File format of the HDR output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HdrFormat {
+    /// 16-bit PNG, lossless; shown in HDR by Windows Photos and browsers.
+    #[default]
+    Png,
+    /// 10-bit AVIF, about a tenth of the PNG's size.
+    Avif,
+}
+
+impl HdrFormat {
+    /// File extension, without the dot.
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Avif => "avif",
+        }
+    }
+}
+
 /// Settings for the HDR output.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct HdrOptions {
+    pub format: HdrFormat,
+    /// Encoder settings when [`Self::format`] is AVIF.
+    pub avif: AvifOptions,
     /// Optional brightest luminance, in nits, to write. Brighter highlights
     /// roll off smoothly up to this value. `None` (the default) keeps the
     /// screenshot's brightness exactly and leaves fitting it to the display
@@ -90,7 +115,7 @@ pub enum Existing {
 /// How output files are named.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Naming {
-    /// File name without `.png`. `{name}` is replaced by the input's name
+    /// File name without extension. `{name}` is replaced by the input's name
     /// without extension, `{type}` by `hdr` or `sdr`.
     pub pattern: String,
     /// Put HDR and SDR PNGs into `hdr` and `sdr` subfolders.
@@ -176,6 +201,8 @@ pub enum Error {
     SameAsInput(PathBuf),
     #[error("could not write PNG: {0}")]
     Encode(#[from] png::EncodingError),
+    #[error("could not write AVIF: {0}")]
+    EncodeAvif(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -235,7 +262,7 @@ pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {
         .unwrap_or_default();
     let stem = input.file_stem().unwrap_or_default().to_string_lossy();
     let naming = &options.naming;
-    let path = |kind: &str| {
+    let path = |kind: &str, extension: &str| {
         let name = naming
             .pattern
             .replace("{name}", &stem)
@@ -245,11 +272,14 @@ pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {
         } else {
             dir.clone()
         };
-        dir.join(format!("{name}.png"))
+        dir.join(format!("{name}.{extension}"))
     };
     Outputs {
-        hdr: options.mode.hdr().then(|| path("hdr")),
-        sdr: options.mode.sdr().then(|| path("sdr")),
+        hdr: options
+            .mode
+            .hdr()
+            .then(|| path("hdr", options.hdr.format.extension())),
+        sdr: options.mode.sdr().then(|| path("sdr", "png")),
         ..Outputs::default()
     }
 }
@@ -390,8 +420,9 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
         }
     }
     if let Some(path) = &outputs.hdr {
-        write_file(path, modified, |w| {
-            write_hdr_png(&image, &levels, &options.hdr, &options.sdr, w)
+        write_file(path, modified, |w| match options.hdr.format {
+            HdrFormat::Png => write_hdr_png(&image, &levels, &options.hdr, &options.sdr, w),
+            HdrFormat::Avif => write_hdr_avif(&image, &options.hdr, &options.hdr.avif, w),
         })?;
     }
     if let Some(path) = &outputs.sdr {
@@ -461,6 +492,20 @@ mod tests {
                 .is_err()
         );
         assert!(naming("out/{name}", false).check(OutputMode::Sdr).is_err());
+    }
+
+    #[test]
+    fn hdr_extension_follows_format() {
+        let opts = ConvertOptions {
+            hdr: HdrOptions {
+                format: HdrFormat::Avif,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let out = output_paths(Path::new("shots/game.jxr"), &opts);
+        assert_eq!(out.hdr, Some(PathBuf::from("shots/game_hdr.avif")));
+        assert_eq!(out.sdr, Some(PathBuf::from("shots/game_sdr.png")));
     }
 
     #[test]
