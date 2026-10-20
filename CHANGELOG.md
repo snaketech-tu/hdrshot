@@ -4,6 +4,10 @@
 
 ### Added
 
+- The command line takes folders (`-r` for subfolders too) and expands
+  wildcards such as `*.jxr` itself, so they work in cmd and PowerShell.
+- `--quiet`, `--json`, a progress line on terminals, and a closing summary
+  such as "3 of 20 files failed".
 - A "Made with ♥ by snake.tech" line at the bottom of the desktop app,
   linking to Ko-fi.
 
@@ -16,6 +20,8 @@
   "1080p (2580×1080)" for ultrawide screenshots.
 - The command line no longer replaces PNGs that already exist. It skips
   them and says so; `--overwrite` replaces them as before.
+- The command line converts several files at once, about three times as
+  fast on a 4-core PC.
 - PNGs get the screenshot's modified date, so folders sorted by date stay
   in capture order. `--no-keep-date` turns this off.
 

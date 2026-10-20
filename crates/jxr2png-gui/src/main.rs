@@ -205,13 +205,10 @@ impl App {
         let mut skipped = 0;
         for path in paths {
             if path.is_dir() {
-                let mut found = Vec::new();
-                collect_jxr(&path, &mut found);
-                found.sort();
-                for file in found {
+                for file in jxr2png_core::find_jxr(&path, true) {
                     self.add_file(file);
                 }
-            } else if is_jxr(&path) {
+            } else if jxr2png_core::is_jxr(&path) {
                 self.add_file(path);
             } else {
                 skipped += 1;
@@ -888,25 +885,6 @@ fn ok_color(ui: &egui::Ui) -> Color32 {
         Color32::from_rgb(120, 200, 120)
     } else {
         Color32::from_rgb(30, 130, 50)
-    }
-}
-
-fn is_jxr(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("jxr") || e.eq_ignore_ascii_case("wdp"))
-}
-
-fn collect_jxr(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_jxr(&path, out);
-        } else if is_jxr(&path) {
-            out.push(path);
-        }
     }
 }
 

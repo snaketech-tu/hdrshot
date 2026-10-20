@@ -137,6 +137,36 @@ pub struct Outputs {
     pub skipped: Vec<PathBuf>,
 }
 
+/// Whether `path` names a JPEG XR file (`.jxr` or `.wdp`).
+pub fn is_jxr(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("jxr") || e.eq_ignore_ascii_case("wdp"))
+}
+
+/// The JPEG XR files in `dir`, sorted by path; with `recursive`, also those
+/// in its subfolders. Unreadable folders are left out.
+pub fn find_jxr(dir: &Path, recursive: bool) -> Vec<PathBuf> {
+    fn walk(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if recursive {
+                    walk(&path, recursive, out);
+                }
+            } else if is_jxr(&path) {
+                out.push(path);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(dir, recursive, &mut found);
+    found.sort();
+    found
+}
+
 /// Output paths that `convert_file` will write for `input`, before
 /// [`ConvertOptions::existing`] is applied.
 pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {

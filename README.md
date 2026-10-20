@@ -106,12 +106,14 @@ with a paid certificate, so the first launch needs one extra step:
 ```sh
 jxr2png shot.jxr                         # writes shot_hdr.png and shot_sdr.png
 jxr2png --hdr -o out/ a.jxr b.jxr        # HDR only, into out/
+jxr2png *.jxr                            # wildcards work in cmd and PowerShell too
+jxr2png -r Captures/                     # a folder, including its subfolders
 jxr2png --sdr --sdr-white 203 shot.jxr   # darker SDR result
 ```
 
-Wildcards such as `*.jxr` work in shells that expand them (bash, zsh); in
-cmd and PowerShell, list the files or use the desktop app, which also takes
-folders.
+Several files are converted at once, up to eight at a time. Each line of
+output names a written or skipped PNG, a summary follows, and the exit code
+is non-zero if any file failed.
 
 PNGs that already exist are skipped, so converting a folder again only
 adds the new screenshots. Each PNG gets the screenshot's modified date, so
@@ -123,6 +125,7 @@ Everything is automatic; these options are only for tuning:
 | Option | Effect |
 | --- | --- |
 | `--hdr` / `--sdr` | Make only the HDR or only the SDR PNG |
+| `-r, --recursive` | Also convert files in subfolders of the given folders |
 | `-o, --output <DIR>` | Save into this folder instead of next to each input |
 | `--hdr-peak <NITS>` | Limit the HDR PNG's brightest highlight, rolling off anything brighter |
 | `--sdr-white <NITS>` | HDR brightness that becomes SDR white (default 80; lower is brighter) |
@@ -130,6 +133,8 @@ Everything is automatic; these options are only for tuning:
 | `--max-height <PIXELS>` | Scale taller images down to this height, averaging in linear light |
 | `--overwrite` | Replace PNGs that already exist; by default they are skipped |
 | `--no-keep-date` | Give the PNGs the current time instead of the screenshot's date |
+| `-q, --quiet` | Print only errors |
+| `--json` | Print one JSON object per input file, for scripts |
 
 Run `jxr2png --help` for the full list.
 
