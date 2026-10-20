@@ -20,6 +20,18 @@ pub fn fit_height(width: u32, height: u32, max_height: u32) -> (u32, u32) {
     ((new_width as u32).max(1), max_height)
 }
 
+/// Output size for an image `width`×`height` that fits in
+/// `max_width`×`max_height`, keeping the aspect ratio. Never scales up.
+pub fn fit_box(width: u32, height: u32, max_width: u32, max_height: u32) -> (u32, u32) {
+    if width <= max_width && height <= max_height {
+        return (width, height);
+    }
+    let scale =
+        (f64::from(max_width) / f64::from(width)).min(f64::from(max_height) / f64::from(height));
+    let scaled = |v: u32| ((f64::from(v) * scale).round() as u32).max(1);
+    (scaled(width), scaled(height))
+}
+
 /// Resample `image` to `width`×`height`.
 pub fn resize(image: &ScRgbImage, width: u32, height: u32) -> ScRgbImage {
     if (width, height) == (image.width, image.height) {
@@ -97,6 +109,14 @@ fn weights(src: usize, dst: usize) -> Vec<(usize, Vec<f32>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fit_box_keeps_aspect_and_never_upscales() {
+        assert_eq!(fit_box(3440, 1440, 480, 270), (480, 201));
+        assert_eq!(fit_box(1440, 3440, 480, 270), (113, 270));
+        assert_eq!(fit_box(64, 64, 480, 270), (64, 64));
+        assert_eq!(fit_box(10_000, 1, 96, 54), (96, 1));
+    }
 
     #[test]
     fn fit_height_keeps_aspect_and_never_upscales() {

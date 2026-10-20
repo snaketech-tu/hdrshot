@@ -218,13 +218,10 @@ pub fn for_discord(png: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Write a tone-mapped 8-bit sRGB PNG.
-pub fn write_sdr_png<W: Write>(
-    image: &ScRgbImage,
-    levels: &LightLevels,
-    options: &SdrOptions,
-    out: W,
-) -> Result<()> {
+/// The tone-mapped 8-bit sRGB pixels of the SDR output, RGB row by row.
+/// `levels` are those of the full image, so that a preview made from a
+/// downscaled copy is tone-mapped like the PNG.
+pub fn sdr_rgb8(image: &ScRgbImage, levels: &LightLevels, options: &SdrOptions) -> Vec<u8> {
     let white = options.white_nits / SCRGB_WHITE_NITS;
     let curve = ToneCurve::new(sdr_peak_nits(levels, options) / options.white_nits);
     let mut data = vec![0u8; image.pixels.len() * 3];
@@ -235,7 +232,17 @@ pub fn write_sdr_png<W: Write>(
                 *o = (srgb_encode(c) * 255.0).round() as u8;
             }
         });
+    data
+}
 
+/// Write a tone-mapped 8-bit sRGB PNG.
+pub fn write_sdr_png<W: Write>(
+    image: &ScRgbImage,
+    levels: &LightLevels,
+    options: &SdrOptions,
+    out: W,
+) -> Result<()> {
+    let data = sdr_rgb8(image, levels, options);
     let mut encoder = png::Encoder::new(out, image.width, image.height);
     encoder.set_color(ColorType::Rgb);
     encoder.set_depth(BitDepth::Eight);

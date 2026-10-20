@@ -4,7 +4,10 @@
 
 use std::path::{Path, PathBuf};
 
-use jxr2png_core::{ConvertOptions, Outputs, ScRgbImage, convert_file, decode, for_discord};
+use jxr2png_core::{
+    ConvertOptions, Outputs, ScRgbImage, SdrOptions, convert_file, decode, for_discord, preview,
+    sdr_rgb8,
+};
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/hdr64.jxr");
 
@@ -229,4 +232,24 @@ fn discord_copy_drops_cicp_and_mdcv_only() {
     {
         assert_eq!(copy.rgb(x, y), expected, "Discord copy pixel ({x}, {y})");
     }
+}
+
+#[test]
+fn preview_is_small_and_tone_maps_like_the_png() {
+    let preview = preview(Path::new(FIXTURE), 32, 16).unwrap();
+    assert_eq!((preview.image.width, preview.image.height), (16, 16));
+    // Levels come from the full image, not the downscaled one.
+    let full = jxr2png_core::light_levels(&fixture());
+    assert_eq!(preview.levels, full);
+
+    let dir = out_dir("preview");
+    let options = ConvertOptions {
+        mode: jxr2png_core::OutputMode::Sdr,
+        output_dir: Some(dir),
+        ..Default::default()
+    };
+    let outputs = convert_file(Path::new(FIXTURE), &options).unwrap();
+    let png = read_png(outputs.sdr.as_ref().unwrap());
+    let full_rgb = sdr_rgb8(&fixture(), &full, &SdrOptions::default());
+    assert_eq!(png.pixels, full_rgb);
 }

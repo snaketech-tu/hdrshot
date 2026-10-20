@@ -19,7 +19,7 @@ pub mod resize;
 
 use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode, dimensions};
-pub use encode::{LightLevels, for_discord, light_levels, write_hdr_png, write_sdr_png};
+pub use encode::{LightLevels, for_discord, light_levels, sdr_rgb8, write_hdr_png, write_sdr_png};
 
 /// Which PNG files to produce for each input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -229,6 +229,23 @@ fn write_file(
         let _ = std::fs::remove_file(&temp);
     }
     result
+}
+
+/// A small copy of an image for showing it, with the light levels of the
+/// full image so it tone-maps like the PNG ([`sdr_rgb8`]).
+#[derive(Debug, Clone)]
+pub struct Preview {
+    pub image: ScRgbImage,
+    pub levels: LightLevels,
+}
+
+/// Decodes `input` and scales it to fit `max_width`×`max_height`.
+pub fn preview(input: &Path, max_width: u32, max_height: u32) -> Result<Preview> {
+    let image = decode(&std::fs::read(input)?)?;
+    let levels = light_levels(&image);
+    let (width, height) = resize::fit_box(image.width, image.height, max_width, max_height);
+    let image = resize::resize(&image, width, height);
+    Ok(Preview { image, levels })
 }
 
 /// Convert one `.jxr` file according to `options`.
