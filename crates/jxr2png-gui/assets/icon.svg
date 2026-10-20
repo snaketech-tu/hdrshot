@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs>
+<clipPath id="i-tile"><rect x="8" y="8" width="240" height="240" rx="56"/></clipPath>
+<clipPath id="i-hot"><polygon points="0,0 256,0 256,256"/></clipPath>
+<clipPath id="i-cold"><polygon points="0,0 0,256 256,256"/></clipPath>
+<linearGradient id="i-dim" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4c5566"/><stop offset="1" stop-color="#262c37"/></linearGradient>
+<linearGradient id="i-hdr" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#0f55c4"/><stop offset="1" stop-color="#2cc0ff"/></linearGradient>
+<radialGradient id="i-glow"><stop offset="0" stop-color="#ffffff" stop-opacity="1"/><stop offset="0.3" stop-color="#e6f6ff" stop-opacity="0.85"/><stop offset="0.6" stop-color="#9fdcff" stop-opacity="0.35"/><stop offset="1" stop-color="#7fd0ff" stop-opacity="0"/></radialGradient>
+<radialGradient id="i-halo"><stop offset="0" stop-color="#bfeaff" stop-opacity="1"/><stop offset="1" stop-color="#bfeaff" stop-opacity="0"/></radialGradient>
+</defs>
+<g clip-path="url(#i-tile)">
+<rect x="0" y="0" width="256" height="256" fill="url(#i-dim)"/>
+<polygon points="0,0 256,0 256,256" fill="url(#i-hdr)"/>
+<g clip-path="url(#i-hot)">
+<circle cx="128" cy="128" r="96" fill="url(#i-glow)"/>
+
+<circle cx="128" cy="128" r="42" fill="#ffffff"/>
+<g stroke="#ffffff" stroke-width="14" stroke-linecap="round"><line x1="128.0" y1="48.0" x2="128.0" y2="30.0"/><line x1="184.6" y1="71.4" x2="197.3" y2="58.7"/><line x1="208.0" y1="128.0" x2="226.0" y2="128.0"/></g>
+</g>
+<g clip-path="url(#i-cold)"><circle cx="128" cy="128" r="42" fill="#8a93a3"/></g>
+<line x1="8" y1="8" x2="248" y2="248" stroke="#ffffff" stroke-opacity="0.25" stroke-width="3"/>
+</g>
+</svg>

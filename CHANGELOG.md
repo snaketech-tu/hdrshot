@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- New app icon: a picture split between flat SDR and bright HDR. It has
+  a simplified version for the smallest sizes, a macOS icon on Apple's
+  icon grid, and Linux icons from 16 px to 512 px plus a scalable SVG.
+
 ## [1.2.0] - 2026-10-20
 
 ### Added
