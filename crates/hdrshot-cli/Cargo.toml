@@ -17,4 +17,4 @@ clap_mangen = "0.3.3"
 ctrlc = "3.5.2"
 rayon = "1.12.0"
 wild = "2"
-hdrshot-core = { version = "2.0.0", path = "../hdrshot-core" }
+hdrshot-core = { version = "2.0.1", path = "../hdrshot-core" }
