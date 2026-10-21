@@ -79,7 +79,7 @@ fn main() {
     let viewport = egui::ViewportBuilder::default()
         .with_title(format!("hdrshot {}", env!("CARGO_PKG_VERSION")))
         .with_app_id("hdrshot")
-        .with_inner_size([560.0, 760.0])
+        .with_inner_size([560.0, 820.0])
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());

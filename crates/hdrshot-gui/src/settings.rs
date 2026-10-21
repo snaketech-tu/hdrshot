@@ -165,10 +165,6 @@ impl App {
                     );
                 ui.end_row();
 
-                theme::row_label(ui, "Watch folder");
-                self.watch_ui(ui);
-                ui.end_row();
-
                 theme::row_label(ui, "Clipboard");
                 ui.checkbox(
                     &mut self.settings.copy_to_clipboard,
@@ -217,6 +213,7 @@ impl App {
     }
 
     pub(crate) fn advanced_ui(&mut self, ui: &mut egui::Ui) {
+        self.watch_ui(ui);
         ui.checkbox(&mut self.settings.keep_date, "Keep the capture date")
             .on_hover_text(
                 "Give each PNG the date of its screenshot, so folders sorted \
