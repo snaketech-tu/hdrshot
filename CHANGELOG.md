@@ -44,6 +44,11 @@
 - The crates are `hdrshot-core`, `hdrshot` and `hdrshot-gui`, with
   crates.io metadata. The vendored CPU renderer is the
   `hdrshot-egui-backend` package.
+- A refreshed desktop app look, in colors taken from the icon: the icon
+  and tagline in the header, a dashed drop area, joined choice buttons,
+  settings grouped on a card, files on rounded rows with status labels,
+  and a highlighted Convert button. Dark and light themes both follow the
+  system.
 - New app icon: a picture split between flat SDR and bright HDR. It has
   a simplified version for the smallest sizes, a macOS icon on Apple's
   icon grid, and Linux icons from 16 px to 512 px plus a scalable SVG.

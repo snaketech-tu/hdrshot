@@ -8,6 +8,7 @@ mod previews;
 mod single;
 mod storage;
 mod taskbar;
+mod theme;
 mod update;
 mod window;
 
@@ -275,6 +276,8 @@ struct App {
     update: Update,
     /// Results of the update check and install, made in the background.
     updates: (Sender<UpdateMessage>, Receiver<UpdateMessage>),
+    /// The app icon, shown in the header.
+    logo: egui::TextureHandle,
 }
 
 /// Where the check for a newer version stands.
@@ -346,10 +349,18 @@ impl App {
         #[cfg(target_os = "macos")]
         macos::receive_opened_files(open.clone(), ctx.clone());
         drop(open);
-        ctx.global_style_mut(|style| {
-            style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-            style.spacing.button_padding = Vec2::new(10.0, 4.0);
-        });
+        theme::apply(ctx);
+        let logo = {
+            let icon = icon();
+            ctx.load_texture(
+                "logo",
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [icon.width as usize, icon.height as usize],
+                    &icon.rgba,
+                ),
+                egui::TextureOptions::LINEAR,
+            )
+        };
         let mut app = Self {
             settings,
             tuning: Tuning::default(),
@@ -374,6 +385,7 @@ impl App {
             asking: None,
             update: Update::Idle,
             updates: channel(),
+            logo,
         };
         if assoc::SUPPORTED {
             assoc::refresh();
@@ -921,10 +933,9 @@ impl App {
         } else {
             "Check for updates"
         };
-        let selection = ui.visuals().selection;
         let label = RichText::new(text)
             .font(egui::FontId::proportional(12.0))
-            .color(selection.stroke.color);
+            .color(theme::accent(ui));
         let width = ui
             .painter()
             .layout_no_wrap(
@@ -944,7 +955,7 @@ impl App {
             egui::Layout::centered_and_justified(egui::Direction::TopDown),
         ));
         let button = egui::Button::new(label)
-            .fill(selection.bg_fill)
+            .fill(theme::accent(ui).gamma_multiply(0.14))
             .stroke(Stroke::NONE)
             .corner_radius(6.0)
             .wrap_mode(egui::TextWrapMode::Extend);
@@ -1144,10 +1155,15 @@ impl App {
         let stroke = if highlight {
             Stroke::new(2.0, accent)
         } else {
-            Stroke::new(1.5, visuals.widgets.noninteractive.bg_stroke.color)
+            Stroke::new(1.5, visuals.weak_text_color().gamma_multiply(0.5))
         };
         let painter = ui.painter();
-        painter.rect(rect, 10.0, fill, stroke, StrokeKind::Inside);
+        painter.rect_filled(rect, 12.0, fill);
+        if highlight {
+            painter.rect_stroke(rect, 12.0, stroke, StrokeKind::Inside);
+        } else {
+            dashed_outline(painter, rect.shrink(1.0), 12.0, stroke);
+        }
 
         let dim = |c: Color32| if enabled { c } else { c.gamma_multiply(0.4) };
         let text_color = dim(visuals.text_color());
@@ -1164,9 +1180,14 @@ impl App {
         let big = height > 120.0;
         if big {
             // Drawn as shapes: egui's bundled fonts have no arrow glyphs.
-            let arrow = Stroke::new(3.0, if highlight { accent } else { weak });
-            let tip = center - Vec2::new(0.0, 22.0);
-            painter.line_segment([center - Vec2::new(0.0, 48.0), tip], arrow);
+            painter.circle_filled(
+                center - Vec2::new(0.0, 38.0),
+                30.0,
+                accent.gamma_multiply(if highlight { 0.25 } else { 0.12 }),
+            );
+            let arrow = Stroke::new(3.0, dim(accent));
+            let tip = center - Vec2::new(0.0, 24.0);
+            painter.line_segment([center - Vec2::new(0.0, 52.0), tip], arrow);
             painter.line(
                 vec![
                     tip + Vec2::new(-10.0, -10.0),
@@ -1176,7 +1197,7 @@ impl App {
                 arrow,
             );
         }
-        let title_y = if big { 10.0 } else { -9.0 };
+        let title_y = if big { 14.0 } else { -9.0 };
         painter.text(
             center + Vec2::new(0.0, title_y),
             egui::Align2::CENTER_CENTER,
@@ -1209,23 +1230,24 @@ impl App {
         let running = self.running();
         let mut action = None;
         let mut hovered_thumb = None;
-        let stripe = ui.visuals().faint_bg_color;
-        let selection = ui.visuals().selection.bg_fill.gamma_multiply(0.35);
-        let hover = ui.visuals().widgets.hovered.weak_bg_fill;
+        let card = ui.visuals().faint_bg_color;
+        let selection = ui.visuals().selection.bg_fill.gamma_multiply(0.3);
+        let hover = ui.visuals().widgets.inactive.weak_bg_fill;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.spacing_mut().item_spacing.y = 4.0;
                 for (i, entry) in self.files.iter().enumerate() {
                     let (rect, row) = ui
-                        .allocate_exact_size(Vec2::new(ui.available_width(), 38.0), Sense::click());
-                    if self.selected == Some(i) {
-                        ui.painter().rect_filled(rect, 4.0, selection);
+                        .allocate_exact_size(Vec2::new(ui.available_width(), 44.0), Sense::click());
+                    let fill = if self.selected == Some(i) {
+                        selection
                     } else if row.hovered() {
-                        ui.painter().rect_filled(rect, 4.0, hover);
-                    } else if i % 2 == 0 {
-                        ui.painter().rect_filled(rect, 4.0, stripe);
-                    }
+                        hover
+                    } else {
+                        card
+                    };
+                    ui.painter().rect_filled(rect, 8.0, fill);
                     let outputs = match &entry.status {
                         Status::Done(outputs) if outputs.hdr.is_some() || outputs.sdr.is_some() => {
                             Some(outputs)
@@ -1248,7 +1270,7 @@ impl App {
                     });
 
                     let inner = egui::UiBuilder::new()
-                        .max_rect(rect.shrink2(Vec2::new(8.0, 0.0)))
+                        .max_rect(rect.shrink2(Vec2::new(10.0, 0.0)))
                         .layout(egui::Layout::right_to_left(egui::Align::Center));
                     ui.scope_builder(inner, |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
@@ -1265,15 +1287,19 @@ impl App {
                             && ui
                                 .small_button("Copy for Discord")
                                 .on_hover_text(
-                                    "Copy the image (the HDR one if made) to paste into Discord. \
-                                     The copy leaves out the cICP chunk, which Discord turns yellow.",
+                                    "Copy the image (the HDR one if made) as a PNG that Discord \
+                                     shows correctly",
                                 )
                                 .clicked()
                         {
                             action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
                         }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            if thumb_ui(ui, &entry.thumb, self.shown.as_ref().filter(|s| s.path == entry.path)) {
+                            if thumb_ui(
+                                ui,
+                                &entry.thumb,
+                                self.shown.as_ref().filter(|s| s.path == entry.path),
+                            ) {
                                 hovered_thumb = Some(i);
                             }
                             let name = entry.path.file_name().unwrap_or_default().to_string_lossy();
@@ -1330,46 +1356,70 @@ impl App {
     }
 
     fn settings_ui(&mut self, ui: &mut egui::Ui) {
+        theme::card(ui, |ui| self.settings_grid(ui));
+        ui.add_space(2.0);
+        self.advanced_section(ui);
+    }
+
+    fn settings_grid(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new("settings")
             .num_columns(2)
-            .spacing([12.0, 10.0])
+            .spacing([16.0, 10.0])
             .show(ui, |ui| {
-                ui.label("Create");
-                ui.horizontal(|ui| {
-                    let mode = &mut self.settings.mode;
-                    ui.selectable_value(mode, Mode::Both, "HDR + SDR")
-                        .on_hover_text("An HDR image and a tone-mapped SDR PNG for each image");
-                    ui.selectable_value(mode, Mode::Hdr, "HDR only")
-                        .on_hover_text("Only the HDR image, in the format chosen below");
-                    ui.selectable_value(mode, Mode::Sdr, "SDR only")
-                        .on_hover_text("Tone-mapped 8-bit PNG that looks right everywhere");
-                });
+                theme::row_label(ui, "Create");
+                theme::segmented(
+                    ui,
+                    &mut self.settings.mode,
+                    &[
+                        (
+                            Mode::Both,
+                            "HDR + SDR",
+                            "An HDR image and a tone-mapped SDR PNG for each image",
+                        ),
+                        (
+                            Mode::Hdr,
+                            "HDR only",
+                            "Only the HDR image, in the format chosen below",
+                        ),
+                        (
+                            Mode::Sdr,
+                            "SDR only",
+                            "Tone-mapped 8-bit PNG that looks right everywhere",
+                        ),
+                    ],
+                );
                 ui.end_row();
 
-                ui.label("HDR format");
+                theme::row_label(ui, "HDR format");
                 ui.add_enabled_ui(self.settings.mode != Mode::Sdr, |ui| {
-                    ui.horizontal(|ui| {
-                        let format = &mut self.settings.hdr_format;
-                        ui.selectable_value(format, Format::Png, "PNG")
-                            .on_hover_text(
+                    theme::segmented(
+                        ui,
+                        &mut self.settings.hdr_format,
+                        &[
+                            (
+                                Format::Png,
+                                "PNG",
                                 "16-bit lossless PNG, shown in HDR by Windows Photos, Chrome \
-                             and Edge. The largest files.",
-                            );
-                        ui.selectable_value(format, Format::Avif, "AVIF")
-                            .on_hover_text(
+                                 and Edge. The largest files.",
+                            ),
+                            (
+                                Format::Avif,
+                                "AVIF",
                                 "10-bit AVIF, about a twentieth of the PNG's size, shown in HDR \
-                             by Chrome, Edge and Firefox. Takes a few seconds per image.",
-                            );
-                        ui.selectable_value(format, Format::UltraHdr, "Ultra HDR JPEG")
-                            .on_hover_text(
-                                "A JPEG that every app shows in SDR and that Chrome, Edge, \
-                                 Android and Instagram show in HDR. Best for sharing.",
-                            );
-                    });
+                                 by Chrome, Edge and Firefox. Takes a few seconds per image.",
+                            ),
+                            (
+                                Format::UltraHdr,
+                                "Ultra HDR JPEG",
+                                "A JPEG that every app shows in SDR and that Chrome, Edge \
+                                 and Android show in HDR.",
+                            ),
+                        ],
+                    );
                 });
                 ui.end_row();
 
-                ui.label("Save to");
+                theme::row_label(ui, "Save to");
                 ui.vertical(|ui| {
                     let s = &mut self.settings;
                     ui.radio_value(&mut s.save_to_folder, false, "Same folder as each image");
@@ -1396,7 +1446,7 @@ impl App {
                 });
                 ui.end_row();
 
-                ui.label("Resolution");
+                theme::row_label(ui, "Resolution");
                 let label = |h: Option<u32>| {
                     let name = h.map_or_else(|| "Source".to_owned(), |h| format!("{h}p"));
                     match output_size(&self.files, h) {
@@ -1421,7 +1471,7 @@ impl App {
                     );
                 ui.end_row();
 
-                ui.label("Clipboard");
+                theme::row_label(ui, "Clipboard");
                 ui.checkbox(
                     &mut self.settings.copy_to_clipboard,
                     "Copy the last converted image",
@@ -1432,7 +1482,9 @@ impl App {
                 );
                 ui.end_row();
             });
+    }
 
+    fn advanced_section(&mut self, ui: &mut egui::Ui) {
         let custom = !self.tuning.is_default();
         let title = if custom {
             "Advanced (custom)"
@@ -1610,7 +1662,8 @@ impl App {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let big = |text: &str| {
                     egui::Button::new(RichText::new(text).strong().size(15.0))
-                        .min_size(Vec2::new(130.0, 32.0))
+                        .min_size(Vec2::new(150.0, 34.0))
+                        .corner_radius(8.0)
                 };
                 if let Some(job) = &self.job {
                     let stopping = job.is_cancelled();
@@ -1629,7 +1682,8 @@ impl App {
                     1 => "Convert 1 image".to_owned(),
                     n => format!("Convert {n} images"),
                 };
-                let response = ui.add_enabled(self.can_convert(), big(&label));
+                let button = theme::primary(ui, theme::primary_button(&label));
+                let response = ui.add_enabled(self.can_convert(), button);
                 let response = if self.settings.save_to_folder && self.settings.output_dir.is_none()
                 {
                     response.on_disabled_hover_text("Choose a folder to save into first")
@@ -1675,10 +1729,11 @@ impl window::App for App {
         let panel_fill = ui.visuals().panel_fill;
         self.advanced_height = 0.0;
         let bottom = egui::Panel::bottom("actions")
+            .show_separator_line(false)
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
             .show(ui, |ui| {
                 ui.add_enabled_ui(!self.running(), |ui| self.settings_ui(ui));
-                ui.separator();
+                ui.add_space(4.0);
                 self.action_bar(ui);
                 // Room for the update button, which is taller than the
                 // credit line it sits on.
@@ -1691,13 +1746,20 @@ impl window::App for App {
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading(RichText::new("hdrshot").strong());
-                    ui.label(RichText::new("Convert HDR images").weak());
+                    ui.add(
+                        egui::Image::new((self.logo.id(), Vec2::splat(30.0))).corner_radius(7.0),
+                    );
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.label(RichText::new("hdrshot").strong().size(19.0));
+                        ui.label(RichText::new("HDR image tool").size(12.0).weak());
+                    });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         self.default_app_ui(ui);
                     });
                 });
-                ui.add_space(4.0);
+                ui.add_space(8.0);
                 if self.files.is_empty() {
                     let height = ui.available_height().max(140.0);
                     self.drop_zone(ui, height);
@@ -1882,11 +1944,11 @@ fn row_menu(ui: &mut egui::Ui, i: usize, entry: &Entry, running: bool) -> Option
 fn status_ui(ui: &mut egui::Ui, status: &Status) {
     match status {
         Status::Waiting => {
-            ui.weak("Waiting");
+            theme::pill(ui, "Waiting", ui.visuals().weak_text_color());
         }
         Status::Converting => {
-            ui.label("Converting");
             ui.spinner();
+            theme::pill(ui, "Converting", theme::accent(ui));
         }
         Status::Done(outputs) => {
             let list = |paths: &mut dyn Iterator<Item = &PathBuf>| {
@@ -1909,17 +1971,34 @@ fn status_ui(ui: &mut egui::Ui, status: &Status) {
                     format!("This is an SDR image, so only the SDR PNG was made.\n\n{tooltip}");
             }
             if saved.is_empty() {
-                ui.weak("Skipped").on_hover_text(tooltip);
+                theme::pill(ui, "Skipped", ui.visuals().weak_text_color()).on_hover_text(tooltip);
             } else {
-                ui.label(RichText::new("Done").color(ok_color(ui)))
-                    .on_hover_text(tooltip);
+                theme::pill(ui, "Done", ok_color(ui)).on_hover_text(tooltip);
             }
         }
         Status::Failed(error) => {
-            ui.label(RichText::new("Failed").color(ui.visuals().error_fg_color))
-                .on_hover_text(error);
+            theme::pill(ui, "Failed", ui.visuals().error_fg_color).on_hover_text(error);
         }
     }
+}
+
+/// A rounded rectangle's outline as dashes, for the empty drop zone.
+fn dashed_outline(painter: &egui::Painter, rect: egui::Rect, radius: f32, stroke: Stroke) {
+    let mut points = Vec::new();
+    let corners = [
+        (rect.right_top() + Vec2::new(-radius, radius), -90.0_f32),
+        (rect.right_bottom() + Vec2::new(-radius, -radius), 0.0),
+        (rect.left_bottom() + Vec2::new(radius, -radius), 90.0),
+        (rect.left_top() + Vec2::new(radius, radius), 180.0),
+    ];
+    for (center, start) in corners {
+        for step in 0..=8 {
+            let angle = (start + step as f32 * 90.0 / 8.0).to_radians();
+            points.push(center + radius * Vec2::new(angle.cos(), angle.sin()));
+        }
+    }
+    points.push(points[0]);
+    painter.extend(egui::Shape::dashed_line(&points, stroke, 7.0, 5.0));
 }
 
 fn ok_color(ui: &egui::Ui) -> Color32 {
