@@ -87,15 +87,7 @@ jobs:
           target/jxr2png --generate fish > "$cli/completions/jxr2png.fish"
           target/jxr2png --generate man > "$cli/man/jxr2png.1"
           cp target/jxr2png-gui "$app/MacOS/"
-          iconset="$RUNNER_TEMP/jxr2png.iconset"
-          mkdir "$iconset"
-          for size in 16 32 64 128 256; do
-            sips -z $size $size crates/jxr2png-gui/assets/icon.png --out "$iconset/icon_${size}x${size}.png" > /dev/null
-          done
-          for size in 16 32 64 128; do
-            cp "$iconset/icon_$((size * 2))x$((size * 2)).png" "$iconset/icon_${size}x${size}@2x.png"
-          done
-          iconutil -c icns "$iconset" -o "$app/Resources/jxr2png.icns"
+          cp packaging/macos/jxr2png.icns "$app/Resources/"
           version="${TAG#v}"
           cat > "$app/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -170,6 +162,7 @@ jobs:
           target/release/jxr2png --generate man > "$cli/man/jxr2png.1"
           cp target/release/jxr2png-gui README.md LICENSE packaging/linux/jxr2png.desktop "$gui/"
           cp crates/jxr2png-gui/assets/icon.png "$gui/jxr2png.png"
+          cp -r packaging/linux/icons "$gui/"
           tar -czf "out/$cli.tar.gz" "$cli"
           tar -czf "out/$gui.tar.gz" "$gui"
 

@@ -83,7 +83,7 @@ from the command-line archive to `~/.local/bin` as well, if you want it):
 ```sh
 install -Dm755 jxr2png-gui -t ~/.local/bin
 install -Dm644 jxr2png.desktop -t ~/.local/share/applications
-install -Dm644 jxr2png.png -t ~/.local/share/icons/hicolor/256x256/apps
+cp -r icons/hicolor ~/.local/share/icons/
 ```
 
 ## Desktop app
