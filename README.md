@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="crates/hdrshot-gui/assets/icon.png" width="128" alt="hdrshot icon">
+<img src="https://raw.githubusercontent.com/snaketech-tu/hdrshot/main/crates/hdrshot-gui/assets/icon.png" width="128" alt="hdrshot icon">
 
 # hdrshot
 
@@ -10,7 +10,8 @@ Ultra HDR JPEG and SDR PNG.**
 [![Release](https://img.shields.io/github/v/release/snaketech-tu/hdrshot?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/hdrshot/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/snaketech-tu/hdrshot/total?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/hdrshot/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/snaketech-tu/hdrshot/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/snaketech-tu/hdrshot/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/snaketech-tu/hdrshot?style=flat-square)](LICENSE)
+[![crates.io](https://img.shields.io/crates/v/hdrshot?style=flat-square&color=0e7fc0)](https://crates.io/crates/hdrshot)
+[![License](https://img.shields.io/github/license/snaketech-tu/hdrshot?style=flat-square)](https://github.com/snaketech-tu/hdrshot/blob/main/LICENSE)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555?style=flat-square)
 
 [**Download**](https://github.com/snaketech-tu/hdrshot/releases/latest) ·
@@ -18,7 +19,7 @@ Ultra HDR JPEG and SDR PNG.**
 [Command line](#command-line) ·
 [How it works](#how-it-works)
 
-<img src="docs/images/app.png" width="560" alt="The hdrshot desktop app after converting a batch of screenshots">
+<img src="https://raw.githubusercontent.com/snaketech-tu/hdrshot/main/docs/images/app.png" width="560" alt="The hdrshot desktop app after converting a batch of screenshots">
 
 </div>
 
@@ -94,6 +95,16 @@ from the command-line archive to `~/.local/bin` as well, if you want it):
 install -Dm755 hdrshot-gui -t ~/.local/bin
 install -Dm644 hdrshot.desktop -t ~/.local/share/applications
 cp -r icons/hicolor ~/.local/share/icons/
+```
+
+### With Cargo
+
+With [Rust](https://rustup.rs) installed, both tools can also be built from
+[crates.io](https://crates.io/crates/hdrshot):
+
+```sh
+cargo install hdrshot        # command-line tool
+cargo install hdrshot-gui    # desktop app
 ```
 
 ## Desktop app
@@ -331,11 +342,11 @@ HDRSHOT_SAMPLES=/path/to/jxr/folder cargo test --release -p hdrshot-core --test 
 
 Releases are built by GitHub Actions: pushing a `v*` tag builds all three
 platforms and publishes the release with notes from
-[CHANGELOG.md](CHANGELOG.md).
+[CHANGELOG.md](https://github.com/snaketech-tu/hdrshot/blob/main/CHANGELOG.md).
 
 ## License
 
-[Apache-2.0](LICENSE)
+[Apache-2.0](https://github.com/snaketech-tu/hdrshot/blob/main/LICENSE)
 
 Made by snake.tech. If hdrshot is useful to you, you can support it on
 [Ko-fi](https://ko-fi.com/snake_tech).
