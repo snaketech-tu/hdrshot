@@ -1289,8 +1289,9 @@ impl App {
             Some(RowAction::ShowInFolder(path)) => show_in_folder(&path),
             Some(RowAction::Copy(input, outputs)) => {
                 let clipboard = self.clipboard.clone();
+                let options = self.convert_options(Existing::Skip);
                 convert::in_background(self.copied.0.clone(), ctx, move || {
-                    convert::copy(&clipboard, &input, &outputs)
+                    convert::copy(&clipboard, &input, &outputs, &options)
                 });
             }
             Some(RowAction::Retry(i)) => self.start_some(vec![i], &ctx),

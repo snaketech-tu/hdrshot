@@ -33,6 +33,21 @@ pub fn clipboard_file(name: &str, png: &[u8], hdr: bool) -> std::io::Result<Path
     Ok(path)
 }
 
+/// The HDR PNG of `input` as [`clipboard_file`] writes it, at the size
+/// `options` give. Copies of AVIF and Ultra HDR outputs use it, since
+/// Discord shows AVIF too bright and Ultra HDR JPEGs in SDR only.
+pub fn discord_png(input: &Path, options: &ConvertOptions) -> Result<Vec<u8>> {
+    let mut image = input::decode_file(input, &options.input)?;
+    if let Some(max) = options.max_height.filter(|&max| max < image.height) {
+        let (width, height) = resize::fit_height(image.width, image.height, max);
+        image = resize::resize(&image, width, height);
+    }
+    let levels = light_levels(&image);
+    let mut png = Vec::new();
+    write_hdr_png(&image, &levels, &options.hdr, &options.sdr, &mut png)?;
+    Ok(crate::for_discord(&png))
+}
+
 /// The HDR (or, with `hdr` false, SDR) PNG of `input`, scaled down to the
 /// largest of 1440p, 1080p and 720p, below the height it would have with
 /// `options`, at which it fits in `limit` bytes. HDR copies are measured
@@ -110,6 +125,17 @@ mod tests {
             .map(|s| (s.width, s.height, s.png))
             .unwrap();
         assert!(!png.windows(4).any(|w| w == b"cICP"));
+    }
+
+    #[test]
+    fn discord_png_is_a_png_without_cicp_whatever_the_format() {
+        let mut options = ConvertOptions::default();
+        options.hdr.format = crate::HdrFormat::Avif;
+        options.max_height = Some(32);
+        let png = discord_png(Path::new(FIXTURE), &options).unwrap();
+        assert!(png.starts_with(b"\x89PNG"));
+        assert!(!png.windows(4).any(|w| w == b"cICP"));
+        assert!(png.windows(4).any(|w| w == b"cLLI"));
     }
 
     #[test]

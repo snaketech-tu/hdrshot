@@ -65,7 +65,7 @@ impl Job {
             }
             let copied = clipboard
                 .zip(last)
-                .map(|(clipboard, (input, outputs))| copy(&clipboard, &input, &outputs));
+                .map(|(clipboard, (input, outputs))| copy(&clipboard, &input, &outputs, &options));
             send(&tx, Event::Done(copied));
         });
         Self { events, cancel }
@@ -111,30 +111,45 @@ pub struct TooBig {
 /// Put one of `outputs`, made from `input`, on the clipboard as a file,
 /// preferring the HDR one, so pasting it (into Discord, a browser or a
 /// folder) gives the full image, HDR included. An HDR PNG is copied without
-/// its `cICP` chunk so that it also shows right on Discord; AVIF and Ultra
-/// HDR files are copied as they are.
-pub fn copy(clipboard: &SharedClipboard, input: &Path, outputs: &Outputs) -> Copied {
+/// its `cICP` chunk so that it also shows right on Discord. AVIF and Ultra
+/// HDR outputs are copied as such a PNG too, made from `input`, because
+/// Discord shows AVIF too bright and Ultra HDR JPEGs in SDR only.
+pub fn copy(
+    clipboard: &SharedClipboard,
+    input: &Path,
+    outputs: &Outputs,
+    options: &ConvertOptions,
+) -> Copied {
     // The HDR PNG when there is one: it is the faithful copy.
     let (path, hdr) = match (&outputs.hdr, &outputs.sdr) {
         (Some(hdr), _) => (hdr.as_path(), true),
         (None, Some(sdr)) => (sdr.as_path(), false),
         (None, None) => return Copied::from("Nothing to copy".to_string()),
     };
-    let name = path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
     let png = path
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("png"));
-    let copy = std::fs::read(path).and_then(|png_bytes| {
-        if hdr && png {
-            share::clipboard_file(&name, &png_bytes, true)
-        } else {
-            Ok(path.to_path_buf())
-        }
-    });
+    let name = if png {
+        path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        path.with_extension("png")
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+    };
+    let copy = if !hdr {
+        Ok(path.to_path_buf())
+    } else if png {
+        std::fs::read(path).and_then(|bytes| share::clipboard_file(&name, &bytes, true))
+    } else {
+        share::discord_png(input, options)
+            .map_err(std::io::Error::other)
+            .and_then(|bytes| share::clipboard_file(&name, &bytes, false))
+    };
     let copy = match copy {
         Ok(copy) => copy,
         Err(e) => return Copied::from(format!("Could not copy to the clipboard: {e}")),
@@ -143,9 +158,7 @@ pub fn copy(clipboard: &SharedClipboard, input: &Path, outputs: &Outputs) -> Cop
         return Copied::from(e);
     }
     let size = std::fs::metadata(&copy).map_or(0, |m| m.len());
-    // Only PNGs can be remade smaller; AVIF and JPEG files are far below
-    // the limit anyway.
-    if size > share::DISCORD_LIMIT && png {
+    if size > share::DISCORD_LIMIT {
         Copied {
             message: format!(
                 "Copied {name} ({}), more than Discord's {} limit",

@@ -21,6 +21,9 @@
   picture as the SDR PNG, with a gain map that Chrome, Edge, Android and
   Instagram use to show it in HDR. It carries both Adobe gain map XMP and
   ISO 21496-1 metadata.
+- Copying an AVIF or Ultra HDR result for Discord, in the desktop app or
+  with `--copy`, copies an HDR PNG made for Discord instead, because
+  Discord shows AVIF too bright and Ultra HDR JPEGs in SDR only.
 - The desktop app has an **HDR format** choice (PNG, AVIF or Ultra HDR
   JPEG), and its window title shows the version.
 

@@ -112,7 +112,8 @@ struct Args {
 
     /// Copy the last file's PNG (the HDR one if made) to the clipboard, to
     /// paste into Discord or a folder. The copy leaves out the cICP chunk,
-    /// which Discord turns yellow.
+    /// which Discord turns yellow. AVIF and Ultra HDR results are copied as
+    /// such a PNG, since Discord can't show them in HDR.
     #[arg(long)]
     copy: bool,
 
@@ -445,7 +446,9 @@ mod clipboard {
     }
 
     /// Copies `png`, made from `input`, to the clipboard; with `small`, a
-    /// version that fits Discord's limit. Returns the message to print.
+    /// version that fits Discord's limit. An AVIF or Ultra HDR output is
+    /// copied as an HDR PNG instead, since Discord shows AVIF too bright
+    /// and Ultra HDR JPEGs in SDR only. Returns the message to print.
     pub fn copy(
         input: &Path,
         png: &Path,
@@ -453,19 +456,31 @@ mod clipboard {
         options: &ConvertOptions,
         small: bool,
     ) -> Result<String, String> {
-        let name = png.file_name().unwrap_or_default().to_string_lossy();
-        let bytes = std::fs::read(png).map_err(|e| format!("{}: {e}", png.display()))?;
-        let size = if hdr {
-            hdrshot_core::for_discord(&bytes).len()
-        } else {
-            bytes.len()
-        } as u64;
         let is_png = png
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("png"));
+        let name = png
+            .with_extension("png")
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let (bytes, size) = if is_png {
+            let bytes = std::fs::read(png).map_err(|e| format!("{}: {e}", png.display()))?;
+            let size = if hdr {
+                hdrshot_core::for_discord(&bytes).len()
+            } else {
+                bytes.len()
+            };
+            (bytes, size as u64)
+        } else {
+            let bytes = share::discord_png(input, options).map_err(|e| e.to_string())?;
+            let size = bytes.len() as u64;
+            (bytes, size)
+        };
         let (bytes, message) = if size <= DISCORD_LIMIT {
             (bytes, format!("Copied {name} to the clipboard"))
-        } else if small && is_png {
+        } else if small {
             let smaller = share::smaller_png(input, options, hdr, DISCORD_LIMIT)
                 .map_err(|e| e.to_string())?
                 .ok_or("even a 720p copy is larger than 10 MB")?;

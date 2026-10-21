@@ -41,7 +41,6 @@ updates**.
   twentieth of the PNG's size, shown in HDR by Chrome, Edge and Firefox.
 - **Ultra HDR JPEG.** Or as a JPEG with a gain map: every app shows the
   SDR picture, and Chrome, Edge, Android and Instagram brighten it to HDR.
-  The safest choice for sharing.
 - **SDR PNG.** Tone-mapped the way Windows shows the
   screenshot on an SDR screen, with highlights that roll off smoothly and
   colors that keep their hue.
@@ -121,7 +120,9 @@ cp -r icons/hicolor ~/.local/share/icons/
   for Windows Photos and HDR viewers. When the copy is larger than
   Discord's 10 MB upload limit, the app offers **Copy a smaller version**,
   which copies it at 1440p, or 1080p or 720p if needed, so it fits. The
-  saved PNGs stay at full size.
+  saved PNGs stay at full size. With AVIF or Ultra HDR JPEG as the HDR
+  format, the copy is an HDR PNG made for Discord, since Discord shows
+  AVIF too bright and Ultra HDR JPEGs in SDR only.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
   preview. When the Advanced settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.
@@ -266,7 +267,10 @@ Rust JPEG XR decoder, so no C toolchain is needed.
 - **Discord**: its image service converts PNGs with a `cICP` chunk to SDR
   with wrong colors (warm scenes turn yellow) but shows them correctly
   without it, so the clipboard copy leaves the chunk out (and `mDCV`,
-  which the PNG spec only allows together with `cICP`).
+  which the PNG spec only allows together with `cICP`). It ignores the
+  PQ transfer of AVIF files, so they look too bright, and drops the gain
+  map of Ultra HDR JPEGs, so they show in SDR; copies of those outputs are
+  therefore made as HDR PNGs.
 - **SDR**: scRGB 1.0 (80 nits) becomes SDR white by default, matching how
   Windows shows these screenshots in SDR viewers. Highlights above that roll
   off smoothly up to the image's 99.9th percentile brightness. The curve is
