@@ -15,6 +15,7 @@ mod theme;
 mod toasts;
 mod update;
 mod update_ui;
+mod watching;
 mod window;
 
 use std::path::{Path, PathBuf};
@@ -35,6 +36,7 @@ use previews::{Previews, THUMB_SIZE, Thumb};
 use settings::*;
 use toasts::*;
 use update_ui::*;
+use watching::Watching;
 
 /// The app icon, 256 px. Windows also gets `assets/icon.ico` embedded in
 /// the executable by `build.rs`.
@@ -147,6 +149,11 @@ struct App {
     updates: (Sender<UpdateMessage>, Receiver<UpdateMessage>),
     /// The app icon, shown in the header.
     logo: egui::TextureHandle,
+    watching: Option<Watching>,
+    /// New images from the watch folder, and those waiting for the running
+    /// batch to end.
+    watched: (Sender<PathBuf>, Receiver<PathBuf>),
+    waiting: Vec<PathBuf>,
 }
 
 /// Tooltip for the Copy for Discord buttons; the README's "Sharing on
@@ -217,6 +224,9 @@ impl App {
             update: Update::Idle,
             updates: channel(),
             logo,
+            watching: None,
+            watched: channel(),
+            waiting: Vec::new(),
         };
         if assoc::SUPPORTED {
             assoc::refresh();
@@ -292,6 +302,11 @@ impl App {
             ui.label(format!(
                 "Converted {total} image{}.",
                 if total == 1 { "" } else { "s" }
+            ));
+        } else if let Some(watching) = &self.watching {
+            ui.weak(format!(
+                "Watching {} for new images.",
+                watching.dir.display()
             ));
         }
 
@@ -398,6 +413,8 @@ impl window::App for App {
         }
         self.shortcuts(&ctx);
         self.receive_opened(&ctx);
+        self.sync_watch(&ctx);
+        self.receive_watched(&ctx);
         for (path, thumb) in self.previews.finished(&ctx) {
             if let Some(entry) = self.files.iter_mut().find(|e| e.path == path) {
                 entry.thumb = thumb;

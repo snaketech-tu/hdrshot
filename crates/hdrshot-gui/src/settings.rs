@@ -165,6 +165,10 @@ impl App {
                     );
                 ui.end_row();
 
+                theme::row_label(ui, "Watch folder");
+                self.watch_ui(ui);
+                ui.end_row();
+
                 theme::row_label(ui, "Clipboard");
                 ui.checkbox(
                     &mut self.settings.copy_to_clipboard,
@@ -328,6 +332,9 @@ pub(crate) struct Settings {
     pub(crate) discord_png: bool,
     /// Move each original to the Recycle Bin once its outputs are written.
     pub(crate) trash_originals: bool,
+    /// Convert new images saved to `watch_dir`.
+    pub(crate) watch: bool,
+    pub(crate) watch_dir: Option<PathBuf>,
 }
 
 impl Settings {
@@ -362,6 +369,8 @@ impl Default for Settings {
             type_suffix: true,
             discord_png: false,
             trash_originals: false,
+            watch: false,
+            watch_dir: watching::default_watch_dir(),
         }
     }
 }
