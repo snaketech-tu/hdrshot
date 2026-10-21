@@ -303,6 +303,8 @@ enum UpdateMessage {
 
 struct Asking {
     indices: Vec<usize>,
+    /// Rows left out of the batch, and why (see `App::start_some`).
+    conflicts: Vec<(usize, String)>,
     /// The output files that already exist.
     existing: Vec<PathBuf>,
 }
@@ -499,22 +501,61 @@ impl App {
     }
 
     /// Converts the files at `indices`, leaving the other rows as they are.
-    /// If some of their PNGs already exist, asks first what to do.
+    /// If some of their PNGs already exist, asks first what to do. A file
+    /// that would make the same output file as an earlier one in the batch
+    /// fails instead of replacing that one's result.
     fn start_some(&mut self, indices: Vec<usize>, ctx: &egui::Context) {
-        if indices.is_empty() {
+        let options = self.convert_options(Existing::Skip);
+        let paths: Vec<PathBuf> = indices
+            .iter()
+            .map(|&i| self.files[i].path.clone())
+            .collect();
+        let mut kept = Vec::with_capacity(indices.len());
+        let mut conflicts = Vec::new();
+        for (&i, conflict) in indices
+            .iter()
+            .zip(hdrshot_core::output_conflicts(&paths, &options))
+        {
+            match conflict {
+                Some((output, earlier)) => conflicts.push((
+                    i,
+                    format!(
+                        "Not converted: {} makes the same file, {}. Save to subfolders \
+                         or convert them separately.",
+                        paths[earlier].display(),
+                        output.display()
+                    ),
+                )),
+                None => kept.push(i),
+            }
+        }
+        if kept.is_empty() {
             return;
         }
-        let options = self.convert_options(Existing::Skip);
-        let existing = existing_outputs(indices.iter().map(|&i| &self.files[i].path), &options);
+        let existing = existing_outputs(kept.iter().map(|&i| &self.files[i].path), &options);
         if existing.is_empty() {
             // Nothing to overwrite, so the choice doesn't matter.
-            self.run(indices, Existing::Skip, ctx);
+            self.run(kept, conflicts, Existing::Skip, ctx);
         } else {
-            self.asking = Some(Asking { indices, existing });
+            self.asking = Some(Asking {
+                indices: kept,
+                conflicts,
+                existing,
+            });
         }
     }
 
-    fn run(&mut self, indices: Vec<usize>, existing: Existing, ctx: &egui::Context) {
+    /// Converts the rows `indices` and marks the rows `conflicts` failed.
+    fn run(
+        &mut self,
+        indices: Vec<usize>,
+        conflicts: Vec<(usize, String)>,
+        existing: Existing,
+        ctx: &egui::Context,
+    ) {
+        for (i, reason) in conflicts {
+            self.files[i].status = Status::Failed(reason);
+        }
         let files: Vec<_> = indices
             .into_iter()
             .map(|i| {
@@ -705,9 +746,10 @@ impl App {
                     });
                 });
             });
-        if let Some(existing) = choice {
-            let indices = self.asking.take().map(|a| a.indices).unwrap_or_default();
-            self.run(indices, existing, ctx);
+        if let Some(existing) = choice
+            && let Some(asking) = self.asking.take()
+        {
+            self.run(asking.indices, asking.conflicts, existing, ctx);
         } else if cancel || modal.should_close() {
             self.asking = None;
         }
@@ -1150,10 +1192,11 @@ impl App {
         let hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
         let (rect, response) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
-        let enabled = !self.running();
+        // Files can be added during a batch too: they go at the end of the
+        // list, outside the batch.
         let visuals = ui.visuals();
         let accent = visuals.selection.bg_fill;
-        let highlight = enabled && (hovering || response.hovered());
+        let highlight = hovering || response.hovered();
         let fill = if highlight {
             accent.gamma_multiply(0.15)
         } else {
@@ -1172,9 +1215,8 @@ impl App {
             dashed_outline(painter, rect.shrink(1.0), 12.0, stroke);
         }
 
-        let dim = |c: Color32| if enabled { c } else { c.gamma_multiply(0.4) };
-        let text_color = dim(visuals.text_color());
-        let weak = dim(visuals.weak_text_color());
+        let text_color = visuals.text_color();
+        let weak = visuals.weak_text_color();
         let center = rect.center();
         let (title, hint) = if hovering {
             ("Release to add", "")
@@ -1192,7 +1234,7 @@ impl App {
                 30.0,
                 accent.gamma_multiply(if highlight { 0.25 } else { 0.12 }),
             );
-            let arrow = Stroke::new(3.0, dim(accent));
+            let arrow = Stroke::new(3.0, accent);
             let tip = center - Vec2::new(0.0, 24.0);
             painter.line_segment([center - Vec2::new(0.0, 52.0), tip], arrow);
             painter.line(
@@ -1220,10 +1262,9 @@ impl App {
             weak,
         );
 
-        if enabled
-            && response
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
+        if response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
             && let Some(paths) = rfd::FileDialog::new()
                 .set_title("Choose HDR images")
                 .add_filter("HDR images", &INPUT_EXTENSIONS)
@@ -1321,6 +1362,9 @@ impl App {
             Some(RowAction::Open(path)) => open(&path),
             Some(RowAction::ShowInFolder(path)) => show_in_folder(&path),
             Some(RowAction::Copy(input, outputs)) => {
+                if convert::copy_makes_png(&outputs) {
+                    self.show_toast("Making the PNG for Discord…".into(), &ctx);
+                }
                 let clipboard = self.clipboard.clone();
                 let options = self.convert_options(Existing::Skip);
                 convert::in_background(self.copied.0.clone(), ctx, move || {
@@ -1718,7 +1762,7 @@ impl window::App for App {
                 .map(|f| f.path().to_path_buf())
                 .collect()
         });
-        if !dropped.is_empty() && !self.running() {
+        if !dropped.is_empty() {
             self.add_paths(dropped);
         }
         self.shortcuts(&ctx);
@@ -1779,6 +1823,11 @@ impl window::App for App {
 
     fn on_exit(&mut self) {
         storage::save(SETTINGS_KEY, &self.settings);
+        // Let the file being converted finish, so its temporary file
+        // doesn't stay behind in the user's folder.
+        if let Some(job) = self.job.take() {
+            job.finish();
+        }
     }
 
     fn taskbar_progress(&self) -> Option<f32> {
@@ -1787,9 +1836,7 @@ impl window::App for App {
     }
 
     fn paste_files(&mut self, files: Vec<PathBuf>) {
-        if !self.running() {
-            self.add_paths(files);
-        }
+        self.add_paths(files);
     }
 }
 
@@ -2118,28 +2165,38 @@ fn reveal(dir: &Path) {
 }
 
 /// Open `file` in the app the system uses for it.
+#[cfg(windows)]
 fn open(file: &Path) {
-    #[cfg(windows)]
-    let mut command = {
-        // `start` needs an empty window title before a quoted path.
-        let mut command = Command::new("cmd");
-        command.args(["/C", "start", ""]).arg(file);
-        hide_console(&mut command);
-        command
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    // Straight to the shell: through `cmd /C start`, characters such as `&`
+    // in a file name would be read as commands.
+    let wide = |s: &std::ffi::OsStr| s.encode_wide().chain([0]).collect::<Vec<u16>>();
+    let (verb, file) = (wide("open".as_ref()), wide(file.as_os_str()));
+    // SAFETY: both strings are NUL-terminated and outlive the call; COM is
+    // set up on the UI thread by winit.
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
+    }
+}
+
+/// Open `file` in the app the system uses for it.
+#[cfg(not(windows))]
+fn open(file: &Path) {
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
     };
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = Command::new("open");
-        command.arg(file);
-        command
-    };
-    #[cfg(not(any(windows, target_os = "macos")))]
-    let mut command = {
-        let mut command = Command::new("xdg-open");
-        command.arg(file);
-        command
-    };
-    let _ = command.spawn();
+    let _ = Command::new(program).arg(file).spawn();
 }
 
 /// Show `file` selected in the system's file manager, or its folder where
@@ -2161,14 +2218,6 @@ fn show_in_folder(file: &Path) {
     if let Some(dir) = file.parent() {
         reveal(dir);
     }
-}
-
-/// Keeps `cmd` from flashing a console window.
-#[cfg(windows)]
-fn hide_console(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    command.creation_flags(CREATE_NO_WINDOW);
 }
 
 #[cfg(test)]

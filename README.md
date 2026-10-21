@@ -133,8 +133,10 @@ cargo install hdrshot-gui    # desktop app
   which copies it at 1440p, or 1080p or 720p if needed, so it fits. The
   saved PNGs stay at full size. With AVIF or Ultra HDR JPEG as the HDR
   format, the copy is an HDR PNG made for Discord, since Discord shows
-  AVIF too bright and Ultra HDR JPEGs in SDR only. The app makes it while
-  converting and keeps it in a temporary folder, so copying is instant.
+  AVIF too bright and Ultra HDR JPEGs in SDR only. For the last image of a
+  batch, which is copied automatically, the app makes it while converting;
+  for the others, **Copy for Discord** makes it, which takes a second or
+  two.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
   preview. When the Advanced settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.
@@ -159,7 +161,7 @@ cargo install hdrshot-gui    # desktop app
   **Change All**.
 - **Advanced** has **Keep the capture date** (on by default), which gives
   each PNG the date of its screenshot so folders sorted by date stay in
-  capture order. **Save HDR and SDR PNGs in subfolders** writes them
+  capture order. **Save HDR and SDR images in subfolders** writes them
   to `hdr` and `sdr` subfolders, and with that on, **End file names in _hdr
   and _sdr** can be turned off. It also holds the tuning options from the
   command line.
@@ -196,28 +198,30 @@ is non-zero if any file failed.
 PNGs that already exist are skipped, so converting a folder again only
 adds the new screenshots. Each PNG gets the screenshot's modified date, so
 folders sorted by date stay in capture order. A failed conversion never
-leaves a half-written PNG behind.
+leaves a half-written PNG behind. If two inputs would make the same file,
+for example `a.jxr` and `a.exr`, or two `shot.jxr` from different folders
+with `-o`, the second is not converted and the error says why.
 
 Everything is automatic; these options are only for tuning:
 
 | Option | Effect |
 | --- | --- |
-| `--hdr` / `--sdr` | Make only the HDR or only the SDR PNG |
+| `--hdr` / `--sdr` | Make only the HDR image or only the SDR PNG |
 | `-r, --recursive` | Also convert files in subfolders of the given folders |
 | `-o, --output <DIR>` | Save into this folder instead of next to each input |
 | `--format <png\|avif\|ultrahdr>` | File format of the HDR output (default `png`) |
 | `--avif-quality <1-100>` | AVIF quality (default 90); lower is smaller |
 | `--avif-speed <0-10>` | AVIF encoder speed (default 8); 10 is faster but larger |
 | `--avif-420` | Store AVIF color at half resolution: smaller, softer colored edges |
-| `--hdr-peak <NITS>` | Limit the HDR PNG's brightest highlight, rolling off anything brighter |
+| `--hdr-peak <NITS>` | Limit the HDR image's brightest highlight, rolling off anything brighter |
 | `--sdr-white <NITS>` | HDR brightness that becomes SDR white (default 80; lower is brighter) |
 | `--sdr-peak <NITS>` | Brightness that maps to full SDR white, instead of the 99.9th percentile |
 | `--input-white <NITS>` | Brightness of 1.0 in OpenEXR, Radiance and float JPEG XL files (default: the file's own value, or 80) |
 | `--name <PATTERN>` | Output file name without extension: `{name}` is the input's name, `{type}` is `hdr` or `sdr` (default `{name}_{type}`) |
-| `--subfolders` | Put the PNGs in `hdr` and `sdr` subfolders of the output folder |
+| `--subfolders` | Put the images in `hdr` and `sdr` subfolders of the output folder |
 | `--max-height <PIXELS>` | Scale taller images down to this height, averaging in linear light |
-| `--overwrite` | Replace PNGs that already exist; by default they are skipped |
-| `--no-keep-date` | Give the PNGs the current time instead of the screenshot's date |
+| `--overwrite` | Replace files that already exist; by default they are skipped |
+| `--no-keep-date` | Give the files the current time instead of the screenshot's date |
 | `--copy` | Copy the last file's PNG (the HDR one if made) to the clipboard, ready for Discord |
 | `--copy-small` | Like `--copy`, but scale the copy down if it is over Discord's 10 MB limit |
 | `-q, --quiet` | Print only errors |
@@ -240,7 +244,7 @@ unchanged. The saved files are never modified.
 | Saved HDR format | What Discord does with it | What gets copied |
 | --- | --- | --- |
 | PNG | Its image service converts PNGs that carry a `cICP` chunk to SDR with swapped colors, so warm scenes turn yellow. Without the chunk, it shows the image in HDR. | The same PNG without the `cICP` and `mDCV` chunks. The ICC profile, which also marks the image as BT.2020 PQ, stays and is kept under 32 KB, since Discord drops larger profiles. |
-| AVIF | Ignores the PQ transfer, so the image looks far too bright. | An HDR PNG made for Discord during conversion and kept in a temporary folder. |
+| AVIF | Ignores the PQ transfer, so the image looks far too bright. | An HDR PNG made for Discord and kept in a temporary folder. The desktop app makes it while converting the last image of a batch, and for the others when Copy for Discord is clicked. |
 | Ultra HDR JPEG | Drops the gain map and shows only the SDR base image. | The same HDR PNG made for Discord. |
 
 The saved PNG keeps `cICP` because Windows Photos and most HDR image viewers

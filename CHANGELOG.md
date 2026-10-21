@@ -1,5 +1,39 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- With AVIF or Ultra HDR JPEG output, the desktop app makes the Discord PNG
+  only while converting the last image of a batch. For the other images,
+  Copy for Discord makes it when clicked, so batches finish sooner and use
+  less temporary space.
+
+### Fixed
+
+- Two inputs that would make the same output file, such as `a.jxr` and
+  `a.exr`, or two `shot.jxr` from different folders converted into one, no
+  longer overwrite each other. On the command line, converting them at the
+  same time could also leave a broken PNG. The second one is now not
+  converted, with a message naming the other. The same file given twice on
+  the command line is converted once.
+- Double-clicking a converted image in the desktop app on Windows opens it
+  directly instead of through the command prompt, so file names with `&`
+  or `%` open correctly.
+- `--sdr-white`, `--sdr-peak`, `--hdr-peak` and `--input-white` only accept
+  numbers above 0, instead of writing black images for 0.
+- Closing the desktop app during a conversion lets the current file finish,
+  so no temporary file is left in the folder.
+- Files dropped onto the desktop app or pasted with Ctrl+V during a
+  conversion are added to the list instead of being ignored.
+- Adding OpenEXR files to the desktop app no longer freezes it while the
+  whole file is read just for its size.
+- The command line's progress line no longer shows `←[2K` in the classic
+  Windows console.
+- AVIF chroma uses the exact neutral value, so grey areas have no faint
+  tint.
+- Folder scans no longer loop forever on a link to a parent folder.
+
 ## [2.0.0] - 2026-10-21
 
 ### Added

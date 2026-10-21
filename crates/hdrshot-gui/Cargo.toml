@@ -27,7 +27,7 @@ ureq = { version = "3.4.2", default-features = false, features = ["json", "platf
 winit = "0.30.13"
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_System_Com", "Win32_UI_Shell"] }
+windows-sys = { version = "0.61.2", features = ["Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 winreg = "0.56.0"
 
 [target."cfg(target_os = \"macos\")".dependencies]

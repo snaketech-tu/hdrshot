@@ -137,7 +137,7 @@ pub fn dimensions(path: &Path) -> Result<(u32, u32)> {
         Some(InputFormat::Png) => png::dimensions(&head),
         Some(InputFormat::Radiance) => radiance::dimensions(&head),
         Some(InputFormat::Jxl) => jxl::dimensions(&head),
-        Some(InputFormat::Exr) => None,
+        Some(InputFormat::Exr) => openexr::dimensions(path),
         None => return Err(Error::UnknownFormat),
     };
     match size {
