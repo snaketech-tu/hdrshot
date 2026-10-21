@@ -1,6 +1,7 @@
 //! Making hdrshot the app that opens `.jxr` files, and listing it under
 //! "Open with" for the other formats it reads (`.wdp`, `.exr`, `.jxl` and
-//! `.hdr`), without becoming their default.
+//! `.hdr`), without becoming their default. On Windows this also adds
+//! "Convert with hdrshot" to these files' right-click menu.
 //!
 //! Windows doesn't let programs take over a file type on their own: the app
 //! registers itself as able to open these types, then the user confirms the
@@ -38,6 +39,8 @@ mod imp {
     /// choice by this name and doesn't let programs change that choice.
     const OLD_PROG_ID: &str = "jxr2png.jxr";
     const OLD_APP: &str = r"Software\jxr2png";
+    /// The right-click menu entry's key.
+    const CONVERT_VERB: &str = "hdrshot.convert";
     /// The other types hdrshot reads, with their file type and its name.
     const OPEN_WITH: [(&str, &str, &str); 4] = [
         (".wdp", PROG_ID, "JPEG XR image"),
@@ -127,6 +130,24 @@ mod imp {
             user.create_subkey(format!(r"{CLASSES}\{ext}\OpenWithProgids"))?
                 .0
                 .set_value(prog_id, &"")?;
+        }
+
+        // "Convert with hdrshot" in the right-click menu of every type, which
+        // converts with the saved settings. On Windows 11 it is under "Show
+        // more options".
+        for ext in std::iter::once(".jxr").chain(OPEN_WITH.map(|(ext, ..)| ext)) {
+            let (verb, _) = user.create_subkey(format!(
+                r"{CLASSES}\SystemFileAssociations\{ext}\shell\{CONVERT_VERB}"
+            ))?;
+            verb.set_value("", &"Convert with hdrshot")?;
+            verb.set_value("Icon", &format!("\"{exe}\",0"))?;
+            // One launch per selected file, with no limit on how many; the
+            // running window gathers them into one batch.
+            verb.set_value("MultiSelectModel", &"Player")?;
+            verb.create_subkey("command")?.0.set_value(
+                "",
+                &format!("\"{exe}\" {} \"%1\"", crate::single::CONVERT_FLAG),
+            )?;
         }
 
         let (caps, _) = user.create_subkey(CAPABILITIES)?;

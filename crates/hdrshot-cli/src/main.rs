@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use clap::{CommandFactory, Parser};
 use hdrshot_core::{
     AvifOptions, ConvertOptions, Existing, HdrFormat, HdrOptions, InputOptions, Naming, OutputMode,
-    Outputs, SdrOptions,
+    Outputs, SdrFormat, SdrOptions,
 };
 use rayon::prelude::*;
 
@@ -19,8 +19,14 @@ struct Args {
     /// Input images or folders. Wildcards such as *.jxr also work in cmd and
     /// PowerShell. Folders are searched for .jxr, .exr, .hdr and .jxl files; give
     /// HDR PNGs by name.
-    #[arg(required = true)]
+    #[arg(required_unless_present = "watch")]
     inputs: Vec<PathBuf>,
+
+    /// Watch this folder, such as the Game Bar captures folder, and convert
+    /// each new image saved there until Ctrl+C. Images already in it are
+    /// left alone; any inputs given are converted first.
+    #[arg(long, value_name = "FOLDER")]
+    watch: Option<PathBuf>,
 
     /// Also convert images in subfolders of the given folders.
     #[arg(short, long)]
@@ -30,7 +36,7 @@ struct Args {
     #[arg(long)]
     hdr: bool,
 
-    /// Write only the tone-mapped SDR PNG (8-bit sRGB).
+    /// Write only the tone-mapped SDR image (8-bit sRGB).
     #[arg(long)]
     sdr: bool,
 
@@ -55,6 +61,16 @@ struct Args {
     /// text and thin colored edges get softer.
     #[arg(long)]
     avif_420: bool,
+
+    /// File format of the SDR output: png (lossless) or jpeg (a fraction of
+    /// the size; transparency is lost).
+    #[arg(long, value_enum, default_value_t = SdrFileFormat::Png)]
+    sdr_format: SdrFileFormat,
+
+    /// JPEG quality of the SDR output from 1 to 100, with --sdr-format jpeg.
+    #[arg(long, value_name = "1-100", default_value_t = SdrFormat::DEFAULT_JPEG_QUALITY,
+          value_parser = clap::value_parser!(u8).range(1..=100))]
+    jpeg_quality: u8,
 
     /// Write HDR PNGs that Discord shows correctly, by leaving out their
     /// cICP and mDCV chunks. Windows Photos and most HDR viewers need cICP
@@ -101,6 +117,12 @@ struct Args {
     /// kept.
     #[arg(long, value_name = "PIXELS")]
     max_height: Option<u32>,
+
+    /// Move each input to the Recycle Bin (Trash on macOS and Linux) once
+    /// all of its outputs are written. Inputs that failed, or whose outputs
+    /// already existed, are kept.
+    #[arg(long)]
+    trash_originals: bool,
 
     /// Replace output files that already exist. By default they are skipped.
     #[arg(long)]
@@ -149,6 +171,12 @@ enum Format {
     Avif,
     #[value(name = "ultrahdr")]
     UltraHdr,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum SdrFileFormat {
+    Png,
+    Jpeg,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -251,6 +279,12 @@ fn main() -> ExitCode {
             white_nits: args.sdr_white,
             peak_nits: args.sdr_peak,
         },
+        sdr_format: match args.sdr_format {
+            SdrFileFormat::Png => SdrFormat::Png,
+            SdrFileFormat::Jpeg => SdrFormat::Jpeg {
+                quality: args.jpeg_quality,
+            },
+        },
         max_height: args.max_height,
         existing: if args.overwrite {
             Existing::Replace
@@ -327,7 +361,7 @@ fn main() -> ExitCode {
     });
     let failed = report.finish();
     let mut copy_failed = false;
-    if args.copy || args.copy_small {
+    if (args.copy || args.copy_small) && !files.is_empty() {
         let last = files
             .iter()
             .zip(&results)
@@ -350,11 +384,77 @@ fn main() -> ExitCode {
             }
         }
     }
-    if failed > 0 || missing || copy_failed {
+    // After the copy, which may still read the last input.
+    let mut trash_failed = false;
+    if args.trash_originals {
+        for (input, outputs) in files.iter().zip(&results) {
+            if outputs.as_ref().is_some_and(Outputs::complete)
+                && let Err(e) = trash::delete(input)
+            {
+                eprintln!(
+                    "{}: could not move to the Recycle Bin: {e}",
+                    input.display()
+                );
+                trash_failed = true;
+            }
+        }
+    }
+    if let Some(dir) = &args.watch {
+        return watch(&args, &options, dir);
+    }
+    if failed > 0 || missing || copy_failed || trash_failed {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// `--watch`: converts each new image saved in `dir`, one at a time, until
+/// Ctrl+C, copying and moving originals to the Recycle Bin as asked.
+fn watch(args: &Args, options: &ConvertOptions, dir: &Path) -> ExitCode {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let watching = hdrshot_core::watch::watch_folder(dir, move |path| {
+        let _ = tx.send(path);
+    });
+    let _watching = match watching {
+        Ok(watching) => watching,
+        Err(e) => {
+            eprintln!("--watch: {}: {e}", dir.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let chatty = !args.quiet && !args.json;
+    if chatty {
+        eprintln!(
+            "Watching {} for new images. Press Ctrl+C to stop.",
+            dir.display()
+        );
+    }
+    for input in rx {
+        let result = hdrshot_core::convert_file(&input, options).map_err(|e| e.to_string());
+        let outputs = result.as_ref().ok().cloned();
+        Report::new(args, 1).file(&input, result);
+        let Some(outputs) = outputs else { continue };
+        if (args.copy || args.copy_small)
+            && let Some((png, hdr)) = clipboard::pick(&input, &outputs, options)
+        {
+            match clipboard::copy(&input, &png, hdr, options, args.copy_small) {
+                Ok(message) if chatty => eprintln!("{message}"),
+                Ok(_) => {}
+                Err(e) => eprintln!("--copy: {e}"),
+            }
+        }
+        if args.trash_originals
+            && outputs.complete()
+            && let Err(e) = trash::delete(&input)
+        {
+            eprintln!(
+                "{}: could not move to the Recycle Bin: {e}",
+                input.display()
+            );
+        }
+    }
+    ExitCode::SUCCESS
 }
 
 fn report_error(args: &Args, input: &Path, error: &str) {
@@ -427,7 +527,7 @@ impl<'a> Report<'a> {
         } else if !self.args.quiet {
             if outputs.sdr_input && !(self.args.sdr && !self.args.hdr) {
                 println!(
-                    "{}: an SDR image, so only the SDR PNG is made",
+                    "{}: an SDR image, so only the SDR image is made",
                     input.display()
                 );
             }

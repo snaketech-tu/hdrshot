@@ -12,6 +12,9 @@ use hdrshot_core::{ConvertOptions, Outputs, share};
 pub enum Event {
     Started(usize),
     Finished(usize, Result<Outputs, String>),
+    /// The original of a converted file was moved to the Recycle Bin, or
+    /// why it couldn't be.
+    Trashed(usize, Result<(), String>),
     /// The batch is over; carries the outcome of copying the last image
     /// to the clipboard, if that was asked for.
     Done(Option<Copied>),
@@ -31,11 +34,14 @@ pub struct Job {
 impl Job {
     /// Convert `files` one after another (the core already uses every CPU
     /// core per image). Each event carries the file's index in `files`.
-    /// With `clipboard`, the last PNG written is copied to it.
+    /// With `clipboard`, the last PNG written is copied to it. With
+    /// `trash`, the originals whose outputs were all written are moved to
+    /// the Recycle Bin at the end, unless the batch was stopped.
     pub fn start(
         files: Vec<(usize, PathBuf)>,
         options: ConvertOptions,
         clipboard: Option<SharedClipboard>,
+        trash: bool,
         ctx: egui::Context,
     ) -> Self {
         let (tx, events) = channel();
@@ -48,6 +54,8 @@ impl Job {
             };
             // The last file converted and its PNGs.
             let mut last = None;
+            // Files whose outputs were all written, for `trash`.
+            let mut complete = Vec::new();
             let count = files.len();
             for (n, (index, path)) in files.into_iter().enumerate() {
                 if stop.load(Ordering::Relaxed) {
@@ -57,8 +65,9 @@ impl Job {
                 // The Discord PNG of an AVIF or Ultra HDR result is made from
                 // the image already decoded, but only for the last file, the
                 // one copied after the batch. Other rows make theirs when
-                // they are copied.
-                let result = if clipboard.is_some() && n + 1 == count {
+                // they are copied, from the original, so with `trash` every
+                // file gets one now.
+                let result = if trash || (clipboard.is_some() && n + 1 == count) {
                     hdrshot_core::convert_file_with_discord_png(&path, &options).map(
                         |(outputs, discord)| {
                             if let (Some(hdr), Some(png)) = (&outputs.hdr, discord) {
@@ -75,6 +84,9 @@ impl Job {
                 {
                     last = Some((path.clone(), outputs.clone()));
                 }
+                if result.as_ref().is_ok_and(Outputs::complete) {
+                    complete.push((index, path.clone()));
+                }
                 send(
                     &tx,
                     Event::Finished(index, result.map_err(|e| e.to_string())),
@@ -83,6 +95,13 @@ impl Job {
             let copied = clipboard
                 .zip(last)
                 .map(|(clipboard, (input, outputs))| copy(&clipboard, &input, &outputs, &options));
+            // After the copy, which may still read the last original.
+            if trash && !stop.load(Ordering::Relaxed) {
+                for (index, path) in complete {
+                    let result = ::trash::delete(&path).map_err(|e| e.to_string());
+                    send(&tx, Event::Trashed(index, result));
+                }
+            }
             send(&tx, Event::Done(copied));
         });
         Self {

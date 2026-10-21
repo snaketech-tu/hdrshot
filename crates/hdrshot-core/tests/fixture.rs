@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use hdrshot_core::{
-    ConvertOptions, InputOptions, Outputs, ScRgbImage, SdrOptions, convert_file, decode,
-    for_discord, preview, sdr_rgb8,
+    ConvertOptions, InputOptions, OutputMode, Outputs, ScRgbImage, SdrFormat, SdrOptions,
+    convert_file, decode, for_discord, preview, sdr_rgb8,
 };
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/hdr64.jxr");
@@ -214,6 +214,40 @@ fn sdr_png_pixels() {
     {
         assert_eq!(sdr.rgb(x, y), expected, "SDR pixel ({x}, {y})");
     }
+}
+
+#[test]
+fn sdr_jpeg_pixels_and_date() {
+    let path = convert_file(
+        Path::new(FIXTURE),
+        &ConvertOptions {
+            mode: OutputMode::Sdr,
+            sdr_format: SdrFormat::Jpeg { quality: 90 },
+            output_dir: Some(out_dir("sdr-jpeg")),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .sdr
+    .unwrap();
+    assert_eq!(path.extension().unwrap(), "jpg");
+    let modified = |p: &Path| std::fs::metadata(p).unwrap().modified().unwrap();
+    assert_eq!(modified(&path), modified(Path::new(FIXTURE)));
+    let bytes = std::fs::read(&path).unwrap();
+    let mut decoder = jpeg_decoder::Decoder::new(bytes.as_slice());
+    let pixels = decoder.decode().unwrap();
+    let info = decoder.info().unwrap();
+    assert_eq!((info.width, info.height), (64, 64));
+    assert_eq!(info.pixel_format, jpeg_decoder::PixelFormat::RGB24);
+    // Close to the SDR PNG overall; JPEG only blurs sharp edges a little.
+    let png = read_png(&convert("sdr-jpeg-reference").sdr.unwrap());
+    let error: u64 = pixels
+        .iter()
+        .zip(&png.pixels)
+        .map(|(&a, &b)| u64::from(a.abs_diff(b)))
+        .sum();
+    let mean = error as f64 / pixels.len() as f64;
+    assert!(mean < 1.5, "mean difference from the SDR PNG is {mean}");
 }
 
 #[test]

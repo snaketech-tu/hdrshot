@@ -11,7 +11,7 @@ use crate::color::{
 };
 use crate::decode::ScRgbImage;
 use crate::icc::pq_sdr_fallback_profile;
-use crate::{HdrOptions, Result, SdrOptions};
+use crate::{Error, HdrOptions, Result, SdrOptions};
 
 /// Light-level statistics of an image, in nits.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -347,6 +347,40 @@ pub fn write_sdr_png<W: Write>(
     let mut writer = encoder.write_header()?;
     writer.write_image_data(&data)?;
     writer.finish()?;
+    Ok(())
+}
+
+/// Writes the SDR output as a baseline JPEG of `quality` (1 to 100) with
+/// full-resolution color, which keeps text and UI edges clean. JPEG has no
+/// transparency, so transparent areas are shown over black. Without an ICC
+/// profile, viewers read it as sRGB, which it is.
+pub fn write_sdr_jpeg<W: Write>(
+    image: &ScRgbImage,
+    levels: &LightLevels,
+    options: &SdrOptions,
+    quality: u8,
+    mut out: W,
+) -> Result<()> {
+    let mut rgb = sdr_rgb8(image, levels, options);
+    if let Some(alpha) = &image.alpha {
+        for (pixel, &a) in rgb.as_chunks_mut::<3>().0.iter_mut().zip(alpha) {
+            for c in pixel {
+                *c = (f32::from(*c) * a.clamp(0.0, 1.0)).round() as u8;
+            }
+        }
+    }
+    let too_big =
+        |_| Error::EncodeJpeg("JPEG images can be at most 65535 pixels wide or tall".into());
+    let width = u16::try_from(image.width).map_err(too_big)?;
+    let height = u16::try_from(image.height).map_err(too_big)?;
+    let mut bytes = Vec::new();
+    let mut encoder = jpeg_encoder::Encoder::new(&mut bytes, quality.clamp(1, 100));
+    encoder.set_sampling_factor(jpeg_encoder::SamplingFactor::R_4_4_4);
+    encoder.set_optimized_huffman_tables(true);
+    encoder
+        .encode(&rgb, width, height, jpeg_encoder::ColorType::Rgb)
+        .map_err(|e| Error::EncodeJpeg(e.to_string()))?;
+    out.write_all(&bytes)?;
     Ok(())
 }
 

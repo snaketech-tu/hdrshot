@@ -23,12 +23,17 @@ pub enum Claim {
 
 pub struct Listener(interprocess::local_socket::Listener);
 
+/// Before the files on the command line, as Explorer's "Convert with
+/// hdrshot" passes them: convert them right away. Sent to a running
+/// instance as the first line.
+pub const CONVERT_FLAG: &str = "--convert";
+
 /// Hands `files` to a running instance if there is one, or else becomes the
 /// instance that later ones hand theirs to. `None` when the socket can't be
 /// used at all, in which case every launch simply opens its own window.
-pub fn claim(files: &[PathBuf]) -> Option<Claim> {
+pub fn claim(files: &[PathBuf], convert: bool) -> Option<Claim> {
     let name = name()?;
-    if send(&name, files) {
+    if send(&name, files, convert) {
         return Some(Claim::HandedOff);
     }
     match ListenerOptions::new()
@@ -39,25 +44,36 @@ pub fn claim(files: &[PathBuf]) -> Option<Claim> {
     {
         Ok(listener) => Some(Claim::First(Listener(listener))),
         // Another instance started at the same moment and won.
-        Err(_) if send(&name, files) => Some(Claim::HandedOff),
+        Err(_) if send(&name, files, convert) => Some(Claim::HandedOff),
         Err(_) => None,
     }
 }
 
 impl Listener {
-    /// Sends the file lists of later instances to `opened`, from a
-    /// background thread. An empty list means the app was started again
-    /// without files; either way the window should come to the front.
-    pub fn serve(self, opened: Sender<Vec<PathBuf>>, ctx: egui::Context) {
+    /// Sends the file lists of later instances to `opened`, or each file
+    /// to `convert` when they came with [`CONVERT_FLAG`], from a background
+    /// thread. An empty list means the app was started again without
+    /// files; either way the window should come to the front.
+    pub fn serve(self, opened: Sender<Vec<PathBuf>>, convert: Sender<PathBuf>, ctx: egui::Context) {
         std::thread::spawn(move || {
             for stream in self.0.incoming().flatten() {
-                let files: Vec<PathBuf> = BufReader::new(stream)
+                let mut lines: Vec<String> = BufReader::new(stream)
                     .lines()
                     .map_while(Result::ok)
                     .filter(|line| !line.is_empty())
-                    .map(PathBuf::from)
                     .collect();
-                if opened.send(files).is_err() {
+                let to_convert = lines.first().is_some_and(|l| l == CONVERT_FLAG);
+                if to_convert {
+                    lines.remove(0);
+                }
+                let files: Vec<PathBuf> = lines.into_iter().map(PathBuf::from).collect();
+                let sent = if to_convert {
+                    let all = files.into_iter().all(|f| convert.send(f).is_ok());
+                    all && opened.send(Vec::new()).is_ok()
+                } else {
+                    opened.send(files).is_ok()
+                };
+                if !sent {
                     break;
                 }
                 ctx.request_repaint();
@@ -76,12 +92,17 @@ pub fn wait_for_exit(timeout: std::time::Duration) {
     }
 }
 
-/// Sends `files` to a running instance; false if none answers.
-fn send(name: &Name<'_>, files: &[PathBuf]) -> bool {
+/// Sends `files` to a running instance, to convert right away with
+/// `convert`; false if none answers.
+fn send(name: &Name<'_>, files: &[PathBuf], convert: bool) -> bool {
     let Ok(mut stream) = Stream::connect(name.borrow()) else {
         return false;
     };
     let mut message = String::new();
+    if convert {
+        message.push_str(CONVERT_FLAG);
+        message.push('\n');
+    }
     for file in files {
         // The running instance has its own working directory.
         let file = std::path::absolute(file).unwrap_or_else(|_| file.clone());
