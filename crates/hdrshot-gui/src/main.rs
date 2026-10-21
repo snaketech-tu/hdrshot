@@ -881,9 +881,21 @@ impl App {
                         if let Some(error) = error {
                             ui.colored_label(ui.visuals().error_fg_color, error);
                         }
+                        let managed = update::package_manager_command();
+                        if let Some(command) = managed {
+                            ui.label(
+                                "This copy was installed with a package manager. Update it with:",
+                            );
+                            ui.code(command);
+                        }
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
-                            if newest.download.is_some() && error.is_none() {
+                            if let Some(command) = managed {
+                                if ui.button("Copy command").clicked() {
+                                    ctx.copy_text(command.to_owned());
+                                    choice = Some(Choice::Skip);
+                                }
+                            } else if newest.download.is_some() && error.is_none() {
                                 let hint = if cfg!(target_os = "macos") {
                                     "Download the new version and open its disk image"
                                 } else {

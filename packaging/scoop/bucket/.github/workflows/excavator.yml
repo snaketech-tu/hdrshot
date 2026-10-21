@@ -1,0 +1,22 @@
+name: Excavator
+
+# Checks the hdrshot releases every six hours and commits an updated
+# manifest (version and hashes from SHA256SUMS.txt) when there is a new one.
+on:
+  schedule:
+    - cron: "20 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  excavate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ScoopInstaller/GithubActions@v1
+        env:
+          GITH_EMAIL: 9079973+snaketech-tu@users.noreply.github.com
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SKIP_UPDATED: "1"

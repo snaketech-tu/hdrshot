@@ -16,6 +16,9 @@ name: Release
 #   SHA256SUMS.txt
 # The tarballs keep the executable bit, which a bare binary loses when a
 # browser downloads it.
+#
+# After the GitHub release, the crates are published to crates.io through
+# Trusted Publishing (no stored token) and the winget packages are updated.
 on:
   push:
     tags: ["v*"]
@@ -263,3 +266,60 @@ jobs:
           name: hdrshot ${{ env.TAG }}
           body_path: notes.md
           files: dist/*
+
+  # crates.io Trusted Publishing: each crate lists this repository and
+  # release.yml as a trusted publisher, so the job signs in with GitHub's
+  # OIDC token. Crates are published in dependency order; a version that is
+  # already on crates.io (the renderer, most releases) is skipped.
+  crates-io:
+    needs: release
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          for crate in hdrshot-core hdrshot-egui-backend hdrshot hdrshot-gui; do
+            version=$(cargo metadata --no-deps --format-version 1 |
+              jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')
+            if curl -sf -A "hdrshot release (github.com/snaketech-tu/hdrshot)" \
+                "https://crates.io/api/v1/crates/$crate/$version" > /dev/null; then
+              echo "$crate $version is already on crates.io"
+            else
+              cargo publish --locked -p "$crate"
+            fi
+          done
+
+  # Files a pull request to microsoft/winget-pkgs for both packages. Needs
+  # the WINGET_TOKEN secret (a classic token with public_repo, from the
+  # account that owns the winget-pkgs fork); skipped while it isn't set.
+  winget:
+    needs: release
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - identifier: SnakeTech.hdrshot
+            installer: hdrshot-gui\.exe$
+          - identifier: SnakeTech.hdrshot.CLI
+            installer: hdrshot\.exe$
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@v2
+        if: env.WINGET_TOKEN != ''
+        with:
+          identifier: ${{ matrix.identifier }}
+          installers-regex: ${{ matrix.installer }}
+          release-tag: ${{ env.TAG }}
+          token: ${{ env.WINGET_TOKEN }}
