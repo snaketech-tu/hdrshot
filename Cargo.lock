@@ -1328,13 +1328,11 @@ dependencies = [
 
 [[package]]
 name = "hdrshot-egui-backend"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "constify",
  "egui",
- "log",
- "rayon",
  "strength_reduce",
 ]
 
@@ -1579,9 +1577,9 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "j2k-core"
-version = "0.11.3"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae969eb19e9b3a8d65c4342f9921717be407571cc0fbc44e4379daa0b588d01c"
+checksum = "e95fe1ed3855b263af459102af993bddc5d8f0689df7b38867831c7bdbd28848"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1852,9 +1850,9 @@ dependencies = [
 
 [[package]]
 name = "jxr"
-version = "0.2.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49b4cdee06e38e63caf16668e9a44d5fef007290c74c2cb70fa271e8efc628c1"
+checksum = "232aa9e81eac66bcd0497acbe70d39d6bab379155afbe87a39eb8628f32d4e46"
 dependencies = [
  "jxr-core",
  "jxr-native",
@@ -1864,24 +1862,24 @@ dependencies = [
 
 [[package]]
 name = "jxr-core"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "035778813630e6079117cf5fac0a79290ec0edaffe16ac0072c2ea5f11cc685e"
+checksum = "fd5c5ff6127bb6f583d5821383c02fb5e8f67891198f904d5eafabdeeeea85d9"
 dependencies = [
  "j2k-core",
 ]
 
 [[package]]
 name = "jxr-math"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6506b3ec14544413cf741ae3ce3b3079e6cff860bc7060fa8ae311157f7b4752"
+checksum = "535bbde5e0d35cbe67936a27e123ece2c4ecc9660a93082e80cf4eaf183e2fd0"
 
 [[package]]
 name = "jxr-native"
-version = "0.2.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0459a9c1d26181e8904b0df164e6dd2f198e7a7a96f1e1c2ea463f8c3c09953a"
+checksum = "1002074a8357b4412eae8cc9a2102ac25593463be1babcb57339fd7e258e9fd1"
 dependencies = [
  "fearless_simd 1.0.0",
  "jxr-core",

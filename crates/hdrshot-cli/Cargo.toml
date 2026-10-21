@@ -3,6 +3,7 @@ name = "hdrshot"
 description = "HDR image tool: convert HDR screenshots (JXR, EXR, JXL, HDR PNG) to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 keywords.workspace = true

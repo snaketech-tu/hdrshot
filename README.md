@@ -101,7 +101,7 @@ cp -r icons/hicolor ~/.local/share/icons/
 
 ### With Cargo
 
-With [Rust](https://rustup.rs) installed, both tools can also be built from
+With [Rust](https://rustup.rs) 1.99 or newer installed, both tools can also be built from
 [crates.io](https://crates.io/crates/hdrshot):
 
 ```sh
@@ -348,7 +348,7 @@ Rust JPEG XR decoder, so no C toolchain is needed.
 
 ## Building from source
 
-With [Rust](https://rustup.rs) installed:
+With [Rust](https://rustup.rs) 1.99 or newer installed:
 
 ```sh
 cargo build --release
