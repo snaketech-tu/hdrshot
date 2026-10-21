@@ -1,4 +1,4 @@
-//! Making jxr2png the app that opens `.jxr` files.
+//! Making hdrshot the app that opens `.jxr` files.
 //!
 //! Windows doesn't let programs take over a file type on their own: the app
 //! registers itself as able to open `.jxr`, then the user confirms the
@@ -11,7 +11,7 @@
 pub const SUPPORTED: bool = cfg!(any(windows, all(unix, not(target_os = "macos"))));
 
 pub enum Outcome {
-    /// jxr2png now opens `.jxr` files.
+    /// hdrshot now opens `.jxr` files.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     Done,
     /// The system's settings were opened for the user to confirm.
@@ -24,13 +24,18 @@ mod imp {
     use std::io;
 
     use winreg::RegKey;
-    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
 
     use super::Outcome;
 
-    const PROG_ID: &str = "jxr2png.jxr";
+    const PROG_ID: &str = "hdrshot.jxr";
     const CLASSES: &str = r"Software\Classes";
-    const CAPABILITIES: &str = r"Software\jxr2png\Capabilities";
+    const CAPABILITIES: &str = r"Software\hdrshot\Capabilities";
+    /// The registration of versions before the rename. Its file type is kept
+    /// and pointed at this program, because Windows remembers the user's
+    /// choice by this name and doesn't let programs change that choice.
+    const OLD_PROG_ID: &str = "jxr2png.jxr";
+    const OLD_APP: &str = r"Software\jxr2png";
 
     pub fn is_default() -> bool {
         let user = RegKey::predef(HKEY_CURRENT_USER);
@@ -40,12 +45,12 @@ mod imp {
             )
             .and_then(|k| k.get_value::<String, _>("ProgId"));
         match choice {
-            Ok(prog_id) => prog_id == PROG_ID,
+            Ok(prog_id) => prog_id == PROG_ID || prog_id == OLD_PROG_ID,
             // Without a choice made in Windows, the class default applies.
             Err(_) => user
                 .open_subkey(format!(r"{CLASSES}\.jxr"))
                 .and_then(|k| k.get_value::<String, _>(""))
-                .is_ok_and(|v| v == PROG_ID),
+                .is_ok_and(|v| v == PROG_ID || v == OLD_PROG_ID),
         }
     }
 
@@ -53,19 +58,20 @@ mod imp {
     /// it was moved since.
     pub fn refresh() {
         let user = RegKey::predef(HKEY_CURRENT_USER);
-        if user.open_subkey(format!(r"{CLASSES}\{PROG_ID}")).is_ok() {
+        let registered = |id: &str| user.open_subkey(format!(r"{CLASSES}\{id}")).is_ok();
+        if registered(PROG_ID) || registered(OLD_PROG_ID) {
             let _ = register();
         }
     }
 
     pub fn make_default() -> Result<Outcome, String> {
-        register().map_err(|e| format!("Could not register jxr2png: {e}"))?;
+        register().map_err(|e| format!("Could not register hdrshot: {e}"))?;
         if is_default() {
             return Ok(Outcome::Done);
         }
-        // Windows 11 opens jxr2png's own page; Windows 10 the general one.
+        // Windows 11 opens hdrshot's own page; Windows 10 the general one.
         std::process::Command::new("explorer")
-            .arg("ms-settings:defaultapps?registeredAppUser=jxr2png")
+            .arg("ms-settings:defaultapps?registeredAppUser=hdrshot")
             .spawn()
             .map_err(|e| format!("Could not open Settings: {e}"))?;
         Ok(Outcome::Confirm)
@@ -75,14 +81,28 @@ mod imp {
         let exe = std::env::current_exe()?.display().to_string();
         let user = RegKey::predef(HKEY_CURRENT_USER);
 
-        let (prog, _) = user.create_subkey(format!(r"{CLASSES}\{PROG_ID}"))?;
-        prog.set_value("", &"JPEG XR image")?;
-        prog.create_subkey("DefaultIcon")?
-            .0
-            .set_value("", &format!("\"{exe}\",0"))?;
-        prog.create_subkey(r"shell\open\command")?
-            .0
-            .set_value("", &format!("\"{exe}\" \"%1\""))?;
+        let set_command = |prog_id: &str| -> io::Result<()> {
+            let (prog, _) = user.create_subkey(format!(r"{CLASSES}\{prog_id}"))?;
+            prog.set_value("", &"JPEG XR image")?;
+            prog.create_subkey("DefaultIcon")?
+                .0
+                .set_value("", &format!("\"{exe}\",0"))?;
+            prog.create_subkey(r"shell\open\command")?
+                .0
+                .set_value("", &format!("\"{exe}\" \"%1\""))
+        };
+        set_command(PROG_ID)?;
+        if user
+            .open_subkey(format!(r"{CLASSES}\{OLD_PROG_ID}"))
+            .is_ok()
+        {
+            set_command(OLD_PROG_ID)?;
+            // Listed once in Settings, under the new name.
+            let _ = user
+                .open_subkey_with_flags(r"Software\RegisteredApplications", KEY_SET_VALUE)
+                .and_then(|k| k.delete_value("jxr2png"));
+            let _ = user.delete_subkey_all(OLD_APP);
+        }
 
         let (ext, _) = user.create_subkey(format!(r"{CLASSES}\.jxr"))?;
         ext.create_subkey("OpenWithProgids")?
@@ -94,17 +114,14 @@ mod imp {
         }
 
         let (caps, _) = user.create_subkey(CAPABILITIES)?;
-        caps.set_value("ApplicationName", &"jxr2png")?;
-        caps.set_value(
-            "ApplicationDescription",
-            &"Converts HDR JPEG XR screenshots to PNG",
-        )?;
+        caps.set_value("ApplicationName", &"hdrshot")?;
+        caps.set_value("ApplicationDescription", &"HDR image tool")?;
         caps.create_subkey("FileAssociations")?
             .0
             .set_value(".jxr", &PROG_ID)?;
         user.create_subkey(r"Software\RegisteredApplications")?
             .0
-            .set_value("jxr2png", &CAPABILITIES)?;
+            .set_value("hdrshot", &CAPABILITIES)?;
 
         // SAFETY: plain notification call with no pointers to keep alive.
         unsafe {
@@ -127,24 +144,45 @@ mod imp {
 
     use super::Outcome;
 
-    const DESKTOP_FILE: &str = "jxr2png.desktop";
+    const DESKTOP_FILE: &str = "hdrshot.desktop";
+    /// The file of versions before the rename, replaced by the new one.
+    const OLD_DESKTOP_FILE: &str = "jxr2png.desktop";
     const MIME_TYPE: &str = "image/vnd.ms-photo";
 
-    pub fn is_default() -> bool {
+    fn default_app() -> Option<String> {
         Command::new("xdg-mime")
             .args(["query", "default", MIME_TYPE])
             .output()
-            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == DESKTOP_FILE)
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+    }
+
+    pub fn is_default() -> bool {
+        default_app().is_some_and(|app| app == DESKTOP_FILE || app == OLD_DESKTOP_FILE)
     }
 
     pub fn refresh() {
-        if desktop_file().is_some_and(|p| p.exists()) {
+        let old = data_home().map(|d| d.join("applications").join(OLD_DESKTOP_FILE));
+        if let Some(old) = old.filter(|p| p.exists()) {
+            if write_desktop_file().is_err() {
+                return;
+            }
+            if default_app().is_some_and(|app| app == OLD_DESKTOP_FILE) {
+                let _ = Command::new("xdg-mime")
+                    .args(["default", DESKTOP_FILE, MIME_TYPE])
+                    .status();
+            }
+            let _ = std::fs::remove_file(old);
+            if let Some(data) = data_home() {
+                let _ = std::fs::remove_file(data.join("icons/hicolor/256x256/apps/jxr2png.png"));
+            }
+        } else if desktop_file().is_some_and(|p| p.exists()) {
             let _ = write_desktop_file();
         }
     }
 
     pub fn make_default() -> Result<Outcome, String> {
-        write_desktop_file().map_err(|e| format!("Could not install jxr2png.desktop: {e}"))?;
+        write_desktop_file().map_err(|e| format!("Could not install hdrshot.desktop: {e}"))?;
         let status = Command::new("xdg-mime")
             .args(["default", DESKTOP_FILE, MIME_TYPE])
             .status()
@@ -176,11 +214,11 @@ mod imp {
             .replace('"', "\\\\\"")
             .replace('`', "\\\\`")
             .replace('$', "\\\\$");
-        // The icon goes where desktops look up `Icon=jxr2png`.
+        // The icon goes where desktops look up `Icon=hdrshot`.
         if let Some(data) = data_home() {
             let icons = data.join("icons/hicolor/256x256/apps");
             std::fs::create_dir_all(&icons)?;
-            std::fs::write(icons.join("jxr2png.png"), crate::ICON_PNG)?;
+            std::fs::write(icons.join("hdrshot.png"), crate::ICON_PNG)?;
         }
         std::fs::create_dir_all(path.parent().expect("has parent"))?;
         std::fs::write(
@@ -188,9 +226,9 @@ mod imp {
             format!(
                 "[Desktop Entry]\n\
                  Type=Application\n\
-                 Name=jxr2png\n\
-                 Comment=Convert HDR JPEG XR screenshots to PNG\n\
-                 Icon=jxr2png\n\
+                 Name=hdrshot\n\
+                 Comment=HDR image tool\n\
+                 Icon=hdrshot\n\
                  Exec=\"{exe}\" %F\n\
                  MimeType={MIME_TYPE};\n\
                  Categories=Graphics;\n\

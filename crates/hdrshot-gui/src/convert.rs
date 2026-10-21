@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use jxr2png_core::{ConvertOptions, Outputs, share};
+use hdrshot_core::{ConvertOptions, Outputs, share};
 
 pub enum Event {
     Started(usize),
@@ -52,7 +52,7 @@ impl Job {
                     break;
                 }
                 send(&tx, Event::Started(index));
-                let result = jxr2png_core::convert_file(&path, &options);
+                let result = hdrshot_core::convert_file(&path, &options);
                 if let Ok(outputs) = &result
                     && (outputs.hdr.is_some() || outputs.sdr.is_some())
                 {

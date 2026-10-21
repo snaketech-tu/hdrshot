@@ -16,7 +16,7 @@ use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
-use jxr2png_core::{
+use hdrshot_core::{
     ConvertOptions, Existing, HdrFormat, HdrOptions, InputOptions, Naming, OutputMode, Outputs,
     SdrOptions,
 };
@@ -54,14 +54,14 @@ fn main() {
         None => None,
     };
     let viewport = egui::ViewportBuilder::default()
-        .with_title(format!("jxr2png {}", env!("CARGO_PKG_VERSION")))
-        .with_app_id("jxr2png")
+        .with_title(format!("hdrshot {}", env!("CARGO_PKG_VERSION")))
+        .with_app_id("hdrshot")
         .with_inner_size([560.0, 760.0])
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());
     if let Err(e) = window::run(viewport, |ctx| App::new(ctx, files, listener, updated)) {
-        eprintln!("jxr2png: {e}");
+        eprintln!("hdrshot: {e}");
         std::process::exit(1);
     }
 }
@@ -255,7 +255,7 @@ struct App {
     /// area, and of that area, from the last frame.
     bottom_rest: f32,
     advanced_height: f32,
-    /// Whether jxr2png opens `.jxr` files; rechecked when the window
+    /// Whether hdrshot opens `.jxr` files; rechecked when the window
     /// regains focus, since the choice is made in the system's settings.
     is_default_app: bool,
     was_focused: bool,
@@ -377,7 +377,7 @@ impl App {
         }
         app.add_paths(files);
         if updated {
-            app.show_toast(format!("Updated to jxr2png {}", update::CURRENT), ctx);
+            app.show_toast(format!("Updated to hdrshot {}", update::CURRENT), ctx);
         }
         app
     }
@@ -405,10 +405,10 @@ impl App {
         let mut skipped = 0;
         for path in paths {
             if path.is_dir() {
-                for file in jxr2png_core::find_inputs(&path, true) {
+                for file in hdrshot_core::find_inputs(&path, true) {
                     self.add_file(file);
                 }
-            } else if jxr2png_core::is_supported(&path) {
+            } else if hdrshot_core::is_supported(&path) {
                 self.add_file(path);
             } else {
                 skipped += 1;
@@ -425,7 +425,7 @@ impl App {
 
     fn add_file(&mut self, path: PathBuf) {
         if !self.files.iter().any(|e| e.path == path) {
-            let size = jxr2png_core::input::dimensions(&path).ok();
+            let size = hdrshot_core::input::dimensions(&path).ok();
             self.previews.request(&path);
             self.files.push(Entry {
                 path,
@@ -728,7 +728,7 @@ impl App {
             match message {
                 UpdateMessage::Checked(Ok(update::Checked::UpToDate)) => {
                     self.update = Update::Idle;
-                    let text = format!("jxr2png {} is the latest version", update::CURRENT);
+                    let text = format!("hdrshot {} is the latest version", update::CURRENT);
                     self.show_toast(text, ctx);
                 }
                 UpdateMessage::Checked(Ok(update::Checked::Newer(releases))) => {
@@ -746,7 +746,7 @@ impl App {
                         Ok(()) => self.quit(),
                         Err(_) => {
                             self.update = Update::Idle;
-                            let text = "The update is installed. Start jxr2png again to use it.";
+                            let text = "The update is installed. Start hdrshot again to use it.";
                             self.show_toast(text.into(), ctx);
                         }
                     }
@@ -788,7 +788,7 @@ impl App {
                     .show(ctx, |ui| {
                         ui.set_max_width(420.0);
                         ui.label(
-                            RichText::new(format!("jxr2png {} is available", newest.version))
+                            RichText::new(format!("hdrshot {} is available", newest.version))
                                 .strong()
                                 .size(15.0),
                         );
@@ -819,7 +819,7 @@ impl App {
                                 let hint = if cfg!(target_os = "macos") {
                                     "Download the new version and open its disk image"
                                 } else {
-                                    "Download the new version and restart jxr2png"
+                                    "Download the new version and restart hdrshot"
                                 };
                                 if ui
                                     .add_enabled(!running, egui::Button::new("Update"))
@@ -863,7 +863,7 @@ impl App {
                     .show(ctx, |ui| {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.label(format!("Downloading jxr2png {}…", releases[0].version));
+                            ui.label(format!("Downloading hdrshot {}…", releases[0].version));
                         });
                     });
             }
@@ -878,12 +878,12 @@ impl App {
                                 .size(15.0),
                         );
                         ui.label(
-                            "Quit jxr2png, then drag jxr2png from the opened disk image \
+                            "Quit hdrshot, then drag hdrshot from the opened disk image \
                              to Applications and choose Replace.",
                         );
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
-                            if ui.button("Quit jxr2png").clicked() {
+                            if ui.button("Quit hdrshot").clicked() {
                                 choice = Some(Choice::Quit);
                             }
                             ui.with_layout(
@@ -948,7 +948,7 @@ impl App {
         if child
             .add_enabled(!checking, button)
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(format!("You have jxr2png {}", update::CURRENT))
+            .on_hover_text(format!("You have hdrshot {}", update::CURRENT))
             .clicked()
         {
             let ctx = ui.ctx().clone();
@@ -993,7 +993,7 @@ impl App {
                             RichText::new(format!(
                                 "Copied {}. At {} it is over Discord's 10 MB limit.",
                                 too_big.name,
-                                jxr2png_core::share::megabytes(too_big.size)
+                                hdrshot_core::share::megabytes(too_big.size)
                             ))
                             .size(14.0),
                         );
@@ -1078,18 +1078,18 @@ impl App {
             return;
         }
         if ui
-            .small_button("Open .jxr files with jxr2png")
-            .on_hover_text("Make jxr2png the app that opens .jxr files when you double-click them")
+            .small_button("Open .jxr files with hdrshot")
+            .on_hover_text("Make hdrshot the app that opens .jxr files when you double-click them")
             .clicked()
         {
             let ctx = ui.ctx().clone();
             match assoc::make_default() {
                 Ok(assoc::Outcome::Done) => {
                     self.is_default_app = true;
-                    self.show_toast("jxr2png now opens .jxr files".into(), &ctx);
+                    self.show_toast("hdrshot now opens .jxr files".into(), &ctx);
                 }
                 Ok(assoc::Outcome::Confirm) => self.show_toast(
-                    "In Settings, choose jxr2png for .jxr to finish".into(),
+                    "In Settings, choose hdrshot for .jxr to finish".into(),
                     &ctx,
                 ),
                 Err(e) => self.show_toast(e, &ctx),
@@ -1687,7 +1687,7 @@ impl window::App for App {
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading(RichText::new("jxr2png").strong());
+                    ui.heading(RichText::new("hdrshot").strong());
                     ui.label(RichText::new("Convert HDR images").weak());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         self.default_app_ui(ui);
@@ -1730,7 +1730,7 @@ fn existing_outputs<'a>(
 ) -> Vec<PathBuf> {
     inputs
         .flat_map(|input| {
-            let planned = jxr2png_core::output_paths(input, options);
+            let planned = hdrshot_core::output_paths(input, options);
             [planned.hdr, planned.sdr]
         })
         .flatten()
@@ -1757,7 +1757,7 @@ fn output_size(files: &[Entry], max_height: Option<u32>) -> OutputSize {
     let mut sizes = files
         .iter()
         .filter_map(|e| e.size)
-        .map(|(w, h)| max_height.map_or((w, h), |max| jxr2png_core::resize::fit_height(w, h, max)));
+        .map(|(w, h)| max_height.map_or((w, h), |max| hdrshot_core::resize::fit_height(w, h, max)));
     let Some(first) = sizes.next() else {
         return OutputSize::Unknown;
     };
@@ -1790,7 +1790,7 @@ fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) -> bool {
         return false;
     };
     let [w, h] = texture.size();
-    let (w, h) = jxr2png_core::resize::fit_box(w as u32, h as u32, THUMB_SIZE.0, THUMB_SIZE.1);
+    let (w, h) = hdrshot_core::resize::fit_box(w as u32, h as u32, THUMB_SIZE.0, THUMB_SIZE.1);
     let (rect, response) = ui.allocate_exact_size(box_size, Sense::hover());
     let image_rect = egui::Rect::from_center_size(rect.center(), Vec2::new(w as f32, h as f32));
     egui::Image::new((texture.id(), image_rect.size()))
@@ -2096,7 +2096,7 @@ mod tests {
 
     #[test]
     fn existing_outputs_lists_only_files_on_disk() {
-        let dir = std::env::temp_dir().join(format!("jxr2png-gui-existing-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("hdrshot-gui-existing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a_hdr.png"), b"png").unwrap();

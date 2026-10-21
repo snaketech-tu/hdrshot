@@ -1,30 +1,36 @@
 <div align="center">
 
-<img src="crates/jxr2png-gui/assets/icon.png" width="128" alt="jxr2png icon">
+<img src="crates/hdrshot-gui/assets/icon.png" width="128" alt="hdrshot icon">
 
-# jxr2png
+# hdrshot
 
-**Converts HDR JPEG XR (`.jxr`) screenshots to HDR and SDR PNG.**
+**HDR image tool. Converts HDR screenshots and images to HDR PNG, AVIF,
+Ultra HDR JPEG and SDR PNG.**
 
-[![Release](https://img.shields.io/github/v/release/snaketech-tu/jxr2png?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/jxr2png/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/snaketech-tu/jxr2png/total?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/jxr2png/releases)
-[![CI](https://img.shields.io/github/actions/workflow/status/snaketech-tu/jxr2png/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/snaketech-tu/jxr2png/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/snaketech-tu/jxr2png?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/snaketech-tu/hdrshot?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/hdrshot/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/snaketech-tu/hdrshot/total?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/hdrshot/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/snaketech-tu/hdrshot/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/snaketech-tu/hdrshot/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/snaketech-tu/hdrshot?style=flat-square)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555?style=flat-square)
 
-[**Download**](https://github.com/snaketech-tu/jxr2png/releases/latest) ·
+[**Download**](https://github.com/snaketech-tu/hdrshot/releases/latest) ·
 [Desktop app](#desktop-app) ·
 [Command line](#command-line) ·
 [How it works](#how-it-works)
 
-<img src="docs/images/app.png" width="560" alt="The jxr2png desktop app after converting a batch of screenshots">
+<img src="docs/images/app.png" width="560" alt="The hdrshot desktop app after converting a batch of screenshots">
 
 </div>
 
 Windows Game Bar and Xbox save HDR screenshots as JPEG XR, a format few
-applications can open. jxr2png converts them to PNG, in HDR for screens and
-apps that support it and in SDR for everything else, without changing how
-the screenshot looks.
+applications can open. hdrshot converts them, and other HDR images, to
+formats that can be viewed and shared: HDR PNG, AVIF or Ultra HDR JPEG for
+screens and apps that support HDR, and SDR PNG for everything else, without
+changing how the picture looks.
+
+hdrshot was called jxr2png up to version 1.2. Settings and the `.jxr` file
+association carry over, and version 1.2 updates to it from **Check for
+updates**.
 
 ## Features
 
@@ -48,46 +54,46 @@ the screenshot looks.
   form Discord shows with correct colors.
 - **Other HDR inputs.** Also reads OpenEXR (`.exr`), Radiance (`.hdr`),
   HDR PNG and JPEG XL (`.jxl`) files, for game photo modes, renders and re-tone-mapping.
-- **Double-click to convert.** Optionally opens `.jxr` files with jxr2png
+- **Double-click to convert.** Optionally opens `.jxr` files with hdrshot
   on Windows and Linux.
 - **Parallel conversion.** Uses all CPU cores, written in pure Rust with no
   external libraries.
 
 ## Download
 
-The desktop app and the `jxr2png` command-line tool are separate downloads.
+The desktop app and the `hdrshot` command-line tool are separate downloads.
 These links always point to the
-[latest release](https://github.com/snaketech-tu/jxr2png/releases/latest).
+[latest release](https://github.com/snaketech-tu/hdrshot/releases/latest).
 
 | Platform | Desktop app | Command line |
 | --- | --- | --- |
-| Windows 10/11 (x64) | [`jxr2png-gui.exe`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png-gui.exe) | [`jxr2png.exe`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png.exe) |
-| macOS 11+ (Apple silicon and Intel) | [`jxr2png-gui-macos.dmg`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png-gui-macos.dmg) | [`jxr2png-cli-macos.tar.gz`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png-cli-macos.tar.gz) |
-| Linux (x64) | [`jxr2png-gui-linux-x64.tar.gz`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png-gui-linux-x64.tar.gz) | [`jxr2png-cli-linux-x64.tar.gz`](https://github.com/snaketech-tu/jxr2png/releases/latest/download/jxr2png-cli-linux-x64.tar.gz) |
+| Windows 10/11 (x64) | [`hdrshot-gui.exe`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-gui.exe) | [`hdrshot.exe`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot.exe) |
+| macOS 11+ (Apple silicon and Intel) | [`hdrshot-gui-macos.dmg`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-gui-macos.dmg) | [`hdrshot-cli-macos.tar.gz`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-cli-macos.tar.gz) |
+| Linux (x64) | [`hdrshot-gui-linux-x64.tar.gz`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-gui-linux-x64.tar.gz) | [`hdrshot-cli-linux-x64.tar.gz`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-cli-linux-x64.tar.gz) |
 
 `SHA256SUMS.txt` in each release lists the checksums of all downloads.
 
 No installer is needed. On Windows, run the `.exe` directly. On macOS, open
-the disk image and drag jxr2png to Applications. On Linux and for the macOS
+the disk image and drag hdrshot to Applications. On Linux and for the macOS
 command line, unpack the archive. The builds aren't signed
 with a paid certificate, so the first launch needs one extra step:
 
 - **Windows**: if SmartScreen says "Windows protected your PC", choose
   **More info**, then **Run anyway**.
 - **macOS**: if the app "can't be opened", open **System Settings → Privacy
-  & Security** and choose **Open Anyway** next to jxr2png (on older macOS,
+  & Security** and choose **Open Anyway** next to hdrshot (on older macOS,
   right-click the app and choose **Open**). Or remove the download
   quarantine in Terminal:
-  `xattr -dr com.apple.quarantine /Applications/jxr2png.app`,
-  or `xattr -d com.apple.quarantine jxr2png` for the command-line tool.
+  `xattr -dr com.apple.quarantine /Applications/hdrshot.app`,
+  or `xattr -d com.apple.quarantine hdrshot` for the command-line tool.
 
 On Linux, to list the app in your application menu and open `.jxr` files
-with it, install the files from the unpacked folder (and copy `jxr2png`
+with it, install the files from the unpacked folder (and copy `hdrshot`
 from the command-line archive to `~/.local/bin` as well, if you want it):
 
 ```sh
-install -Dm755 jxr2png-gui -t ~/.local/bin
-install -Dm644 jxr2png.desktop -t ~/.local/share/applications
+install -Dm755 hdrshot-gui -t ~/.local/bin
+install -Dm644 hdrshot.desktop -t ~/.local/share/applications
 cp -r icons/hicolor ~/.local/share/icons/
 ```
 
@@ -132,10 +138,10 @@ cp -r icons/hicolor ~/.local/share/icons/
 - **Resolution** scales the output down to 2160p, 1440p, 1080p or 720p,
   keeping the aspect ratio and never scaling up. It starts at Source every
   time.
-- **Open .jxr files with jxr2png** (Windows and Linux) makes a double-click
+- **Open .jxr files with hdrshot** (Windows and Linux) makes a double-click
   on a screenshot open it in the app. Windows asks you to confirm the choice
   in Settings.
-  On macOS, jxr2png is listed under **Open With** for `.jxr` files; to make
+  On macOS, hdrshot is listed under **Open With** for `.jxr` files; to make
   it the default, choose it in the file's **Get Info** window and click
   **Change All**.
 - **Advanced** has **Keep the capture date** (on by default), which gives
@@ -163,11 +169,11 @@ cp -r icons/hicolor ~/.local/share/icons/
 ## Command line
 
 ```sh
-jxr2png shot.jxr                         # writes shot_hdr.png and shot_sdr.png
-jxr2png --hdr -o out/ a.jxr b.jxr        # HDR only, into out/
-jxr2png *.jxr                            # wildcards work in cmd and PowerShell too
-jxr2png -r Captures/                     # a folder, including its subfolders
-jxr2png --sdr --sdr-white 203 shot.jxr   # darker SDR result
+hdrshot shot.jxr                         # writes shot_hdr.png and shot_sdr.png
+hdrshot --hdr -o out/ a.jxr b.jxr        # HDR only, into out/
+hdrshot *.jxr                            # wildcards work in cmd and PowerShell too
+hdrshot -r Captures/                     # a folder, including its subfolders
+hdrshot --sdr --sdr-white 203 shot.jxr   # darker SDR result
 ```
 
 Several files are converted at once, up to eight at a time. Each line of
@@ -204,13 +210,13 @@ Everything is automatic; these options are only for tuning:
 | `-q, --quiet` | Print only errors |
 | `--json` | Print one JSON object per input file, for scripts |
 
-Run `jxr2png --help` for the full list.
+Run `hdrshot --help` for the full list.
 
 The macOS and Linux command-line archives include shell completions for
-bash, zsh and fish in `completions/`, and a man page in `man/jxr2png.1`. On
+bash, zsh and fish in `completions/`, and a man page in `man/hdrshot.1`. On
 Windows, create the PowerShell completion script with
-`jxr2png --generate powershell > _jxr2png.ps1`, then add
-`. path\to\_jxr2png.ps1` to your PowerShell profile to load it.
+`hdrshot --generate powershell > _hdrshot.ps1`, then add
+`. path\to\_hdrshot.ps1` to your PowerShell profile to load it.
 
 ## How it works
 
@@ -284,7 +290,7 @@ Rust JPEG XR decoder, so no C toolchain is needed.
     SDR and, like 8-bit JXR files, give only the SDR PNG. Animations give
     their first frame.
   - **HDR PNG**: PQ or HLG in BT.2020, BT.709 or Display P3, marked by a
-    `cICP` chunk or an ICC `cicp` tag (so jxr2png's own HDR PNGs and their
+    `cICP` chunk or an ICC `cicp` tag (so hdrshot's own HDR PNGs and their
     Discord copies both work). HLG uses a 1000-nit display, as BT.2100
     specifies. Folder scans leave PNGs out, so converted folders aren't
     converted again; give HDR PNGs by name. SDR PNGs are refused.
@@ -300,21 +306,22 @@ With [Rust](https://rustup.rs) installed:
 
 ```sh
 cargo build --release
-cargo run --release -p jxr2png-gui   # desktop app
-cargo run --release -p jxr2png -- --help
+cargo run --release -p hdrshot-gui   # desktop app
+cargo run --release -p hdrshot -- --help
 ```
 
 | Crate | Purpose |
 | --- | --- |
-| `crates/jxr2png-core` | Decoding, color conversion and PNG encoding |
-| `crates/jxr2png-cli` | `jxr2png` command-line tool |
-| `crates/jxr2png-gui` | Desktop app with drag-and-drop (egui) |
+| `crates/hdrshot-core` | Decoding, color conversion and encoding (library) |
+| `crates/hdrshot-cli` | `hdrshot` command-line tool |
+| `crates/hdrshot-gui` | Desktop app with drag-and-drop (egui) |
+| `crates/egui-software-backend` | CPU renderer for the desktop app |
 
 Captures are too large to keep in the repository. Point the sample test at
 a folder of them:
 
 ```sh
-JXR2PNG_SAMPLES=/path/to/jxr/folder cargo test --release -p jxr2png-core --test samples
+HDRSHOT_SAMPLES=/path/to/jxr/folder cargo test --release -p hdrshot-core --test samples
 ```
 
 Releases are built by GitHub Actions: pushing a `v*` tag builds all three
@@ -325,5 +332,5 @@ platforms and publishes the release with notes from
 
 [Apache-2.0](LICENSE)
 
-Made by snake.tech. If jxr2png is useful to you, you can support it on
+Made by snake.tech. If hdrshot is useful to you, you can support it on
 [Ko-fi](https://ko-fi.com/snake_tech).

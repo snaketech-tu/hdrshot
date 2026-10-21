@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 
 use clap::{CommandFactory, Parser};
-use jxr2png_core::{
+use hdrshot_core::{
     AvifOptions, ConvertOptions, Existing, HdrFormat, HdrOptions, InputOptions, Naming, OutputMode,
     Outputs, SdrOptions,
 };
@@ -165,7 +165,7 @@ fn generate(what: Generate, out: &mut dyn Write) -> std::io::Result<()> {
             return clap_mangen::Man::new(command).render(out);
         }
     };
-    clap_complete::generate(shell, &mut command, "jxr2png", out);
+    clap_complete::generate(shell, &mut command, "hdrshot", out);
     Ok(())
 }
 
@@ -249,7 +249,7 @@ fn main() -> ExitCode {
     let mut files = Vec::new();
     for input in &args.inputs {
         if input.is_dir() {
-            let found = jxr2png_core::find_inputs(input, args.recursive);
+            let found = hdrshot_core::find_inputs(input, args.recursive);
             if found.is_empty() && !args.quiet {
                 eprintln!("{}: no images found", input.display());
             }
@@ -275,7 +275,7 @@ fn main() -> ExitCode {
             .par_iter()
             .with_max_len(1)
             .map(|input| {
-                let result = jxr2png_core::convert_file(input, &options);
+                let result = hdrshot_core::convert_file(input, &options);
                 let outputs = result.as_ref().ok().cloned();
                 report.file(input, result);
                 outputs
@@ -345,7 +345,7 @@ impl<'a> Report<'a> {
         }
     }
 
-    fn file(&self, input: &Path, result: jxr2png_core::Result<Outputs>) {
+    fn file(&self, input: &Path, result: hdrshot_core::Result<Outputs>) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let (done, failed) = &mut *state;
         *done += 1;
@@ -419,8 +419,8 @@ mod clipboard {
     use std::path::{Path, PathBuf};
     use std::process::ExitCode;
 
-    use jxr2png_core::share::{self, DISCORD_LIMIT, megabytes};
-    use jxr2png_core::{ConvertOptions, Outputs};
+    use hdrshot_core::share::{self, DISCORD_LIMIT, megabytes};
+    use hdrshot_core::{ConvertOptions, Outputs};
 
     /// The image of `input` to copy, preferring the HDR one, and whether it
     /// is HDR. A PNG skipped because it already existed counts too.
@@ -429,7 +429,7 @@ mod clipboard {
         outputs: &Outputs,
         options: &ConvertOptions,
     ) -> Option<(PathBuf, bool)> {
-        let planned = jxr2png_core::output_paths(input, options);
+        let planned = hdrshot_core::output_paths(input, options);
         let made = |written: &Option<PathBuf>, planned: Option<PathBuf>| {
             written
                 .clone()
@@ -456,7 +456,7 @@ mod clipboard {
         let name = png.file_name().unwrap_or_default().to_string_lossy();
         let bytes = std::fs::read(png).map_err(|e| format!("{}: {e}", png.display()))?;
         let size = if hdr {
-            jxr2png_core::for_discord(&bytes).len()
+            hdrshot_core::for_discord(&bytes).len()
         } else {
             bytes.len()
         } as u64;
@@ -489,7 +489,7 @@ mod clipboard {
         Ok(message)
     }
 
-    /// Windows and macOS keep the file on the clipboard after jxr2png exits.
+    /// Windows and macOS keep the file on the clipboard after hdrshot exits.
     #[cfg(not(target_os = "linux"))]
     fn set(file: &Path) -> Result<(), String> {
         arboard::Clipboard::new()
@@ -498,7 +498,7 @@ mod clipboard {
     }
 
     /// On Linux the clipboard only holds what a running program offers, so
-    /// a background copy of jxr2png offers the file until something else
+    /// a background copy of hdrshot offers the file until something else
     /// is copied.
     #[cfg(target_os = "linux")]
     fn set(file: &Path) -> Result<(), String> {
@@ -567,7 +567,7 @@ mod tests {
         for (what, expect) in [
             (Generate::Bash, "--copy-small"),
             (Generate::Powershell, "--copy-small"),
-            (Generate::Man, ".TH jxr2png"),
+            (Generate::Man, ".TH hdrshot"),
         ] {
             let mut out = Vec::new();
             generate(what, &mut out).unwrap();

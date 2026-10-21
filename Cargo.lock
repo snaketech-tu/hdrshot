@@ -880,18 +880,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_software_backend"
-version = "0.0.3"
-dependencies = [
- "ahash",
- "constify",
- "egui",
- "log",
- "rayon",
- "strength_reduce",
-]
-
-[[package]]
 name = "egui_system_font_provider"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1295,6 +1283,74 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "foldhash 0.2.0",
+]
+
+[[package]]
+name = "hdrshot"
+version = "2.0.0"
+dependencies = [
+ "arboard",
+ "clap",
+ "clap_complete",
+ "clap_mangen",
+ "hdrshot-core",
+ "rayon",
+ "wild",
+]
+
+[[package]]
+name = "hdrshot-core"
+version = "2.0.0"
+dependencies = [
+ "avif-serialize",
+ "exr",
+ "image",
+ "jpeg-encoder",
+ "jxl-oxide",
+ "jxr",
+ "png",
+ "rav1e",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "hdrshot-egui-backend"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "constify",
+ "egui",
+ "log",
+ "rayon",
+ "strength_reduce",
+]
+
+[[package]]
+name = "hdrshot-gui"
+version = "2.0.0"
+dependencies = [
+ "arboard",
+ "bytemuck",
+ "egui",
+ "egui-winit",
+ "egui_system_font_provider",
+ "hdrshot-core",
+ "hdrshot-egui-backend",
+ "interprocess",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "png",
+ "rfd",
+ "ron",
+ "serde",
+ "softbuffer",
+ "ureq",
+ "windows-sys 0.61.2",
+ "winit",
+ "winreg",
+ "winresource",
 ]
 
 [[package]]
@@ -1817,62 +1873,6 @@ dependencies = [
  "jxr-core",
  "jxr-math",
  "rayon",
-]
-
-[[package]]
-name = "jxr2png"
-version = "1.2.0"
-dependencies = [
- "arboard",
- "clap",
- "clap_complete",
- "clap_mangen",
- "jxr2png-core",
- "rayon",
- "wild",
-]
-
-[[package]]
-name = "jxr2png-core"
-version = "1.2.0"
-dependencies = [
- "avif-serialize",
- "exr",
- "image",
- "jpeg-encoder",
- "jxl-oxide",
- "jxr",
- "png",
- "rav1e",
- "rayon",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "jxr2png-gui"
-version = "1.2.0"
-dependencies = [
- "arboard",
- "bytemuck",
- "egui",
- "egui-winit",
- "egui_software_backend",
- "egui_system_font_provider",
- "interprocess",
- "jxr2png-core",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "png",
- "rfd",
- "ron",
- "serde",
- "softbuffer",
- "ureq",
- "windows-sys 0.61.2",
- "winit",
- "winreg",
- "winresource",
 ]
 
 [[package]]

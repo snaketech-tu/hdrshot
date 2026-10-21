@@ -3,14 +3,14 @@
 
 use std::path::{Path, PathBuf};
 
-use jxr2png_core::{ConvertOptions, OutputMode, convert_file, decode, resize};
+use hdrshot_core::{ConvertOptions, OutputMode, convert_file, decode, resize};
 
 const ALPHA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/alpha32.jxr");
 const SDR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sdr32.jxr");
 
 fn out_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir()
-        .join("jxr2png-inputs")
+        .join("hdrshot-inputs")
         .join(format!("{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();

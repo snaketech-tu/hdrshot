@@ -1,4 +1,4 @@
-//! Reading the image formats jxr2png accepts.
+//! Reading the image formats hdrshot accepts.
 //!
 //! Every format is decoded to the same linear scRGB [`ScRgbImage`] that the
 //! JPEG XR path produces, so all outputs work unchanged for every input.

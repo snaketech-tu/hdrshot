@@ -1,10 +1,13 @@
 [package]
-name = "jxr2png"
-description = "Command-line JXR to PNG converter"
+name = "hdrshot"
+description = "HDR image tool: convert HDR screenshots (JXR, EXR, JXL, HDR PNG) to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
 
 [dependencies]
 arboard = { version = "3.7.0", default-features = false, features = ["wayland-data-control"] }
@@ -13,4 +16,4 @@ clap_complete = "4.6.11"
 clap_mangen = "0.3.3"
 rayon = "1.12.0"
 wild = "2"
-jxr2png-core = { version = "1.2.0", path = "../jxr2png-core" }
+hdrshot-core = { version = "2.0.0", path = "../hdrshot-core" }

@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use jxr2png_core::{
+use hdrshot_core::{
     ConvertOptions, InputOptions, Outputs, ScRgbImage, SdrOptions, convert_file, decode,
     for_discord, preview, sdr_rgb8,
 };
@@ -22,7 +22,7 @@ fn at(image: &ScRgbImage, x: usize, y: usize) -> [f32; 3] {
 /// A fresh output folder for one test.
 fn out_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir()
-        .join("jxr2png-fixture")
+        .join("hdrshot-fixture")
         .join(format!("{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -239,12 +239,12 @@ fn preview_is_small_and_tone_maps_like_the_png() {
     let preview = preview(Path::new(FIXTURE), &InputOptions::default(), 32, 16).unwrap();
     assert_eq!((preview.image.width, preview.image.height), (16, 16));
     // Levels come from the full image, not the downscaled one.
-    let full = jxr2png_core::light_levels(&fixture());
+    let full = hdrshot_core::light_levels(&fixture());
     assert_eq!(preview.levels, full);
 
     let dir = out_dir("preview");
     let options = ConvertOptions {
-        mode: jxr2png_core::OutputMode::Sdr,
+        mode: hdrshot_core::OutputMode::Sdr,
         output_dir: Some(dir),
         ..Default::default()
     };

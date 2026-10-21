@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-const RELEASES_URL: &str = "https://api.github.com/repos/snaketech-tu/jxr2png/releases?per_page=30";
+const RELEASES_URL: &str = "https://api.github.com/repos/snaketech-tu/hdrshot/releases?per_page=30";
 
 /// The version of this build.
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
@@ -46,6 +46,8 @@ pub struct Release {
 
 #[derive(Clone)]
 pub struct Download {
+    /// The file name, used for the download on macOS and Linux.
+    #[cfg_attr(windows, allow(dead_code))]
     pub name: String,
     pub url: String,
 }
@@ -92,7 +94,7 @@ fn agent() -> ureq::Agent {
         // Followed by `get`.
         .max_redirects(0)
         .timeout_global(Some(Duration::from_secs(120)))
-        .user_agent(format!("jxr2png/{CURRENT}"))
+        .user_agent(format!("hdrshot/{CURRENT}"))
         .build()
         .into()
 }
@@ -207,7 +209,7 @@ fn install_here(download: &Download) -> io::Result<Installed> {
 #[cfg(not(any(windows, target_os = "macos")))]
 fn install_here(download: &Download) -> io::Result<Installed> {
     let exe = std::env::current_exe()?;
-    let work = std::env::temp_dir().join(format!("jxr2png-update-{}", std::process::id()));
+    let work = std::env::temp_dir().join(format!("hdrshot-update-{}", std::process::id()));
     std::fs::create_dir_all(&work)?;
     let result = (|| {
         let archive = work.join(&download.name);

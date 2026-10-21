@@ -1,12 +1,14 @@
 [package]
-name = "egui_software_backend"
+name = "hdrshot-egui-backend"
 description = "CPU renderer for egui (vendored from egui_software_backend 0.0.3, ported to egui 0.37)"
-version = "0.0.3"
+version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-publish = false
+repository = "https://github.com/snaketech-tu/hdrshot"
+readme = "README.md"
 
 [lib]
+name = "egui_software_backend"
 # The crate docs show examples that need egui_demo_lib.
 doctest = false
 

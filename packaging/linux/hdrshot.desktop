@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=hdrshot
+GenericName=HDR Image Tool
+Comment=Convert HDR screenshots and images to PNG, AVIF and Ultra HDR JPEG
+Exec=hdrshot-gui %F
+Icon=hdrshot
+Terminal=false
+Categories=Graphics;Utility;
+MimeType=image/vnd.ms-photo;image/jxr;
+Keywords=HDR;JXR;JPEG XR;PNG;AVIF;Ultra HDR;EXR;JXL;screenshot;

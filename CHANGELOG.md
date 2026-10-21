@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.0] - 2026-10-21
 
 ### Added
 
@@ -26,6 +26,19 @@
 
 ### Changed
 
+- jxr2png is now **hdrshot**, an HDR image tool, since it reads and writes
+  more than JPEG XR and PNG. The command is `hdrshot`, the desktop app is
+  `hdrshot-gui`, and the downloads are named `hdrshot-gui.exe`,
+  `hdrshot.exe`, `hdrshot-gui-macos.dmg` and so on. Version 1.2 finds and
+  installs the update under the new name.
+- Settings saved by jxr2png are read on first start. On Windows the `.jxr`
+  association made by jxr2png now opens hdrshot, and Settings lists it
+  once, as hdrshot. On Linux the `jxr2png.desktop` entry is replaced by
+  `hdrshot.desktop`, keeping it as the default app for `.jxr` if it was.
+  On macOS, delete the old jxr2png app after installing hdrshot.
+- The crates are `hdrshot-core`, `hdrshot` and `hdrshot-gui`, with
+  crates.io metadata. The vendored CPU renderer is the
+  `hdrshot-egui-backend` package.
 - New app icon: a picture split between flat SDR and bright HDR. It has
   a simplified version for the smallest sizes, a macOS icon on Apple's
   icon grid, and Linux icons from 16 px to 512 px plus a scalable SVG.

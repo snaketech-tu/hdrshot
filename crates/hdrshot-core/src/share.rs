@@ -21,7 +21,7 @@ pub struct Smaller {
 /// as `name`, and returns its path. An HDR PNG loses its `cICP` chunk
 /// first (see [`crate::for_discord`]).
 pub fn clipboard_file(name: &str, png: &[u8], hdr: bool) -> std::io::Result<PathBuf> {
-    let dir = std::env::temp_dir().join("jxr2png-clipboard");
+    let dir = std::env::temp_dir().join("hdrshot-clipboard");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(name);

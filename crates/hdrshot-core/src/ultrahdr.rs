@@ -181,7 +181,7 @@ fn iso_segment(payload: &[u8]) -> Vec<u8> {
 /// XMP of the base image: the container directory naming the gain map.
 fn primary_xmp(gain_map_length: usize) -> String {
     format!(
-        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="jxr2png">
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="hdrshot">
  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
   <rdf:Description rdf:about=""
     xmlns:hdrgm="http://ns.adobe.com/hdr-gain-map/1.0/"
@@ -207,7 +207,7 @@ fn primary_xmp(gain_map_length: usize) -> String {
 /// XMP of the gain map image: its parameters.
 fn gain_map_xmp(params: &GainMapParams) -> String {
     format!(
-        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="jxr2png">
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="hdrshot">
  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
   <rdf:Description rdf:about=""
     xmlns:hdrgm="http://ns.adobe.com/hdr-gain-map/1.0/"
