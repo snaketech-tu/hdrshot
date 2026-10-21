@@ -9,6 +9,8 @@ egui 0.37 for the hdrshot desktop app, and published as `hdrshot-egui-backend`:
 - `ahash` is a direct dependency, since egui no longer re-exports it.
 - Texture updates are applied per batch, since `TexturesDelta::set` now holds
   several deltas per texture.
+- The optional `rayon`, `log` and `raster_stats` features are removed, since
+  the app never enabled them.
 - The winit runner and test helpers are removed; the app has its own window
   code in `crates/hdrshot-gui/src/window.rs`.
 

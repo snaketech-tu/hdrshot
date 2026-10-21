@@ -83,8 +83,6 @@ use alloc::{borrow::Cow, vec, vec::Vec};
 use ahash::HashMap;
 use egui::{Color32, Mesh, Pos2, Vec2, vec2};
 
-#[cfg(feature = "raster_stats")]
-use crate::stats::RasterStats;
 use crate::{
     color::{AvailableImpl, SelectedImpl, swizzle_rgba_bgra},
     egui_texture::EguiTexture,
@@ -98,8 +96,6 @@ pub(crate) mod hash;
 pub(crate) mod math;
 pub(crate) mod raster;
 pub(crate) mod render;
-#[cfg(feature = "raster_stats")]
-pub mod stats;
 
 #[inline(always)]
 #[allow(dead_code)]
@@ -146,8 +142,6 @@ pub struct EguiSoftwareRender {
     allow_raster_opt: bool,
     cacheing_enabled: bool,
     simd_impl: AvailableImpl,
-    #[cfg(feature = "raster_stats")]
-    pub stats: RasterStats,
 }
 
 impl EguiSoftwareRender {
@@ -169,8 +163,6 @@ impl EguiSoftwareRender {
             allow_raster_opt: true,
             cacheing_enabled: true,
             simd_impl: Default::default(),
-            #[cfg(feature = "raster_stats")]
-            stats: Default::default(),
         }
     }
 
@@ -244,9 +236,6 @@ impl EguiSoftwareRender {
     ) {
         // TODO: need to deal with user textures. Either make the fields of EguiUserTextures pub or need to come up with a replacement.
 
-        #[cfg(feature = "raster_stats")]
-        self.stats.clear();
-
         assert!(width > 0);
         assert!(height > 0);
         assert!(pixels_per_point > 0.0);
@@ -290,19 +279,12 @@ impl EguiSoftwareRender {
     /// Only run after EguiSoftwareRender::render_to_canvas(), or use EguiSoftwareRender::render() to run both.
     /// Only writes tile regions that contain pixels that are not fully transparent.
     pub fn blit_canvas_to_buffer(&mut self, buffer: &mut BufferMutRef) {
-        #[cfg(feature = "raster_stats")]
-        let start = std::time::Instant::now();
-
         // Simple tile-less version
         // buffer.data.iter_mut().zip(self.canvas.iter()).for_each(|(pixel, src)| {
         //     *pixel = egui_blend_u8(*src, *pixel);
         // });
 
         if self.canvas.data.is_empty() {
-            #[cfg(feature = "log")]
-            log::error!(
-                "Canvas not initialized, call EguiSoftwareRender::blit_canvas_to_buffer() only after EguiSoftwareRender::render_to_canvas()"
-            );
             return;
         }
 
@@ -313,57 +295,6 @@ impl EguiSoftwareRender {
 
         let tiles_x = self.tiles_dim[0];
 
-        #[cfg(feature = "rayon")]
-        {
-            use rayon::{
-                iter::{IndexedParallelIterator, ParallelIterator},
-                slice::ParallelSliceMut,
-            };
-            // blit rows of tiles in parallel
-
-            let width = buffer.width;
-            let px_per_row_of_tiles = width * TILE_SIZE;
-
-            buffer
-                .data
-                .par_chunks_mut(px_per_row_of_tiles)
-                .enumerate()
-                .for_each(|(tile_row, tile_height_row)| {
-                    let height = tile_height_row.len() / width; // Might be less than TILE_SIZE
-                    let buffer_tile_row = &mut BufferMutRef::new(tile_height_row, width, height);
-
-                    for (tile_idx, &mask) in self.dirty_tiles.iter().enumerate() {
-                        if mask & Self::OCCUPIED_TILE_MASK == 0 {
-                            continue;
-                        }
-
-                        let tile_y = tile_idx / tiles_x;
-                        if tile_y != tile_row {
-                            continue;
-                        }
-
-                        let tile_x = tile_idx % tiles_x;
-
-                        let x_start = tile_x * TILE_SIZE;
-                        let y_start = 0;
-                        let x_end = (x_start + TILE_SIZE).min(width);
-                        let y_end = TILE_SIZE.min(height);
-
-                        let canvas_row_offset = tile_row * TILE_SIZE;
-
-                        dispatch_simd_impl!(self.simd_impl, |simd_impl| self.blit_tile(
-                            simd_impl,
-                            buffer_tile_row,
-                            x_start,
-                            y_start,
-                            x_end,
-                            y_end,
-                            canvas_row_offset,
-                        ));
-                    }
-                });
-        }
-        #[cfg(not(feature = "rayon"))]
         {
             for (tile_idx, &mask) in self.dirty_tiles.iter().enumerate() {
                 if mask & Self::OCCUPIED_TILE_MASK == 0 {
@@ -381,11 +312,6 @@ impl EguiSoftwareRender {
                 dispatch_simd_impl!(self.simd_impl, |simd_impl| self
                     .blit_tile(simd_impl, buffer, x_start, y_start, x_end, y_end, 0));
             }
-        }
-
-        #[cfg(feature = "raster_stats")]
-        {
-            self.stats.blit_canvas_to_buffer = start.elapsed().as_secs_f32();
         }
     }
 
@@ -415,18 +341,12 @@ impl EguiSoftwareRender {
         textures_delta: &egui::TexturesDelta,
         pixels_per_point: f32,
     ) {
-        #[cfg(feature = "raster_stats")]
-        self.stats.clear();
-
         self.set_textures(textures_delta);
 
         self.target_size = vec2(
             direct_draw_buffer.width as f32,
             direct_draw_buffer.height as f32,
         );
-
-        #[cfg(feature = "raster_stats")]
-        let start = std::time::Instant::now();
 
         for egui::ClippedPrimitive {
             clip_rect,
@@ -436,8 +356,6 @@ impl EguiSoftwareRender {
             let input_mesh = match primitive {
                 egui::epaint::Primitive::Mesh(input_mesh) => input_mesh,
                 egui::epaint::Primitive::Callback(_) => {
-                    #[cfg(feature = "log")]
-                    log::error!("egui::epaint::Primitive::Callback(PaintCallback) not supported");
                     continue;
                 }
             };
@@ -474,8 +392,6 @@ impl EguiSoftwareRender {
                     Vec2::ZERO,
                     self.allow_raster_opt,
                     self.convert_tris_to_rects,
-                    #[cfg(all(feature = "raster_stats", not(feature = "rayon")))]
-                    &mut self.stats,
                 );
             } else {
                 draw_egui_mesh::<8>(
@@ -487,16 +403,10 @@ impl EguiSoftwareRender {
                     Vec2::ZERO,
                     self.allow_raster_opt,
                     self.convert_tris_to_rects,
-                    #[cfg(all(feature = "raster_stats", not(feature = "rayon")))]
-                    &mut self.stats,
                 );
             }
         }
 
-        #[cfg(feature = "raster_stats")]
-        {
-            self.stats.render_direct = start.elapsed().as_secs_f32();
-        }
         self.free_textures(textures_delta);
     }
 
@@ -546,9 +456,6 @@ impl EguiSoftwareRender {
         paint_jobs: &[egui::ClippedPrimitive],
         pixels_per_point: f32,
     ) {
-        #[cfg(feature = "raster_stats")]
-        let start = std::time::Instant::now();
-
         struct CacheReuse {
             seen_this_frame: bool,
             z_order: usize,
@@ -565,12 +472,7 @@ impl EguiSoftwareRender {
         }
 
         // Render paint jobs in parallel
-        #[cfg(feature = "rayon")]
-        use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-        #[cfg(feature = "rayon")]
-        let iter = paint_jobs.par_iter().enumerate();
 
-        #[cfg(not(feature = "rayon"))]
         let iter = paint_jobs.iter().enumerate();
 
         let updates: Vec<CacheUpdate> = iter
@@ -585,10 +487,6 @@ impl EguiSoftwareRender {
                     let input_mesh = match primitive {
                         egui::epaint::Primitive::Mesh(input_mesh) => input_mesh,
                         egui::epaint::Primitive::Callback(_) => {
-                            #[cfg(feature = "log")]
-                            log::error!(
-                                "egui::epaint::Primitive::Callback(PaintCallback) not supported"
-                            );
                             return CacheUpdate::None;
                         }
                     };
@@ -697,8 +595,6 @@ impl EguiSoftwareRender {
                                 offset,
                                 self.allow_raster_opt,
                                 self.convert_tris_to_rects,
-                                #[cfg(all(feature = "raster_stats", not(feature = "rayon")))]
-                                &mut self.stats,
                             );
                         } else {
                             draw_egui_mesh::<8>(
@@ -710,8 +606,6 @@ impl EguiSoftwareRender {
                                 offset,
                                 self.allow_raster_opt,
                                 self.convert_tris_to_rects,
-                                #[cfg(all(feature = "raster_stats", not(feature = "rayon")))]
-                                &mut self.stats,
                             );
                         }
                         prim.update_occupied_tiles(self.tiles_dim[0], self.tiles_dim[1]);
@@ -737,80 +631,17 @@ impl EguiSoftwareRender {
             }
             CacheUpdate::None => (),
         });
-
-        #[cfg(feature = "raster_stats")]
-        {
-            self.stats.render_prims_to_cache = start.elapsed().as_secs_f32();
-        }
     }
 
     fn update_canvas_from_cached(&mut self) {
         let simd_impl = self.simd_impl;
-        #[cfg(feature = "raster_stats")]
-        let start = std::time::Instant::now();
 
         let mut sorted_prim_cache = self.cached_primitives.values().collect::<Vec<_>>();
         sorted_prim_cache.sort_unstable_by_key(|prim| prim.z_order);
 
-        #[allow(unused_mut)]
         let mut canvas =
             BufferMutRef::new(&mut self.canvas.data, self.canvas.width, self.canvas.height);
 
-        #[cfg(feature = "rayon")]
-        {
-            use rayon::{
-                iter::{IndexedParallelIterator, ParallelIterator},
-                slice::ParallelSliceMut,
-            };
-            // composite rows of tiles in parallel
-
-            let full_height = self.canvas.height;
-
-            let width = canvas.width;
-            let px_per_row_of_tiles = width * TILE_SIZE;
-
-            canvas
-                .data
-                .par_chunks_mut(px_per_row_of_tiles)
-                .enumerate()
-                .for_each(|(tile_row, tile_height_row)| {
-                    let height = tile_height_row.len() / width; // Might be less than TILE_SIZE
-                    let canvas_tile_row = &mut BufferMutRef::new(tile_height_row, width, height);
-
-                    let dirty_tile_row_start = tile_row * self.tiles_dim[0];
-                    let dirty_tile_row_end = dirty_tile_row_start + self.tiles_dim[0];
-
-                    self.dirty_tiles
-                        .iter()
-                        .enumerate()
-                        .skip(dirty_tile_row_start)
-                        .take(dirty_tile_row_end)
-                        .filter(|(_, mask)| **mask & Self::DIRTY_TILE_MASK != 0)
-                        .map(|(idx, _)| idx)
-                        .for_each(|tile_idx| {
-                            let tile_y = tile_idx / self.tiles_dim[0];
-
-                            if tile_y != tile_row {
-                                return;
-                            }
-                            let canvas_row_offset = tile_row * TILE_SIZE;
-
-                            let tile_x = tile_idx % self.tiles_dim[0];
-
-                            update_canvas_tile(
-                                simd_impl,
-                                &sorted_prim_cache,
-                                canvas_tile_row,
-                                tile_x,
-                                tile_y,
-                                full_height,
-                                canvas_row_offset,
-                            );
-                        });
-                });
-        }
-
-        #[cfg(not(feature = "rayon"))]
         {
             for tile_idx in self
                 .dirty_tiles
@@ -833,10 +664,6 @@ impl EguiSoftwareRender {
                 );
             }
         }
-        #[cfg(feature = "raster_stats")]
-        {
-            self.stats.update_canvas_from_cached = start.elapsed().as_secs_f32();
-        }
     }
 
     fn clear_unused_cached_prims(&mut self) {
@@ -847,8 +674,6 @@ impl EguiSoftwareRender {
     const DIRTY_TILE_MASK: u8 = 0b00000001;
     const OCCUPIED_TILE_MASK: u8 = 0b000000010;
     fn update_dirty_tiles(&mut self) {
-        #[cfg(feature = "raster_stats")]
-        let start = std::time::Instant::now();
         self.dirty_tiles
             .resize(self.tiles_dim[0] * self.tiles_dim[1], 0);
         self.dirty_tiles.fill(0);
@@ -862,24 +687,14 @@ impl EguiSoftwareRender {
                 *mask |= Self::OCCUPIED_TILE_MASK;
             }
         }
-        #[cfg(feature = "raster_stats")]
-        {
-            self.stats.update_dirty_tiles = start.elapsed().as_secs_f32();
-        }
     }
 
     fn set_textures(&mut self, textures_delta: &egui::TexturesDelta) {
-        #[cfg(feature = "raster_stats")]
-        let start = std::time::Instant::now();
         // egui 0.37 batches several updates per texture; apply them in order.
         for (id, deltas) in &textures_delta.set {
             for delta in deltas {
                 if delta.options.magnification != delta.options.minification {
                     // Would need helper lanes to impl?
-                    #[cfg(feature = "log")]
-                    log::warn!(
-                        "TextureOptions magnification and minification not matching is unsupported."
-                    );
                 }
                 let pixels = match &delta.image {
                     egui::ImageData::Color(image) => {
@@ -910,10 +725,6 @@ impl EguiSoftwareRender {
                     self.textures.insert(*id, new_texture);
                 }
             }
-        }
-        #[cfg(feature = "raster_stats")]
-        {
-            self.stats.set_textures = start.elapsed().as_secs_f32();
         }
     }
 
