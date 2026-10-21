@@ -64,7 +64,8 @@ pub fn write_hdr_avif<W: Write>(
     let (width, height) = (image.width as usize, image.height as usize);
     let transform = HdrTransform::new(image, hdr);
 
-    // Full-resolution Y, Cb and Cr in 0..1, from the PQ-encoded BT.2020 RGB.
+    // Full-resolution Y in 0..1 and Cb, Cr in -0.5..0.5, from the
+    // PQ-encoded BT.2020 RGB.
     let mut ycbcr = vec![[0f32; 3]; width * height];
     let brightest: Vec<f32> = ycbcr
         .par_iter_mut()
@@ -75,8 +76,8 @@ pub fn write_hdr_avif<W: Write>(
             let y = KR * r + (1.0 - KR - KB) * g + KB * b;
             *out = [
                 y,
-                (b - y) / (2.0 * (1.0 - KB)) + 0.5,
-                (r - y) / (2.0 * (1.0 - KR)) + 0.5,
+                (b - y) / (2.0 * (1.0 - KB)),
+                (r - y) / (2.0 * (1.0 - KR)),
             ];
             nits.into_iter().fold(0.0, f32::max)
         })
@@ -142,8 +143,15 @@ pub fn write_hdr_avif<W: Write>(
     Ok(())
 }
 
+/// A full-range 10-bit code for a 0..1 value (Y or alpha).
 fn to_code(v: f32) -> u16 {
     (v.clamp(0.0, 1.0) * MAX_CODE).round() as u16
+}
+
+/// A full-range 10-bit chroma code for a -0.5..0.5 value: H.273 puts zero
+/// at 512, not halfway up the range at 511.5.
+fn to_chroma_code(v: f32) -> u16 {
+    (v * MAX_CODE + 512.0).round().clamp(0.0, MAX_CODE) as u16
 }
 
 /// Copies Y, Cb and Cr into the frame, averaging each 2×2 block of chroma
@@ -167,7 +175,7 @@ fn fill_color(
         if full_color {
             for (row, pixels) in rows.rows_iter_mut().zip(ycbcr.chunks_exact(width)) {
                 for (o, p) in row.iter_mut().zip(pixels) {
-                    *o = to_code(p[c]);
+                    *o = to_chroma_code(p[c]);
                 }
             }
         } else {
@@ -180,7 +188,7 @@ fn fill_color(
                             n += 1.0;
                         }
                     }
-                    *o = to_code(sum / n);
+                    *o = to_chroma_code(sum / n);
                 }
             }
         }
@@ -301,6 +309,19 @@ mod tests {
                     .any(|w| w == b"urn:mpeg:mpegB:cicp:systems:")
             );
         }
+    }
+
+    #[test]
+    fn grey_has_neutral_chroma() {
+        for i in 0..=1000 {
+            let v = i as f32 / 1000.0;
+            let y = KR * v + (1.0 - KR - KB) * v + KB * v;
+            let cb = (v - y) / (2.0 * (1.0 - KB));
+            assert_eq!(to_chroma_code(cb), 512, "{v}");
+        }
+        // The range is lopsided around 512, as H.273 has it.
+        assert_eq!(to_chroma_code(-0.5), 1);
+        assert_eq!(to_chroma_code(0.5), 1023);
     }
 
     #[test]

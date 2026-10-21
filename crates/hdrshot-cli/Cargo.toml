@@ -14,6 +14,7 @@ arboard = { version = "3.7.0", default-features = false, features = ["wayland-da
 clap = { version = "4.6.7", features = ["derive"] }
 clap_complete = "4.6.11"
 clap_mangen = "0.3.3"
+ctrlc = "3.5.2"
 rayon = "1.12.0"
 wild = "2"
 hdrshot-core = { version = "2.0.0", path = "../hdrshot-core" }

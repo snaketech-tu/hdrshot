@@ -1,11 +1,13 @@
-//! Making hdrshot the app that opens `.jxr` files.
+//! Making hdrshot the app that opens `.jxr` files, and listing it under
+//! "Open with" for the other formats it reads (`.wdp`, `.exr`, `.jxl` and
+//! `.hdr`), without becoming their default.
 //!
 //! Windows doesn't let programs take over a file type on their own: the app
-//! registers itself as able to open `.jxr`, then the user confirms the
-//! choice in the Settings page this opens. On Linux the default is set with
-//! `xdg-mime`. On macOS the app bundle declares that it opens `.jxr`, and
-//! Finder's "Open With" and "Get Info" set the default, so there is nothing
-//! to do here.
+//! registers itself as able to open these types, then the user confirms the
+//! choice for `.jxr` in the Settings page this opens. On Linux the default
+//! is set with `xdg-mime`. On macOS the app bundle declares the types it
+//! opens, and Finder's "Open With" and "Get Info" set the default, so there
+//! is nothing to do here.
 
 /// Whether this platform supports setting the default from inside the app.
 pub const SUPPORTED: bool = cfg!(any(windows, all(unix, not(target_os = "macos"))));
@@ -36,6 +38,13 @@ mod imp {
     /// choice by this name and doesn't let programs change that choice.
     const OLD_PROG_ID: &str = "jxr2png.jxr";
     const OLD_APP: &str = r"Software\jxr2png";
+    /// The other types hdrshot reads, with their file type and its name.
+    const OPEN_WITH: [(&str, &str, &str); 4] = [
+        (".wdp", PROG_ID, "JPEG XR image"),
+        (".exr", "hdrshot.exr", "OpenEXR image"),
+        (".jxl", "hdrshot.jxl", "JPEG XL image"),
+        (".hdr", "hdrshot.hdr", "Radiance HDR image"),
+    ];
 
     pub fn is_default() -> bool {
         let user = RegKey::predef(HKEY_CURRENT_USER);
@@ -81,9 +90,9 @@ mod imp {
         let exe = std::env::current_exe()?.display().to_string();
         let user = RegKey::predef(HKEY_CURRENT_USER);
 
-        let set_command = |prog_id: &str| -> io::Result<()> {
+        let set_command = |prog_id: &str, name: &str| -> io::Result<()> {
             let (prog, _) = user.create_subkey(format!(r"{CLASSES}\{prog_id}"))?;
-            prog.set_value("", &"JPEG XR image")?;
+            prog.set_value("", &name)?;
             prog.create_subkey("DefaultIcon")?
                 .0
                 .set_value("", &format!("\"{exe}\",0"))?;
@@ -91,12 +100,12 @@ mod imp {
                 .0
                 .set_value("", &format!("\"{exe}\" \"%1\""))
         };
-        set_command(PROG_ID)?;
+        set_command(PROG_ID, "JPEG XR image")?;
         if user
             .open_subkey(format!(r"{CLASSES}\{OLD_PROG_ID}"))
             .is_ok()
         {
-            set_command(OLD_PROG_ID)?;
+            set_command(OLD_PROG_ID, "JPEG XR image")?;
             // Listed once in Settings, under the new name.
             let _ = user
                 .open_subkey_with_flags(r"Software\RegisteredApplications", KEY_SET_VALUE)
@@ -112,13 +121,22 @@ mod imp {
         if ext.get_value::<String, _>("").is_err() {
             ext.set_value("", &PROG_ID)?;
         }
+        // The other types only get hdrshot under "Open with".
+        for (ext, prog_id, name) in OPEN_WITH {
+            set_command(prog_id, name)?;
+            user.create_subkey(format!(r"{CLASSES}\{ext}\OpenWithProgids"))?
+                .0
+                .set_value(prog_id, &"")?;
+        }
 
         let (caps, _) = user.create_subkey(CAPABILITIES)?;
         caps.set_value("ApplicationName", &"hdrshot")?;
         caps.set_value("ApplicationDescription", &"HDR image tool")?;
-        caps.create_subkey("FileAssociations")?
-            .0
-            .set_value(".jxr", &PROG_ID)?;
+        let (associations, _) = caps.create_subkey("FileAssociations")?;
+        associations.set_value(".jxr", &PROG_ID)?;
+        for (ext, prog_id, _) in OPEN_WITH {
+            associations.set_value(ext, &prog_id)?;
+        }
         user.create_subkey(r"Software\RegisteredApplications")?
             .0
             .set_value("hdrshot", &CAPABILITIES)?;
@@ -148,6 +166,10 @@ mod imp {
     /// The file of versions before the rename, replaced by the new one.
     const OLD_DESKTOP_FILE: &str = "jxr2png.desktop";
     const MIME_TYPE: &str = "image/vnd.ms-photo";
+    /// Listed in the desktop file, so hdrshot is under "Open with" for
+    /// them; only `MIME_TYPE` is made the default.
+    const MIME_TYPES: &str =
+        "image/vnd.ms-photo;image/jxr;image/x-exr;image/jxl;image/vnd.radiance;";
 
     fn default_app() -> Option<String> {
         Command::new("xdg-mime")
@@ -230,7 +252,7 @@ mod imp {
                  Comment=HDR image tool\n\
                  Icon=hdrshot\n\
                  Exec=\"{exe}\" %F\n\
-                 MimeType={MIME_TYPE};\n\
+                 MimeType={MIME_TYPES}\n\
                  Categories=Graphics;\n\
                  Terminal=false\n"
             ),

@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use hdrshot_core::{Preview, SdrOptions};
+use half::f16;
+use hdrshot_core::{LightLevels, Preview, ScRgbImage, SdrOptions};
 
 /// Largest preview kept per file. The tooltip shows it at this size.
 pub const PREVIEW_SIZE: (u32, u32) = (360, 220);
@@ -14,7 +15,7 @@ pub const THUMB_SIZE: (u32, u32) = (56, 32);
 pub enum Thumb {
     Loading,
     Ready {
-        preview: Box<Preview>,
+        preview: Box<Stored>,
         texture: egui::TextureHandle,
     },
     Failed,
@@ -72,7 +73,7 @@ impl Previews {
                             &SdrOptions::default(),
                         );
                         Thumb::Ready {
-                            preview: Box::new(preview),
+                            preview: Box::new(Stored::new(&preview)),
                             texture,
                         }
                     }
@@ -81,6 +82,56 @@ impl Previews {
                 (path, thumb)
             })
             .collect()
+    }
+}
+
+/// A preview as kept for its row: half floats and 8-bit alpha take less
+/// than half the memory of the float preview, with no visible difference
+/// once tone-mapped to 8 bits.
+pub struct Stored {
+    width: u32,
+    height: u32,
+    pixels: Vec<[f16; 3]>,
+    alpha: Option<Vec<u8>>,
+    hdr: bool,
+    levels: LightLevels,
+}
+
+impl Stored {
+    fn new(preview: &Preview) -> Self {
+        let image = &preview.image;
+        Self {
+            width: image.width,
+            height: image.height,
+            pixels: image
+                .pixels
+                .iter()
+                .map(|p| p.map(|c| f16::from_f32(c.min(f16::MAX.to_f32()))))
+                .collect(),
+            alpha: image
+                .alpha
+                .as_ref()
+                .map(|alpha| alpha.iter().map(|&a| (a * 255.0).round() as u8).collect()),
+            hdr: image.hdr,
+            levels: preview.levels,
+        }
+    }
+
+    /// The preview in floats again, for tone-mapping it.
+    pub fn restore(&self) -> Preview {
+        Preview {
+            image: ScRgbImage {
+                width: self.width,
+                height: self.height,
+                pixels: self.pixels.iter().map(|p| p.map(f16::to_f32)).collect(),
+                alpha: self
+                    .alpha
+                    .as_ref()
+                    .map(|alpha| alpha.iter().map(|&a| f32::from(a) / 255.0).collect()),
+                hdr: self.hdr,
+            },
+            levels: self.levels,
+        }
     }
 }
 
@@ -108,4 +159,41 @@ pub fn texture(
         }
     };
     ctx.load_texture(name, color, egui::TextureOptions::LINEAR)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_preview_tone_maps_the_same() {
+        // Shadows to 10,000 nits, with some colours outside BT.709.
+        let pixels: Vec<[f32; 3]> = (0..4096)
+            .map(|i| {
+                let v = (i as f32 / 4095.0).powi(3) * 125.0;
+                [v, v * 0.5 - 0.01, v * (i % 7) as f32 / 6.0]
+            })
+            .collect();
+        let image = ScRgbImage {
+            width: 64,
+            height: 64,
+            pixels,
+            alpha: None,
+            hdr: true,
+        };
+        let preview = Preview {
+            levels: hdrshot_core::light_levels(&image),
+            image,
+        };
+        let restored = Stored::new(&preview).restore();
+        let sdr = SdrOptions::default();
+        let before = hdrshot_core::sdr_rgb8(&preview.image, &preview.levels, &sdr);
+        let after = hdrshot_core::sdr_rgb8(&restored.image, &restored.levels, &sdr);
+        let worst = before
+            .iter()
+            .zip(&after)
+            .map(|(&a, &b)| a.abs_diff(b))
+            .max();
+        assert!(worst <= Some(1), "{worst:?}");
+    }
 }

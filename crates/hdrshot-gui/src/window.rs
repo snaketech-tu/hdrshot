@@ -291,8 +291,9 @@ impl<A: App> ApplicationHandler<Repaint> for Runner<A> {
         match event {
             WindowEvent::RedrawRequested => self.redraw(),
             WindowEvent::CloseRequested => {
-                self.app.on_exit();
+                // Hidden first, since the app may still finish writing a file.
                 running.window.set_visible(false);
+                self.app.on_exit();
                 event_loop.exit();
             }
             event => {

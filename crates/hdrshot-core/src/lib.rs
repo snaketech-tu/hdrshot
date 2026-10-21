@@ -7,9 +7,12 @@
 //!   `cicp` tag so HDR-aware viewers display it in HDR.
 //! - **SDR**: tone-mapped 8-bit sRGB PNG.
 
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::SystemTime;
 
 pub mod avif;
@@ -83,6 +86,11 @@ pub struct HdrOptions {
     /// screenshot's brightness exactly and leaves fitting it to the display
     /// to the viewer, as with the original JXR.
     pub peak_nits: Option<f32>,
+    /// Write HDR PNGs without their `cICP` and `mDCV` chunks, as the
+    /// Discord copy is (see [`for_discord`]), so that Discord shows the
+    /// saved file itself correctly. Windows Photos and most HDR viewers
+    /// need `cICP` and show such a PNG in SDR. Other formats ignore it.
+    pub for_discord: bool,
 }
 
 /// Settings for the tone-mapped SDR output.
@@ -239,7 +247,11 @@ pub fn is_jxr(path: &Path) -> bool {
 /// PNGs are not included, since a folder of converted images holds the
 /// PNGs made from them; pass HDR PNGs by name instead.
 pub fn find_inputs(dir: &Path, recursive: bool) -> Vec<PathBuf> {
-    fn walk(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
+    fn walk(dir: &Path, recursive: bool, seen: &mut HashSet<PathBuf>, out: &mut Vec<PathBuf>) {
+        // A link back up the tree would otherwise be followed forever.
+        if !seen.insert(dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf())) {
+            return;
+        }
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -247,7 +259,7 @@ pub fn find_inputs(dir: &Path, recursive: bool) -> Vec<PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 if recursive {
-                    walk(&path, recursive, out);
+                    walk(&path, recursive, seen, out);
                 }
             } else if InputFormat::from_path(&path).is_some_and(|f| f != InputFormat::Png) {
                 out.push(path);
@@ -255,7 +267,7 @@ pub fn find_inputs(dir: &Path, recursive: bool) -> Vec<PathBuf> {
         }
     }
     let mut found = Vec::new();
-    walk(dir, recursive, &mut found);
+    walk(dir, recursive, &mut HashSet::new(), &mut found);
     found.sort();
     found
 }
@@ -292,6 +304,57 @@ pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {
     }
 }
 
+/// For each of `inputs`, converted together with `options`, an output file
+/// that an earlier input also makes, and that input's index. Converting
+/// both would leave only one of the two results, so callers leave such
+/// inputs out and say why.
+pub fn output_conflicts(
+    inputs: &[PathBuf],
+    options: &ConvertOptions,
+) -> Vec<Option<(PathBuf, usize)>> {
+    let mut makers: HashMap<PathBuf, usize> = HashMap::new();
+    inputs
+        .iter()
+        .enumerate()
+        .map(|(i, input)| {
+            let planned = output_paths(input, options);
+            let paths: Vec<PathBuf> = [planned.hdr, planned.sdr].into_iter().flatten().collect();
+            let keys: Vec<PathBuf> = paths.iter().map(|p| file_key(p)).collect();
+            if let Some((path, &earlier)) = paths
+                .iter()
+                .zip(&keys)
+                .find_map(|(path, key)| Some((path, makers.get(key)?)))
+            {
+                return Some((path.clone(), earlier));
+            }
+            for key in keys {
+                makers.insert(key, i);
+            }
+            None
+        })
+        .collect()
+}
+
+/// `path` spelled the same way whichever way it was given, as far as that
+/// can be told before it exists: absolute, and in lowercase where file
+/// names ignore case (Windows and macOS).
+fn file_key(path: &Path) -> PathBuf {
+    let dir = match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    };
+    let dir = dir
+        .canonicalize()
+        .or_else(|_| std::path::absolute(dir))
+        .unwrap_or_else(|_| dir.to_path_buf());
+    let key = dir.join(path.file_name().unwrap_or_default());
+    if cfg!(any(windows, target_os = "macos")) {
+        PathBuf::from(key.to_string_lossy().to_lowercase())
+    } else {
+        key
+    }
+}
+
 /// Applies `existing` to a planned output path: the path to write, or
 /// `None` to skip it.
 fn resolve_existing(path: PathBuf, existing: Existing) -> Option<PathBuf> {
@@ -311,6 +374,21 @@ fn resolve_existing(path: PathBuf, existing: Existing) -> Option<PathBuf> {
     }
 }
 
+/// The temporary files being written, or `None` once
+/// [`remove_unfinished_files`] has run.
+static UNFINISHED: Mutex<Option<Vec<PathBuf>>> = Mutex::new(Some(Vec::new()));
+
+/// Deletes the temporary files of the writes in progress and makes later
+/// writes fail, so that a program stopped mid-conversion, such as with
+/// Ctrl+C, leaves no temporary file next to its outputs. Call it right
+/// before exiting.
+pub fn remove_unfinished_files() {
+    let mut unfinished = UNFINISHED.lock().unwrap_or_else(PoisonError::into_inner);
+    for path in unfinished.take().unwrap_or_default() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 /// Writes `path` through a temporary file in the same folder that is renamed
 /// into place only once complete, so a failed conversion never leaves a
 /// broken PNG behind.
@@ -319,10 +397,25 @@ fn write_file(
     modified: Option<SystemTime>,
     write: impl FnOnce(&mut BufWriter<File>) -> Result<()>,
 ) -> Result<()> {
+    // Unique per write, as files converted at the same time may write to
+    // the same folder, or even to the same file.
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let write_id = WRITES.fetch_add(1, Ordering::Relaxed);
     let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let temp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let temp = path.with_file_name(format!(".{name}.{}-{write_id}.tmp", std::process::id()));
+    // Created and listed under the lock, so `remove_unfinished_files`
+    // finds every temporary file.
+    let file = {
+        let mut unfinished = UNFINISHED.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(unfinished) = unfinished.as_mut() else {
+            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+        };
+        let file = File::create(&temp)?;
+        unfinished.push(temp.clone());
+        file
+    };
     let result = (|| {
-        let mut writer = BufWriter::new(File::create(&temp)?);
+        let mut writer = BufWriter::new(file);
         write(&mut writer)?;
         writer.flush()?;
         let file = writer.into_inner().map_err(|e| e.into_error())?;
@@ -335,6 +428,13 @@ fn write_file(
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temp);
+    }
+    if let Some(unfinished) = UNFINISHED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_mut()
+    {
+        unfinished.retain(|p| *p != temp);
     }
     result
 }
@@ -646,6 +746,69 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, ["a.jxr", "b.EXR", "c.hdr"]);
+    }
+
+    #[test]
+    fn inputs_making_the_same_file_conflict() {
+        let into = |dir: &str| ConvertOptions {
+            output_dir: Some(PathBuf::from(dir)),
+            ..Default::default()
+        };
+        let inputs: Vec<PathBuf> = ["d1/shot.jxr", "d2/shot.hdr", "d2/other.jxr", "shots/a.jxr"]
+            .map(PathBuf::from)
+            .into();
+        assert_eq!(
+            output_conflicts(&inputs, &into("out")),
+            [
+                None,
+                Some((PathBuf::from("out/shot_hdr.png"), 0)),
+                None,
+                None
+            ]
+        );
+        // Next to each input, only same-named files in one folder clash.
+        let same_folder: Vec<PathBuf> = ["shots/a.jxr", "shots/a.exr", "other/a.jxr"]
+            .map(PathBuf::from)
+            .into();
+        let conflicts = output_conflicts(&same_folder, &ConvertOptions::default());
+        assert_eq!(
+            conflicts,
+            [None, Some((PathBuf::from("shots/a_hdr.png"), 0)), None]
+        );
+        // SDR only: the SDR PNG is what clashes.
+        let sdr = ConvertOptions {
+            mode: OutputMode::Sdr,
+            ..into("out")
+        };
+        assert_eq!(
+            output_conflicts(&inputs[..2], &sdr)[1],
+            Some((PathBuf::from("out/shot_sdr.png"), 0))
+        );
+    }
+
+    #[test]
+    fn overlapping_writes_to_one_file_keep_apart() {
+        // As when two conversions running at once make the same file.
+        let dir = temp_dir("overlap");
+        let path = dir.join("shot_hdr.png");
+        write_file(&path, None, |outer| {
+            outer.write_all(b"outer")?;
+            write_file(&path, None, |inner| Ok(inner.write_all(b"inner")?))
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"outer");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_scan_survives_a_link_loop() {
+        let dir = temp_dir("loop");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/a.jxr"), b"").unwrap();
+        std::os::unix::fs::symlink(&dir, dir.join("sub/back")).unwrap();
+        let found = find_inputs(&dir, true);
+        assert_eq!(found, [dir.join("sub/a.jxr")]);
     }
 
     #[test]

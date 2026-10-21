@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -25,11 +26,11 @@ struct Args {
     #[arg(short, long)]
     recursive: bool,
 
-    /// Write the HDR PNG (16-bit Rec.2020 PQ).
+    /// Write only the HDR image, in the --format chosen.
     #[arg(long)]
     hdr: bool,
 
-    /// Write the tone-mapped SDR PNG (8-bit sRGB).
+    /// Write only the tone-mapped SDR PNG (8-bit sRGB).
     #[arg(long)]
     sdr: bool,
 
@@ -55,6 +56,12 @@ struct Args {
     #[arg(long)]
     avif_420: bool,
 
+    /// Write HDR PNGs that Discord shows correctly, by leaving out their
+    /// cICP and mDCV chunks. Windows Photos and most HDR viewers need cICP
+    /// and show such PNGs in SDR.
+    #[arg(long)]
+    for_discord: bool,
+
     /// Output directory (defaults to each input's directory).
     #[arg(short, long)]
     output: Option<PathBuf>,
@@ -64,28 +71,29 @@ struct Args {
     #[arg(long, value_name = "PATTERN", default_value = Naming::DEFAULT_PATTERN)]
     name: String,
 
-    /// Put HDR and SDR PNGs into hdr and sdr subfolders.
+    /// Put HDR and SDR images into hdr and sdr subfolders.
     #[arg(long)]
     subfolders: bool,
 
-    /// Limit the HDR PNG's brightest highlight to this many nits; brighter
+    /// Limit the HDR image's brightest highlight to this many nits; brighter
     /// parts roll off smoothly. By default the original brightness is kept.
-    #[arg(long, value_name = "NITS")]
+    #[arg(long, value_name = "NITS", value_parser = nits)]
     hdr_peak: Option<f32>,
 
     /// HDR brightness, in nits, that becomes white in the SDR PNG.
-    #[arg(long, value_name = "NITS", default_value_t = SdrOptions::default().white_nits)]
+    #[arg(long, value_name = "NITS", value_parser = nits,
+          default_value_t = SdrOptions::default().white_nits)]
     sdr_white: f32,
 
     /// HDR brightness, in nits, that maps to the SDR maximum
     /// (defaults to the image's 99.9th percentile).
-    #[arg(long, value_name = "NITS")]
+    #[arg(long, value_name = "NITS", value_parser = nits)]
     sdr_peak: Option<f32>,
 
     /// Brightness, in nits, of 1.0 in OpenEXR, Radiance and float JPEG XL
-    /// files. By default
-    /// the file's own value is used, or 80 nits if it has none.
-    #[arg(long, value_name = "NITS")]
+    /// files. By default the file's own value is used, or 80 nits if it has
+    /// none.
+    #[arg(long, value_name = "NITS", value_parser = nits)]
     input_white: Option<f32>,
 
     /// Scale images taller than this down to this height in pixels, keeping
@@ -94,11 +102,12 @@ struct Args {
     #[arg(long, value_name = "PIXELS")]
     max_height: Option<u32>,
 
-    /// Replace PNGs that already exist. By default they are skipped.
+    /// Replace output files that already exist. By default they are skipped.
     #[arg(long)]
     overwrite: bool,
 
-    /// Give the PNGs the current time instead of the input's modified time.
+    /// Give the output files the current time instead of the input's
+    /// modified time.
     #[arg(long)]
     no_keep_date: bool,
 
@@ -150,6 +159,14 @@ enum Generate {
     Powershell,
     Elvish,
     Man,
+}
+
+/// A brightness option's value: a positive number of nits.
+fn nits(value: &str) -> Result<f32, String> {
+    match value.parse::<f32>() {
+        Ok(nits) if nits.is_finite() && nits > 0.0 => Ok(nits),
+        _ => Err("expected a number of nits above 0".into()),
+    }
 }
 
 /// Writes what `what` asks for to `out`.
@@ -228,6 +245,7 @@ fn main() -> ExitCode {
                 full_color: !args.avif_420,
             },
             peak_nits: args.hdr_peak,
+            for_discord: args.for_discord,
         },
         sdr: SdrOptions {
             white_nits: args.sdr_white,
@@ -263,7 +281,23 @@ fn main() -> ExitCode {
         }
     }
 
+    // The same file given twice, e.g. by name and in its folder, is
+    // converted once.
+    let mut seen = HashSet::new();
+    files.retain(|file| seen.insert(file.canonicalize().unwrap_or_else(|_| file.clone())));
+    let conflicts = hdrshot_core::output_conflicts(&files, &options);
+
     let report = Report::new(&args, files.len());
+    // Ctrl+C stops at once, without leaving the temporary files of the
+    // images being written.
+    let say_stopped = !args.quiet && !args.json;
+    let _ = ctrlc::set_handler(move || {
+        hdrshot_core::remove_unfinished_files();
+        if say_stopped {
+            eprintln!("\nStopped");
+        }
+        std::process::exit(130);
+    });
     let threads = std::thread::available_parallelism()
         .map_or(1, usize::from)
         .min(MAX_PARALLEL_FILES);
@@ -274,9 +308,17 @@ fn main() -> ExitCode {
     let results: Vec<Option<Outputs>> = pool.install(|| {
         files
             .par_iter()
+            .zip(&conflicts)
             .with_max_len(1)
-            .map(|input| {
-                let result = hdrshot_core::convert_file(input, &options);
+            .map(|(input, conflict)| {
+                let result = match conflict {
+                    Some((output, earlier)) => Err(format!(
+                        "not converted, because {} also makes {}",
+                        files[*earlier].display(),
+                        output.display()
+                    )),
+                    None => hdrshot_core::convert_file(input, &options).map_err(|e| e.to_string()),
+                };
                 let outputs = result.as_ref().ok().cloned();
                 report.file(input, result);
                 outputs
@@ -346,7 +388,7 @@ impl<'a> Report<'a> {
         }
     }
 
-    fn file(&self, input: &Path, result: hdrshot_core::Result<Outputs>) {
+    fn file(&self, input: &Path, result: Result<Outputs, String>) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let (done, failed) = &mut *state;
         *done += 1;
@@ -355,13 +397,17 @@ impl<'a> Report<'a> {
             Ok(outputs) => self.print_outputs(input, &outputs),
             Err(e) => {
                 *failed += 1;
-                report_error(self.args, input, &e.to_string());
+                report_error(self.args, input, &e);
             }
         }
         if self.progress && *done < self.total {
-            eprint!("[{done}/{}] converting...", self.total);
+            eprint!("{}", self.progress_line(*done));
             let _ = std::io::stderr().flush();
         }
+    }
+
+    fn progress_line(&self, done: usize) -> String {
+        format!("[{done}/{}] converting...", self.total)
     }
 
     fn print_outputs(&self, input: &Path, outputs: &Outputs) {
@@ -398,9 +444,12 @@ impl<'a> Report<'a> {
         }
     }
 
+    /// Clears the progress line with spaces: the ANSI code for it shows up
+    /// as text in the classic Windows console.
     fn clear_progress(&self) {
         if self.progress {
-            eprint!("\r\x1b[2K");
+            let width = self.progress_line(self.total).len();
+            eprint!("\r{:width$}\r", "");
         }
     }
 
@@ -590,6 +639,15 @@ mod tests {
             assert!(text.contains(expect), "{what:?}");
             assert!(!text.contains("hold-clipboard"), "{what:?}");
         }
+    }
+
+    #[test]
+    fn nits_must_be_positive() {
+        assert_eq!(nits("203"), Ok(203.0));
+        for bad in ["0", "-5", "nan", "inf", "bright"] {
+            assert!(nits(bad).is_err(), "{bad}");
+        }
+        assert!(Args::try_parse_from(["hdrshot", "--sdr-white", "0", "a.jxr"]).is_err());
     }
 
     #[test]

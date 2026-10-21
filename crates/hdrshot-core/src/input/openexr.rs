@@ -75,6 +75,24 @@ pub(super) fn decode(bytes: &[u8], options: &InputOptions) -> CoreResult<ScRgbIm
     ))
 }
 
+/// Width and height of the layer [`decode`] reads, from the file's headers
+/// alone.
+pub(super) fn dimensions(path: &std::path::Path) -> Option<(u32, u32)> {
+    let meta = ::exr::meta::MetaData::read_from_file(path, false).ok()?;
+    let has = |header: &::exr::meta::header::Header, name: &str| {
+        header.channels.list.iter().any(|c| c.name.eq(name))
+    };
+    let header = meta
+        .headers
+        .iter()
+        .find(|h| has(h, "R") && has(h, "G") && has(h, "B"))?;
+    let size = header.layer_size;
+    Some((
+        u32::try_from(size.width()).ok()?,
+        u32::try_from(size.height()).ok()?,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,6 +128,16 @@ mod tests {
             assert!((c - 4.0).abs() < 1e-3);
         }
         assert_eq!(image.alpha.as_deref(), Some(&[1.0, 0.5][..]));
+    }
+
+    #[test]
+    fn size_comes_from_the_header() {
+        let bytes = write_exr(&[(1.0, 1.0, 1.0, 1.0); 6], 3, None);
+        let path =
+            std::env::temp_dir().join(format!("hdrshot-exr-size-{}.exr", std::process::id()));
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(dimensions(&path), Some((3, 2)));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

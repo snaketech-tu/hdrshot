@@ -25,6 +25,7 @@ pub type SharedClipboard = Arc<Mutex<Option<arboard::Clipboard>>>;
 pub struct Job {
     pub events: Receiver<Event>,
     cancel: Arc<AtomicBool>,
+    thread: thread::JoinHandle<()>,
 }
 
 impl Job {
@@ -40,26 +41,35 @@ impl Job {
         let (tx, events) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
-        thread::spawn(move || {
+        let thread = thread::spawn(move || {
             let send = |tx: &Sender<Event>, event| {
                 let _ = tx.send(event);
                 ctx.request_repaint();
             };
             // The last file converted and its PNGs.
             let mut last = None;
-            for (index, path) in files {
+            let count = files.len();
+            for (n, (index, path)) in files.into_iter().enumerate() {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
                 send(&tx, Event::Started(index));
-                let result = hdrshot_core::convert_file_with_discord_png(&path, &options).map(
-                    |(outputs, discord)| {
-                        if let (Some(hdr), Some(png)) = (&outputs.hdr, discord) {
-                            save_discord_png(hdr, &png);
-                        }
-                        outputs
-                    },
-                );
+                // The Discord PNG of an AVIF or Ultra HDR result is made from
+                // the image already decoded, but only for the last file, the
+                // one copied after the batch. Other rows make theirs when
+                // they are copied.
+                let result = if clipboard.is_some() && n + 1 == count {
+                    hdrshot_core::convert_file_with_discord_png(&path, &options).map(
+                        |(outputs, discord)| {
+                            if let (Some(hdr), Some(png)) = (&outputs.hdr, discord) {
+                                save_discord_png(hdr, &png);
+                            }
+                            outputs
+                        },
+                    )
+                } else {
+                    hdrshot_core::convert_file(&path, &options)
+                };
                 if let Ok(outputs) = &result
                     && (outputs.hdr.is_some() || outputs.sdr.is_some())
                 {
@@ -75,7 +85,11 @@ impl Job {
                 .map(|(clipboard, (input, outputs))| copy(&clipboard, &input, &outputs, &options));
             send(&tx, Event::Done(copied));
         });
-        Self { events, cancel }
+        Self {
+            events,
+            cancel,
+            thread,
+        }
     }
 
     /// Stop after the file that is currently being converted.
@@ -85,6 +99,13 @@ impl Job {
 
     pub fn is_cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// Stops after the file that is currently being converted and waits
+    /// until it is written.
+    pub fn finish(self) {
+        self.cancel();
+        let _ = self.thread.join();
     }
 }
 
@@ -104,9 +125,9 @@ impl From<String> for Copied {
     }
 }
 
-/// Folder for the Discord PNGs of AVIF and Ultra HDR outputs, which are
-/// made while converting so that copying them is instant. Emptied when the
-/// app starts.
+/// Folder for the Discord PNGs of AVIF and Ultra HDR outputs made while
+/// converting, so that copying the last file of a batch is instant.
+/// Emptied when the app starts.
 fn discord_dir() -> PathBuf {
     std::env::temp_dir().join("hdrshot-discord")
 }
@@ -120,6 +141,16 @@ fn discord_path(hdr: &Path) -> PathBuf {
     discord_dir()
         .join(format!("{:016x}", hasher.finish()))
         .join(hdr.with_extension("png").file_name().unwrap_or_default())
+}
+
+/// Whether copying `outputs` first has to make the Discord PNG of an AVIF or
+/// Ultra HDR result, which takes a second or two.
+pub fn copy_makes_png(outputs: &Outputs) -> bool {
+    outputs.hdr.as_ref().is_some_and(|hdr| {
+        !hdr.extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("png"))
+            && !discord_path(hdr).is_file()
+    })
 }
 
 fn save_discord_png(hdr: &Path, png: &[u8]) {

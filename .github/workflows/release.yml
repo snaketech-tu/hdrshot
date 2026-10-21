@@ -115,6 +115,27 @@ jobs:
                 <key>CFBundleTypeExtensions</key>
                 <array><string>jxr</string><string>wdp</string></array>
               </dict>
+              <dict>
+                <key>CFBundleTypeName</key><string>OpenEXR image</string>
+                <key>CFBundleTypeRole</key><string>Viewer</string>
+                <key>LSHandlerRank</key><string>Alternate</string>
+                <key>LSItemContentTypes</key>
+                <array><string>com.ilm.openexr-image</string></array>
+              </dict>
+              <dict>
+                <key>CFBundleTypeName</key><string>JPEG XL image</string>
+                <key>CFBundleTypeRole</key><string>Viewer</string>
+                <key>LSHandlerRank</key><string>Alternate</string>
+                <key>LSItemContentTypes</key>
+                <array><string>public.jpeg-xl</string></array>
+              </dict>
+              <dict>
+                <key>CFBundleTypeName</key><string>Radiance HDR image</string>
+                <key>CFBundleTypeRole</key><string>Viewer</string>
+                <key>LSHandlerRank</key><string>Alternate</string>
+                <key>LSItemContentTypes</key>
+                <array><string>public.radiance</string></array>
+              </dict>
             </array>
             <key>UTImportedTypeDeclarations</key>
             <array>
@@ -128,6 +149,44 @@ jobs:
                   <key>public.filename-extension</key>
                   <array><string>jxr</string><string>wdp</string></array>
                   <key>public.mime-type</key><string>image/vnd.ms-photo</string>
+                </dict>
+              </dict>
+              <!-- System types, declared here too for macOS versions that
+                   don't know them yet (JPEG XL came with macOS 14). -->
+              <dict>
+                <key>UTTypeIdentifier</key><string>com.ilm.openexr-image</string>
+                <key>UTTypeDescription</key><string>OpenEXR image</string>
+                <key>UTTypeConformsTo</key>
+                <array><string>public.image</string><string>public.data</string></array>
+                <key>UTTypeTagSpecification</key>
+                <dict>
+                  <key>public.filename-extension</key>
+                  <array><string>exr</string></array>
+                  <key>public.mime-type</key><string>image/x-exr</string>
+                </dict>
+              </dict>
+              <dict>
+                <key>UTTypeIdentifier</key><string>public.jpeg-xl</string>
+                <key>UTTypeDescription</key><string>JPEG XL image</string>
+                <key>UTTypeConformsTo</key>
+                <array><string>public.image</string><string>public.data</string></array>
+                <key>UTTypeTagSpecification</key>
+                <dict>
+                  <key>public.filename-extension</key>
+                  <array><string>jxl</string></array>
+                  <key>public.mime-type</key><string>image/jxl</string>
+                </dict>
+              </dict>
+              <dict>
+                <key>UTTypeIdentifier</key><string>public.radiance</string>
+                <key>UTTypeDescription</key><string>Radiance HDR image</string>
+                <key>UTTypeConformsTo</key>
+                <array><string>public.image</string><string>public.data</string></array>
+                <key>UTTypeTagSpecification</key>
+                <dict>
+                  <key>public.filename-extension</key>
+                  <array><string>hdr</string></array>
+                  <key>public.mime-type</key><string>image/vnd.radiance</string>
                 </dict>
               </dict>
             </array>
