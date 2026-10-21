@@ -3,6 +3,7 @@ name = "hdrshot-gui"
 description = "HDR image tool: desktop app for converting HDR screenshots and images"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 keywords.workspace = true
@@ -14,7 +15,7 @@ arboard = { version = "3.7.0", default-features = false, features = ["wayland-da
 bytemuck = "1.25.2"
 egui = { version = "0.37.0", features = ["default_fonts"] }
 egui-winit = "0.37.0"
-hdrshot-egui-backend = { version = "0.1.0", path = "../egui-software-backend" }
+hdrshot-egui-backend = { version = "0.2.0", path = "../egui-software-backend" }
 egui_system_font_provider = "0.37.0"
 half = "2.7.1"
 interprocess = "2.4.6"

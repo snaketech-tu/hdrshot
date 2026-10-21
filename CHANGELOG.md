@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Releases publish the crates to crates.io and update the winget packages
+  from GitHub Actions. Manifests for winget (`SnakeTech.hdrshot`,
+  `SnakeTech.hdrshot.CLI`) and a Scoop bucket are in `packaging/`.
+- When winget or Scoop installed the desktop app, Check for updates shows
+  the `winget upgrade` or `scoop update` command instead of replacing the
+  executable.
+
+### Changed
+
+- Updated the JPEG XR decoder (`jxr`) to 0.3. Output is identical on the
+  test images and sample captures.
+- Building from source needs Rust 1.99 or newer, now declared in the
+  crates, so older toolchains get a clear message.
+- `hdrshot-egui-backend` 0.2.0 drops the `rayon`, `log` and `raster_stats`
+  features, which the app never used.
+
 ## [2.0.1] - 2026-10-21
 
 ### Added

@@ -341,6 +341,27 @@ pub fn restart(exe: &Path) -> io::Result<()> {
     Command::new(exe).arg(UPDATED_FLAG).spawn().map(drop)
 }
 
+/// The command that updates this copy, when winget or Scoop installed it.
+/// Replacing the executable in place would leave the package manager's
+/// record at the old version, so the app shows the command instead.
+pub fn package_manager_command() -> Option<&'static str> {
+    if !cfg!(windows) {
+        return None;
+    }
+    managed_by(&std::env::current_exe().ok()?)
+}
+
+fn managed_by(exe: &Path) -> Option<&'static str> {
+    let path = exe.to_string_lossy().to_lowercase().replace('\\', "/");
+    if path.contains("/winget/packages/") || path.contains("/winget/links/") {
+        Some("winget upgrade SnakeTech.hdrshot")
+    } else if path.contains("/scoop/apps/hdrshot/") {
+        Some("scoop update hdrshot")
+    } else {
+        None
+    }
+}
+
 /// Deletes the executable an update on Windows left behind.
 pub fn clean_up() {
     #[cfg(windows)]
@@ -415,6 +436,24 @@ fn plain(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_managers() {
+        let winget = r"C:\Users\A\AppData\Local\Microsoft\WinGet\Packages\SnakeTech.hdrshot_Microsoft.Winget.Source_8wekyb3d8bbwe\hdrshot-gui.exe";
+        assert_eq!(
+            managed_by(Path::new(winget)),
+            Some("winget upgrade SnakeTech.hdrshot")
+        );
+        let link = r"C:\Users\A\AppData\Local\Microsoft\WinGet\Links\hdrshot-gui.exe";
+        assert_eq!(
+            managed_by(Path::new(link)),
+            Some("winget upgrade SnakeTech.hdrshot")
+        );
+        let scoop = r"C:\Users\A\scoop\apps\hdrshot\current\hdrshot-gui.exe";
+        assert_eq!(managed_by(Path::new(scoop)), Some("scoop update hdrshot"));
+        let download = r"C:\Users\A\Downloads\hdrshot-gui.exe";
+        assert_eq!(managed_by(Path::new(download)), None);
+    }
 
     #[test]
     fn versions() {

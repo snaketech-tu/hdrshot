@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+
+PackageIdentifier: SnakeTech.hdrshot
+PackageVersion: 2.0.1
+InstallerType: portable
+Commands:
+- hdrshot-gui
+ReleaseDate: 2026-10-21
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/snaketech-tu/hdrshot/releases/download/v2.0.1/hdrshot-gui.exe
+  InstallerSha256: AF74116052C6FADCC5E1E17616602396EAF24B5F296A02D9919571B6DF8D51C1
+ManifestType: installer
+ManifestVersion: 1.9.0
