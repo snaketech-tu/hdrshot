@@ -24,6 +24,7 @@ pub mod input;
 pub mod resize;
 pub mod share;
 pub mod ultrahdr;
+pub mod watch;
 
 pub use avif::{AvifOptions, write_hdr_avif};
 use color::SCRGB_WHITE_NITS;

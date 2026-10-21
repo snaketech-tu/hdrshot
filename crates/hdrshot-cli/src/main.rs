@@ -19,8 +19,14 @@ struct Args {
     /// Input images or folders. Wildcards such as *.jxr also work in cmd and
     /// PowerShell. Folders are searched for .jxr, .exr, .hdr and .jxl files; give
     /// HDR PNGs by name.
-    #[arg(required = true)]
+    #[arg(required_unless_present = "watch")]
     inputs: Vec<PathBuf>,
+
+    /// Watch this folder, such as the Game Bar captures folder, and convert
+    /// each new image saved there until Ctrl+C. Images already in it are
+    /// left alone; any inputs given are converted first.
+    #[arg(long, value_name = "FOLDER")]
+    watch: Option<PathBuf>,
 
     /// Also convert images in subfolders of the given folders.
     #[arg(short, long)]
@@ -355,7 +361,7 @@ fn main() -> ExitCode {
     });
     let failed = report.finish();
     let mut copy_failed = false;
-    if args.copy || args.copy_small {
+    if (args.copy || args.copy_small) && !files.is_empty() {
         let last = files
             .iter()
             .zip(&results)
@@ -393,11 +399,62 @@ fn main() -> ExitCode {
             }
         }
     }
+    if let Some(dir) = &args.watch {
+        return watch(&args, &options, dir);
+    }
     if failed > 0 || missing || copy_failed || trash_failed {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// `--watch`: converts each new image saved in `dir`, one at a time, until
+/// Ctrl+C, copying and moving originals to the Recycle Bin as asked.
+fn watch(args: &Args, options: &ConvertOptions, dir: &Path) -> ExitCode {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let watching = hdrshot_core::watch::watch_folder(dir, move |path| {
+        let _ = tx.send(path);
+    });
+    let _watching = match watching {
+        Ok(watching) => watching,
+        Err(e) => {
+            eprintln!("--watch: {}: {e}", dir.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let chatty = !args.quiet && !args.json;
+    if chatty {
+        eprintln!(
+            "Watching {} for new images. Press Ctrl+C to stop.",
+            dir.display()
+        );
+    }
+    for input in rx {
+        let result = hdrshot_core::convert_file(&input, options).map_err(|e| e.to_string());
+        let outputs = result.as_ref().ok().cloned();
+        Report::new(args, 1).file(&input, result);
+        let Some(outputs) = outputs else { continue };
+        if (args.copy || args.copy_small)
+            && let Some((png, hdr)) = clipboard::pick(&input, &outputs, options)
+        {
+            match clipboard::copy(&input, &png, hdr, options, args.copy_small) {
+                Ok(message) if chatty => eprintln!("{message}"),
+                Ok(_) => {}
+                Err(e) => eprintln!("--copy: {e}"),
+            }
+        }
+        if args.trash_originals
+            && outputs.complete()
+            && let Err(e) = trash::delete(&input)
+        {
+            eprintln!(
+                "{}: could not move to the Recycle Bin: {e}",
+                input.display()
+            );
+        }
+    }
+    ExitCode::SUCCESS
 }
 
 fn report_error(args: &Args, input: &Path, error: &str) {
@@ -470,7 +527,7 @@ impl<'a> Report<'a> {
         } else if !self.args.quiet {
             if outputs.sdr_input && !(self.args.sdr && !self.args.hdr) {
                 println!(
-                    "{}: an SDR image, so only the SDR PNG is made",
+                    "{}: an SDR image, so only the SDR image is made",
                     input.display()
                 );
             }

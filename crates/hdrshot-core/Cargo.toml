@@ -17,6 +17,7 @@ image = { version = "0.25", default-features = false, features = ["hdr"] }
 jpeg-encoder = "0.7"
 jxl-oxide = { version = "0.12", features = ["moxcms"] }
 jxr = "0.3"
+notify = "8"
 png = "0.18"
 rav1e = { version = "0.8", default-features = false, features = ["threading"] }
 rayon = "1.12.0"
