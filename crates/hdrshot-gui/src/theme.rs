@@ -135,6 +135,38 @@ pub fn row_label(ui: &mut egui::Ui, text: &str) {
     );
 }
 
+/// A small "i" in a circle, drawn rather than taken from a font, to hover
+/// for an explanation.
+pub fn info_icon(ui: &mut egui::Ui) -> egui::Response {
+    let size = ui.spacing().interact_size.y.min(16.0);
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
+    let color = if response.hovered() {
+        ui.visuals().strong_text_color()
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    let painter = ui.painter();
+    painter.circle_stroke(
+        rect.center(),
+        size / 2.0 - 1.0,
+        egui::Stroke::new(1.2, color),
+    );
+    let x = rect.center().x;
+    painter.circle_filled(
+        egui::pos2(x, rect.center().y - size * 0.2),
+        size * 0.07,
+        color,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(x, rect.center().y - size * 0.05),
+            egui::pos2(x, rect.center().y + size * 0.25),
+        ],
+        egui::Stroke::new(1.5, color),
+    );
+    response
+}
+
 /// The main action: filled with the accent color, white text.
 pub fn primary_button(text: &str) -> egui::Button<'static> {
     egui::Button::new(

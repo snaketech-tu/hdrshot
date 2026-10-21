@@ -5,7 +5,7 @@
 //! an app bundle is replaced by dragging it to Applications.
 
 use std::fs::File;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -35,6 +35,10 @@ const ASSET_SUFFIX: Option<&str> = if cfg!(windows) {
     None
 };
 
+/// The release's list of SHA-256 checksums, as made by `release.yml` with
+/// `sha256sum`.
+const CHECKSUMS: &str = "SHA256SUMS.txt";
+
 pub struct Release {
     pub version: String,
     pub notes: String,
@@ -46,10 +50,10 @@ pub struct Release {
 
 #[derive(Clone)]
 pub struct Download {
-    /// The file name, used for the download on macOS and Linux.
-    #[cfg_attr(windows, allow(dead_code))]
     pub name: String,
     pub url: String,
+    /// Where the release's checksums are, if it has them.
+    pub checksums: Option<String>,
 }
 
 pub enum Checked {
@@ -149,12 +153,18 @@ fn check_since(current: &str) -> Result<Checked, String> {
                 notes: r.body.unwrap_or_default(),
                 page: r.html_url,
                 download: ASSET_SUFFIX.and_then(|suffix| {
+                    let checksums = r
+                        .assets
+                        .iter()
+                        .find(|a| a.name == CHECKSUMS)
+                        .map(|a| a.browser_download_url.clone());
                     r.assets
                         .into_iter()
                         .find(|a| a.name.ends_with(suffix))
                         .map(|a| Download {
                             name: a.name,
                             url: a.browser_download_url,
+                            checksums,
                         })
                 }),
             })
@@ -180,7 +190,7 @@ fn install_here(download: &Download) -> io::Result<Installed> {
     let exe = std::env::current_exe()?;
     let new = sibling(&exe, ".new");
     let old = sibling(&exe, ".old");
-    fetch(&download.url, &new)?;
+    fetch(download, &new)?;
     // A running executable can't be overwritten, but it can be renamed.
     let _ = std::fs::remove_file(&old);
     std::fs::rename(&exe, &old)?;
@@ -198,7 +208,7 @@ fn install_here(download: &Download) -> io::Result<Installed> {
         .filter(|dir| dir.is_dir())
         .unwrap_or_else(std::env::temp_dir);
     let dmg = dir.join(&download.name);
-    fetch(&download.url, &dmg)?;
+    fetch(download, &dmg)?;
     let status = Command::new("open").arg(&dmg).status()?;
     if !status.success() {
         return Err(io::Error::other("couldn't open the disk image"));
@@ -213,7 +223,7 @@ fn install_here(download: &Download) -> io::Result<Installed> {
     std::fs::create_dir_all(&work)?;
     let result = (|| {
         let archive = work.join(&download.name);
-        fetch(&download.url, &archive)?;
+        fetch(download, &archive)?;
         let status = Command::new("tar")
             .arg("-xzf")
             .arg(&archive)
@@ -258,18 +268,72 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
     path.with_file_name(name)
 }
 
-/// Downloads `url` to the file `to`.
-fn fetch(url: &str, to: &Path) -> io::Result<()> {
+/// Downloads `download` to the file `to` and, when the release lists
+/// checksums, makes sure the file matches its entry.
+fn fetch(download: &Download, to: &Path) -> io::Result<()> {
     let result = (|| {
-        let mut response = get(url, "application/octet-stream").map_err(io::Error::other)?;
+        let expected = match &download.checksums {
+            Some(url) => {
+                let list = get(url, "application/octet-stream")
+                    .and_then(|mut response| response.body_mut().read_to_string())
+                    .map_err(io::Error::other)?;
+                Some(listed_sum(&list, &download.name).ok_or_else(|| {
+                    io::Error::other(format!("{} is missing from {CHECKSUMS}", download.name))
+                })?)
+            }
+            None => None,
+        };
+        let mut response =
+            get(&download.url, "application/octet-stream").map_err(io::Error::other)?;
         let mut file = File::create(to)?;
         io::copy(&mut response.body_mut().as_reader(), &mut file)?;
-        file.sync_all()
+        file.sync_all()?;
+        drop(file);
+        if let Some(expected) = expected
+            && expected != sha256(to)?
+        {
+            return Err(io::Error::other(format!(
+                "the download doesn't match its checksum in {CHECKSUMS}"
+            )));
+        }
+        Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(to);
     }
     result
+}
+
+/// The checksum that a `sha256sum` list gives for the file `name`, in
+/// lowercase hex.
+fn listed_sum(list: &str, name: &str) -> Option<String> {
+    list.lines().find_map(|line| {
+        let (sum, file) = line.trim().split_once(' ')?;
+        // "*" marks a file read in binary mode.
+        let file = file.trim_start().trim_start_matches('*');
+        (file == name && sum.len() == 64 && sum.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| sum.to_ascii_lowercase())
+    })
+}
+
+/// The SHA-256 of the file at `path`, in lowercase hex.
+fn sha256(path: &Path) -> io::Result<String> {
+    let mut file = File::open(path)?;
+    let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buffer = vec![0; 1 << 16];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(digest
+        .finish()
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// Starts the updated app, which waits for this one to quit.
@@ -377,6 +441,29 @@ mod tests {
                 Block::Text("A closing line that wraps.".into()),
             ]
         );
+    }
+
+    #[test]
+    fn checksums() {
+        let sum = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        let list = format!(
+            "{}  hdrshot-cli.exe\n{}  hdrshot-gui.exe\n",
+            "0".repeat(64),
+            sum.to_uppercase()
+        );
+        assert_eq!(listed_sum(&list, "hdrshot-gui.exe").as_deref(), Some(sum));
+        assert_eq!(
+            listed_sum(&format!("{sum} *a.dmg"), "a.dmg").as_deref(),
+            Some(sum)
+        );
+        assert_eq!(listed_sum(&list, "hdrshot-gui"), None);
+        assert_eq!(listed_sum("abc  a.dmg", "a.dmg"), None);
+
+        let file = std::env::temp_dir().join(format!("hdrshot-sum-{}", std::process::id()));
+        std::fs::write(&file, "abc").unwrap();
+        let hashed = sha256(&file);
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(hashed.unwrap(), sum);
     }
 
     #[test]

@@ -58,7 +58,8 @@ pub fn light_levels(image: &ScRgbImage) -> LightLevels {
 ///
 /// HDR is signalled both by a PNG `cICP` chunk, which Windows Photos and
 /// HDR image viewers need, and by the profile's `cicp` tag. Discord's
-/// image service mishandles the chunk (see [`for_discord`]).
+/// image service mishandles the chunk (see [`for_discord`]), so with
+/// [`HdrOptions::for_discord`] it is left out, and `mDCV` with it.
 pub fn write_hdr_png<W: Write>(
     image: &ScRgbImage,
     levels: &LightLevels,
@@ -109,7 +110,9 @@ pub fn write_hdr_png<W: Write>(
     let mut writer = encoder.write_header()?;
 
     // cICP: BT.2020 primaries, PQ transfer, RGB (identity matrix), full range.
-    writer.write_chunk(png::chunk::ChunkType(*b"cICP"), &[9, 16, 0, 1])?;
+    if !hdr.for_discord {
+        writer.write_chunk(png::chunk::ChunkType(*b"cICP"), &[9, 16, 0, 1])?;
+    }
     // sBIT: the samples carry only this many significant bits.
     let bits = HDR_SIGNIFICANT_BITS as u8;
     let sbit = [bits, bits, bits, 16];
@@ -122,7 +125,10 @@ pub fn write_hdr_png<W: Write>(
     }
     mdcv.extend_from_slice(&to_clli_units(stats.mastering_peak).to_be_bytes());
     mdcv.extend_from_slice(&to_clli_units(MASTERING_MIN_NITS).to_be_bytes());
-    writer.write_chunk(png::chunk::ChunkType(*b"mDCV"), &mdcv)?;
+    // The PNG specification only allows mDCV together with cICP.
+    if !hdr.for_discord {
+        writer.write_chunk(png::chunk::ChunkType(*b"mDCV"), &mdcv)?;
+    }
     // cLLI: MaxCLL and MaxFALL in units of 0.0001 nits.
     let mut clli = [0u8; 8];
     clli[..4].copy_from_slice(&to_clli_units(stats.max_cll).to_be_bytes());
@@ -424,6 +430,21 @@ mod tests {
         assert_eq!(stripped_info.content_light_level, info.content_light_level);
         assert_eq!(stripped_info.icc_profile, info.icc_profile);
         assert_eq!(stripped_data, data);
+
+        // Written for Discord, the PNG is that copy.
+        let mut for_discord_png = Vec::new();
+        write_hdr_png(
+            &img,
+            &levels,
+            &HdrOptions {
+                for_discord: true,
+                ..Default::default()
+            },
+            &SdrOptions::default(),
+            &mut for_discord_png,
+        )
+        .unwrap();
+        assert_eq!(for_discord_png, stripped);
         let clli = info.content_light_level.unwrap();
         assert_eq!(clli.max_content_light_level, 10_000_000);
 

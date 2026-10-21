@@ -56,6 +56,12 @@ struct Args {
     #[arg(long)]
     avif_420: bool,
 
+    /// Write HDR PNGs that Discord shows correctly, by leaving out their
+    /// cICP and mDCV chunks. Windows Photos and most HDR viewers need cICP
+    /// and show such PNGs in SDR.
+    #[arg(long)]
+    for_discord: bool,
+
     /// Output directory (defaults to each input's directory).
     #[arg(short, long)]
     output: Option<PathBuf>,
@@ -239,6 +245,7 @@ fn main() -> ExitCode {
                 full_color: !args.avif_420,
             },
             peak_nits: args.hdr_peak,
+            for_discord: args.for_discord,
         },
         sdr: SdrOptions {
             white_nits: args.sdr_white,
@@ -281,6 +288,16 @@ fn main() -> ExitCode {
     let conflicts = hdrshot_core::output_conflicts(&files, &options);
 
     let report = Report::new(&args, files.len());
+    // Ctrl+C stops at once, without leaving the temporary files of the
+    // images being written.
+    let say_stopped = !args.quiet && !args.json;
+    let _ = ctrlc::set_handler(move || {
+        hdrshot_core::remove_unfinished_files();
+        if say_stopped {
+            eprintln!("\nStopped");
+        }
+        std::process::exit(130);
+    });
     let threads = std::thread::available_parallelism()
         .map_or(1, usize::from)
         .min(MAX_PARALLEL_FILES);

@@ -12,6 +12,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::SystemTime;
 
 pub mod avif;
@@ -85,6 +86,11 @@ pub struct HdrOptions {
     /// screenshot's brightness exactly and leaves fitting it to the display
     /// to the viewer, as with the original JXR.
     pub peak_nits: Option<f32>,
+    /// Write HDR PNGs without their `cICP` and `mDCV` chunks, as the
+    /// Discord copy is (see [`for_discord`]), so that Discord shows the
+    /// saved file itself correctly. Windows Photos and most HDR viewers
+    /// need `cICP` and show such a PNG in SDR. Other formats ignore it.
+    pub for_discord: bool,
 }
 
 /// Settings for the tone-mapped SDR output.
@@ -368,6 +374,21 @@ fn resolve_existing(path: PathBuf, existing: Existing) -> Option<PathBuf> {
     }
 }
 
+/// The temporary files being written, or `None` once
+/// [`remove_unfinished_files`] has run.
+static UNFINISHED: Mutex<Option<Vec<PathBuf>>> = Mutex::new(Some(Vec::new()));
+
+/// Deletes the temporary files of the writes in progress and makes later
+/// writes fail, so that a program stopped mid-conversion, such as with
+/// Ctrl+C, leaves no temporary file next to its outputs. Call it right
+/// before exiting.
+pub fn remove_unfinished_files() {
+    let mut unfinished = UNFINISHED.lock().unwrap_or_else(PoisonError::into_inner);
+    for path in unfinished.take().unwrap_or_default() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 /// Writes `path` through a temporary file in the same folder that is renamed
 /// into place only once complete, so a failed conversion never leaves a
 /// broken PNG behind.
@@ -382,8 +403,19 @@ fn write_file(
     let write_id = WRITES.fetch_add(1, Ordering::Relaxed);
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let temp = path.with_file_name(format!(".{name}.{}-{write_id}.tmp", std::process::id()));
+    // Created and listed under the lock, so `remove_unfinished_files`
+    // finds every temporary file.
+    let file = {
+        let mut unfinished = UNFINISHED.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(unfinished) = unfinished.as_mut() else {
+            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+        };
+        let file = File::create(&temp)?;
+        unfinished.push(temp.clone());
+        file
+    };
     let result = (|| {
-        let mut writer = BufWriter::new(File::create(&temp)?);
+        let mut writer = BufWriter::new(file);
         write(&mut writer)?;
         writer.flush()?;
         let file = writer.into_inner().map_err(|e| e.into_error())?;
@@ -396,6 +428,13 @@ fn write_file(
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temp);
+    }
+    if let Some(unfinished) = UNFINISHED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_mut()
+    {
+        unfinished.retain(|p| *p != temp);
     }
     result
 }

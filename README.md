@@ -55,7 +55,8 @@ updates**.
 - **Other HDR inputs.** Also reads OpenEXR (`.exr`), Radiance (`.hdr`),
   HDR PNG and JPEG XL (`.jxl`) files, for game photo modes, renders and re-tone-mapping.
 - **Double-click to convert.** Optionally opens `.jxr` files with hdrshot
-  on Windows and Linux.
+  on Windows and Linux, and is listed under **Open with** for the other
+  formats it reads.
 - **Parallel conversion.** Uses all CPU cores, written in pure Rust with no
   external libraries.
 
@@ -71,7 +72,8 @@ These links always point to the
 | macOS 11+ (Apple silicon and Intel) | [`hdrshot-gui-macos.dmg`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-gui-macos.dmg) | [`hdrshot-cli-macos.tar.gz`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-cli-macos.tar.gz) |
 | Linux (x64) | [`hdrshot-gui-linux-x64.tar.gz`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-gui-linux-x64.tar.gz) | [`hdrshot-cli-linux-x64.tar.gz`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-cli-linux-x64.tar.gz) |
 
-`SHA256SUMS.txt` in each release lists the checksums of all downloads.
+`SHA256SUMS.txt` in each release lists the checksums of all downloads. The
+app's **Update** button checks its download against this list.
 
 No installer is needed. On Windows, run the `.exe` directly. On macOS, open
 the disk image and drag hdrshot to Applications. On Linux and for the macOS
@@ -137,6 +139,10 @@ cargo install hdrshot-gui    # desktop app
   batch, which is copied automatically, the app makes it while converting;
   for the others, **Copy for Discord** makes it, which takes a second or
   two.
+- **Discord-compatible PNG**, below the HDR format, saves HDR PNGs without
+  the `cICP` and `mDCV` chunks, like the Discord copy, for uploading the
+  saved files to Discord yourself. Windows Photos and most HDR viewers then
+  show them in SDR only, so it is off by default.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
   preview. When the Advanced settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.
@@ -155,10 +161,11 @@ cargo install hdrshot-gui    # desktop app
   time.
 - **Open .jxr files with hdrshot** (Windows and Linux) makes a double-click
   on a screenshot open it in the app. Windows asks you to confirm the choice
-  in Settings.
-  On macOS, hdrshot is listed under **Open With** for `.jxr` files; to make
-  it the default, choose it in the file's **Get Info** window and click
-  **Change All**.
+  in Settings. It also lists hdrshot under **Open with** for `.wdp`, `.exr`,
+  `.jxl` and `.hdr` files, without making it their default.
+  On macOS, hdrshot is listed under **Open With** for all of these; to make
+  it the default for a type, choose it in a file's **Get Info** window and
+  click **Change All**.
 - **Advanced** has **Keep the capture date** (on by default), which gives
   each PNG the date of its screenshot so folders sorted by date stay in
   capture order. **Save HDR and SDR images in subfolders** writes them
@@ -168,9 +175,10 @@ cargo install hdrshot-gui    # desktop app
   They are off by default and reset every time the app starts, so results
   always match the original screenshot unless you change them.
 - **Check for updates**, at the bottom right, looks for a newer release on
-  GitHub and shows its release notes. **Update** downloads it: on Windows
-  and Linux it replaces the app and restarts it, on macOS it opens the new
-  disk image to drag to Applications. **Skip** keeps the current version.
+  GitHub and shows its release notes. **Update** downloads it and checks it
+  against the release's `SHA256SUMS.txt`: on Windows and Linux it replaces
+  the app and restarts it, on macOS it opens the new disk image to drag to
+  Applications. **Skip** keeps the current version.
   The app only connects to GitHub when you press the button.
 - While converting, the Windows taskbar button shows the progress, and the
   button flashes (the Dock icon bounces on macOS) when a batch finishes
@@ -213,6 +221,7 @@ Everything is automatic; these options are only for tuning:
 | `--avif-quality <1-100>` | AVIF quality (default 90); lower is smaller |
 | `--avif-speed <0-10>` | AVIF encoder speed (default 8); 10 is faster but larger |
 | `--avif-420` | Store AVIF color at half resolution: smaller, softer colored edges |
+| `--for-discord` | Leave `cICP` and `mDCV` out of HDR PNGs so Discord shows them correctly; HDR viewers then show SDR |
 | `--hdr-peak <NITS>` | Limit the HDR image's brightest highlight, rolling off anything brighter |
 | `--sdr-white <NITS>` | HDR brightness that becomes SDR white (default 80; lower is brighter) |
 | `--sdr-peak <NITS>` | Brightness that maps to full SDR white, instead of the 99.9th percentile |
@@ -250,7 +259,8 @@ unchanged. The saved files are never modified.
 The saved PNG keeps `cICP` because Windows Photos and most HDR image viewers
 need it to show the image in HDR; an ICC profile alone makes them show SDR.
 `mDCV` is left out of the copy because the PNG specification only allows it
-together with `cICP`.
+together with `cICP`. To save PNGs that are already in the Discord form,
+turn on **Discord-compatible PNG** in the app or use `--for-discord`.
 
 HDR in Discord works in the desktop app and in Chromium-based browsers on an
 HDR display. The mobile apps do not reliably show HDR images, at least in

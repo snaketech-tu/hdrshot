@@ -7,5 +7,5 @@ Exec=hdrshot-gui %F
 Icon=hdrshot
 Terminal=false
 Categories=Graphics;Utility;
-MimeType=image/vnd.ms-photo;image/jxr;
+MimeType=image/vnd.ms-photo;image/jxr;image/x-exr;image/jxl;image/vnd.radiance;
 Keywords=HDR;JXR;JPEG XR;PNG;AVIF;Ultra HDR;EXR;JXL;screenshot;

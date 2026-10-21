@@ -2,12 +2,27 @@
 
 ## [Unreleased]
 
+### Added
+
+- Discord-compatible PNG option in the desktop app, and `--for-discord` on
+  the command line: HDR PNGs are saved without the `cICP` and `mDCV`
+  chunks, the way Copy for Discord copies them, for uploading the saved
+  files to Discord. Windows Photos and most HDR viewers show such PNGs in
+  SDR only, so it is off by default.
+- The desktop app's updater checks each download against the release's
+  `SHA256SUMS.txt` and refuses one that doesn't match.
+- hdrshot is listed under Open with for `.wdp`, `.exr`, `.jxl` and `.hdr`
+  files, on Windows once Open .jxr files with hdrshot was used, on macOS
+  and on Linux. It doesn't become their default.
+
 ### Changed
 
 - With AVIF or Ultra HDR JPEG output, the desktop app makes the Discord PNG
   only while converting the last image of a batch. For the other images,
   Copy for Discord makes it when clicked, so batches finish sooner and use
   less temporary space.
+- The desktop app keeps the previews of listed images in less than half the
+  memory, about 0.5 MB per image instead of 1 to 1.3 MB.
 
 ### Fixed
 
@@ -28,6 +43,8 @@
   conversion are added to the list instead of being ignored.
 - Adding OpenEXR files to the desktop app no longer freezes it while the
   whole file is read just for its size.
+- Stopping the command line with Ctrl+C no longer leaves temporary files
+  next to the images being written.
 - The command line's progress line no longer shows `←[2K` in the classic
   Windows console.
 - AVIF chroma uses the exact neutral value, so grey areas have no faint

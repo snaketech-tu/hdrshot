@@ -107,6 +107,8 @@ struct Settings {
     /// End file names in `_hdr` or `_sdr`. Always on when both types share
     /// a folder.
     type_suffix: bool,
+    /// Write HDR PNGs without `cICP`, so Discord shows them correctly.
+    discord_png: bool,
 }
 
 impl Settings {
@@ -138,6 +140,7 @@ impl Default for Settings {
             keep_date: true,
             subfolders: false,
             type_suffix: true,
+            discord_png: false,
         }
     }
 }
@@ -476,6 +479,7 @@ impl App {
             hdr: HdrOptions {
                 format: self.settings.hdr_format.into(),
                 peak_nits: t.limit_hdr_peak.then_some(t.hdr_peak),
+                for_discord: self.settings.discord_png,
                 ..Default::default()
             },
             sdr: SdrOptions {
@@ -1142,7 +1146,10 @@ impl App {
         }
         if ui
             .small_button("Open .jxr files with hdrshot")
-            .on_hover_text("Make hdrshot the app that opens .jxr files when you double-click them")
+            .on_hover_text(
+                "Make hdrshot the app that opens .jxr files when you double-click them, \
+                 and list it under Open with for .wdp, .exr, .jxl and .hdr files",
+            )
             .clicked()
         {
             let ctx = ui.ctx().clone();
@@ -1394,11 +1401,12 @@ impl App {
             return;
         }
         let auto = SdrOptions::default();
+        let preview = preview.restore();
         self.shown = Some(Shown {
             path: entry.path.clone(),
             sdr,
-            auto: previews::texture(ctx, "preview", preview, &auto),
-            tuned: (sdr != auto).then(|| previews::texture(ctx, "preview-tuned", preview, &sdr)),
+            auto: previews::texture(ctx, "preview", &preview, &auto),
+            tuned: (sdr != auto).then(|| previews::texture(ctx, "preview-tuned", &preview, &sdr)),
         });
         ctx.request_repaint();
     }
@@ -1463,6 +1471,30 @@ impl App {
                                  and Android show in HDR.",
                             ),
                         ],
+                    );
+                });
+                ui.end_row();
+
+                ui.label("");
+                let png =
+                    self.settings.mode != Mode::Sdr && self.settings.hdr_format == Format::Png;
+                ui.horizontal(|ui| {
+                    ui.add_enabled(
+                        png,
+                        egui::Checkbox::new(
+                            &mut self.settings.discord_png,
+                            "Discord-compatible PNG",
+                        ),
+                    );
+                    // Explains the option even while it doesn't apply.
+                    theme::info_icon(ui).on_hover_text(
+                        "Saves HDR PNGs without their cICP and mDCV chunks. Discord turns \
+                         PNGs with cICP yellow; without it, Discord shows them in HDR with \
+                         the right colors.\n\n\
+                         Windows Photos and most other HDR viewers need cICP to show HDR, \
+                         so they show these PNGs in SDR only. Leave this off unless you \
+                         upload the saved files to Discord yourself: Copy for Discord \
+                         already copies a Discord-compatible version.",
                     );
                 });
                 ui.end_row();
