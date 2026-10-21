@@ -52,7 +52,14 @@ impl Job {
                     break;
                 }
                 send(&tx, Event::Started(index));
-                let result = hdrshot_core::convert_file(&path, &options);
+                let result = hdrshot_core::convert_file_with_discord_png(&path, &options).map(
+                    |(outputs, discord)| {
+                        if let (Some(hdr), Some(png)) = (&outputs.hdr, discord) {
+                            save_discord_png(hdr, &png);
+                        }
+                        outputs
+                    },
+                );
                 if let Ok(outputs) = &result
                     && (outputs.hdr.is_some() || outputs.sdr.is_some())
                 {
@@ -97,6 +104,38 @@ impl From<String> for Copied {
     }
 }
 
+/// Folder for the Discord PNGs of AVIF and Ultra HDR outputs, which are
+/// made while converting so that copying them is instant. Emptied when the
+/// app starts.
+fn discord_dir() -> PathBuf {
+    std::env::temp_dir().join("hdrshot-discord")
+}
+
+/// Where the Discord PNG of the HDR output `hdr` is kept: named like it,
+/// in a subfolder per output path so outputs of the same name don't mix.
+fn discord_path(hdr: &Path) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hdr.hash(&mut hasher);
+    discord_dir()
+        .join(format!("{:016x}", hasher.finish()))
+        .join(hdr.with_extension("png").file_name().unwrap_or_default())
+}
+
+fn save_discord_png(hdr: &Path, png: &[u8]) {
+    let path = discord_path(hdr);
+    if let Some(dir) = path.parent()
+        && std::fs::create_dir_all(dir).is_ok()
+    {
+        let _ = std::fs::write(&path, png);
+    }
+}
+
+/// Deletes the Discord PNGs of an earlier run.
+pub fn clean_up() {
+    let _ = std::fs::remove_dir_all(discord_dir());
+}
+
 /// A copied PNG over Discord's upload limit.
 #[derive(Clone)]
 pub struct TooBig {
@@ -112,8 +151,9 @@ pub struct TooBig {
 /// preferring the HDR one, so pasting it (into Discord, a browser or a
 /// folder) gives the full image, HDR included. An HDR PNG is copied without
 /// its `cICP` chunk so that it also shows right on Discord. AVIF and Ultra
-/// HDR outputs are copied as such a PNG too, made from `input`, because
-/// Discord shows AVIF too bright and Ultra HDR JPEGs in SDR only.
+/// HDR outputs are copied as such a PNG too, because Discord shows AVIF too
+/// bright and Ultra HDR JPEGs in SDR only: the one made while converting,
+/// or one made from `input` now if there is none.
 pub fn copy(
     clipboard: &SharedClipboard,
     input: &Path,
@@ -141,10 +181,13 @@ pub fn copy(
             .to_string_lossy()
             .into_owned()
     };
+    let ready = discord_path(path);
     let copy = if !hdr {
         Ok(path.to_path_buf())
     } else if png {
         std::fs::read(path).and_then(|bytes| share::clipboard_file(&name, &bytes, true))
+    } else if ready.is_file() {
+        Ok(ready)
     } else {
         share::discord_png(input, options)
             .map_err(std::io::Error::other)

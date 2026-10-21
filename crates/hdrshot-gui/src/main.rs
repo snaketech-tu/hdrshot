@@ -53,6 +53,9 @@ fn main() {
         Some(single::Claim::First(listener)) => Some(listener),
         None => None,
     };
+    // Only once this is the running copy: a second one hands its files off
+    // and must not delete what the first made.
+    convert::clean_up();
     let viewport = egui::ViewportBuilder::default()
         .with_title(format!("hdrshot {}", env!("CARGO_PKG_VERSION")))
         .with_app_id("hdrshot")

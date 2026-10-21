@@ -122,7 +122,8 @@ cp -r icons/hicolor ~/.local/share/icons/
   which copies it at 1440p, or 1080p or 720p if needed, so it fits. The
   saved PNGs stay at full size. With AVIF or Ultra HDR JPEG as the HDR
   format, the copy is an HDR PNG made for Discord, since Discord shows
-  AVIF too bright and Ultra HDR JPEGs in SDR only.
+  AVIF too bright and Ultra HDR JPEGs in SDR only. The app makes it while
+  converting and keeps it in a temporary folder, so copying is instant.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
   preview. When the Advanced settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.
