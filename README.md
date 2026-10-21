@@ -42,7 +42,7 @@ updates**.
   twentieth of the PNG's size, shown in HDR by Chrome, Edge and Firefox.
 - **Ultra HDR JPEG.** Or as a JPEG with a gain map: every app shows the
   SDR picture, and Chrome, Edge, Android and Instagram brighten it to HDR.
-- **SDR PNG.** Tone-mapped the way Windows shows the
+- **SDR PNG or JPEG.** Tone-mapped the way Windows shows the
   screenshot on an SDR screen, with highlights that roll off smoothly and
   colors that keep their hue.
 - **Faithful by default.** Brightness, peak and white level all
@@ -54,9 +54,12 @@ updates**.
   form Discord shows with correct colors.
 - **Other HDR inputs.** Also reads OpenEXR (`.exr`), Radiance (`.hdr`),
   HDR PNG and JPEG XL (`.jxl`) files, for game photo modes, renders and re-tone-mapping.
-- **Double-click to convert.** Optionally opens `.jxr` files with hdrshot
-  on Windows and Linux, and is listed under **Open with** for the other
-  formats it reads.
+- **Watch folder.** Optionally converts each new screenshot saved to a
+  folder, such as the Game Bar captures folder, as soon as it is written.
+- **Double-click or right-click to convert.** Optionally opens `.jxr` files
+  with hdrshot on Windows and Linux, is listed under **Open with** for the
+  other formats it reads, and on Windows adds **Convert with hdrshot** to
+  their right-click menu.
 - **Parallel conversion.** Uses all CPU cores, written in pure Rust with no
   external libraries.
 
@@ -118,8 +121,8 @@ cargo install hdrshot-gui    # desktop app
    screenshots picked with **Open with**, go to the window that is already
    open.
 2. Choose **HDR + SDR**, **HDR only** or **SDR only**, the HDR format
-   (**PNG**, **AVIF** or **Ultra HDR JPEG**), and whether to save next to
-   each image or into one folder.
+   (**PNG**, **AVIF** or **Ultra HDR JPEG**), the SDR format (**PNG** or
+   **JPEG**), and whether to save next to each image or into one folder.
 3. Press **Convert**.
 
 <details>
@@ -143,6 +146,21 @@ cargo install hdrshot-gui    # desktop app
   the `cICP` and `mDCV` chunks, like the Discord copy, for uploading the
   saved files to Discord yourself. Windows Photos and most HDR viewers then
   show them in SDR only, so it is off by default.
+- **SDR format** **JPEG** saves the SDR image as a JPEG at quality 90,
+  a fraction of the PNG's size, for chats and forums that don't show HDR.
+  JPEG has no transparency, so transparent areas are shown over black.
+- **Originals: Move to the Recycle Bin after converting** (the Trash on
+  macOS and Linux) clears out the originals once all of their files are
+  saved. Images that fail, or whose files already existed, are kept, and so
+  is everything when you stop a batch. It is off by default.
+- **Watch folder**, at the top of **Advanced**, converts each image saved to
+  the chosen folder from then on, with the current settings, as soon as it
+  is completely written. On Windows it suggests the Game Bar captures
+  folder (`Videos\Captures`). Images already in the folder are left alone,
+  and PNGs are ignored, since hdrshot writes its own there. It works while
+  the app is open, and resumes when the app starts again. With **Copy the
+  last converted image** on, each new screenshot is on the clipboard, ready
+  to paste into Discord.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
   preview. When the Advanced settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.
@@ -163,10 +181,14 @@ cargo install hdrshot-gui    # desktop app
   on a screenshot open it in the app. Windows asks you to confirm the choice
   in Settings. It also lists hdrshot under **Open with** for `.wdp`, `.exr`,
   `.jxl` and `.hdr` files, without making it their default.
+  On Windows it also adds **Convert with hdrshot** to the right-click menu
+  of these files (on Windows 11 under **Show more options**), which opens
+  the app and converts them right away with your saved settings. Selecting
+  several files converts them as one batch.
   On macOS, hdrshot is listed under **Open With** for all of these; to make
   it the default for a type, choose it in a file's **Get Info** window and
   click **Change All**.
-- **Advanced** has **Keep the capture date** (on by default), which gives
+- **Advanced** also has **Keep the capture date** (on by default), which gives
   each PNG the date of its screenshot so folders sorted by date stay in
   capture order. **Save HDR and SDR images in subfolders** writes them
   to `hdr` and `sdr` subfolders, and with that on, **End file names in _hdr
@@ -197,6 +219,7 @@ hdrshot --hdr -o out/ a.jxr b.jxr        # HDR only, into out/
 hdrshot *.jxr                            # wildcards work in cmd and PowerShell too
 hdrshot -r Captures/                     # a folder, including its subfolders
 hdrshot --sdr --sdr-white 203 shot.jxr   # darker SDR result
+hdrshot --watch Captures/ --copy         # convert each new screenshot, copy it
 ```
 
 Several files are converted at once, up to eight at a time. Each line of
@@ -214,13 +237,15 @@ Everything is automatic; these options are only for tuning:
 
 | Option | Effect |
 | --- | --- |
-| `--hdr` / `--sdr` | Make only the HDR image or only the SDR PNG |
+| `--hdr` / `--sdr` | Make only the HDR image or only the SDR image |
 | `-r, --recursive` | Also convert files in subfolders of the given folders |
 | `-o, --output <DIR>` | Save into this folder instead of next to each input |
 | `--format <png\|avif\|ultrahdr>` | File format of the HDR output (default `png`) |
 | `--avif-quality <1-100>` | AVIF quality (default 90); lower is smaller |
 | `--avif-speed <0-10>` | AVIF encoder speed (default 8); 10 is faster but larger |
 | `--avif-420` | Store AVIF color at half resolution: smaller, softer colored edges |
+| `--sdr-format <png\|jpeg>` | File format of the SDR output (default `png`) |
+| `--jpeg-quality <1-100>` | JPEG quality of the SDR output (default 90) |
 | `--for-discord` | Leave `cICP` and `mDCV` out of HDR PNGs so Discord shows them correctly; HDR viewers then show SDR |
 | `--hdr-peak <NITS>` | Limit the HDR image's brightest highlight, rolling off anything brighter |
 | `--sdr-white <NITS>` | HDR brightness that becomes SDR white (default 80; lower is brighter) |
@@ -231,6 +256,8 @@ Everything is automatic; these options are only for tuning:
 | `--max-height <PIXELS>` | Scale taller images down to this height, averaging in linear light |
 | `--overwrite` | Replace files that already exist; by default they are skipped |
 | `--no-keep-date` | Give the files the current time instead of the screenshot's date |
+| `--trash-originals` | Move each input to the Recycle Bin (Trash) once all of its files are written |
+| `--watch <FOLDER>` | Convert each new image saved to this folder until Ctrl+C; inputs become optional |
 | `--copy` | Copy the last file's PNG (the HDR one if made) to the clipboard, ready for Discord |
 | `--copy-small` | Like `--copy`, but scale the copy down if it is over Discord's 10 MB limit |
 | `-q, --quiet` | Print only errors |

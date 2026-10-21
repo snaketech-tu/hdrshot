@@ -4,6 +4,20 @@
 
 ### Added
 
+- Watch folder: the desktop app (under Advanced) and `--watch FOLDER`
+  convert each new image saved to a folder, such as the Game Bar captures
+  folder, as soon as it is completely written. Existing images and PNGs in
+  the folder are left alone.
+- Convert with hdrshot in the right-click menu of `.jxr`, `.wdp`, `.exr`,
+  `.jxl` and `.hdr` files on Windows, added by Open .jxr files with
+  hdrshot. It converts with the saved settings; several selected files
+  become one batch.
+- Move originals to the Recycle Bin (Trash) after converting, opt-in: the
+  Originals setting in the app and `--trash-originals`. Only originals
+  whose files were all written are moved.
+- JPEG as the SDR format: the SDR format setting in the app and
+  `--sdr-format jpeg` with `--jpeg-quality` (default 90).
+
 - Releases publish the crates to crates.io and update the winget packages
   from GitHub Actions. Manifests for winget (`SnakeTech.hdrshot`,
   `SnakeTech.hdrshot.CLI`) and a Scoop bucket are in `packaging/`.
@@ -19,6 +33,7 @@
   crates, so older toolchains get a clear message.
 - `hdrshot-egui-backend` 0.2.0 drops the `rayon`, `log` and `raster_stats`
   features, which the app never used.
+- The desktop app's window opens 820 points tall, to fit the new settings.
 
 ## [2.0.1] - 2026-10-21
 
