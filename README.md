@@ -8,10 +8,10 @@
 Ultra HDR JPEG and SDR PNG.**
 
 [![Release](https://img.shields.io/github/v/release/snaketech-tu/hdrshot?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/hdrshot/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/snaketech-tu/hdrshot/total?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/hdrshot/releases)
+[![Downloads](https://img.shields.io/github/downloads/snaketech-tu/hdrshot/total?style=flat-square&color=0e7fc0&cacheSeconds=3600)](https://github.com/snaketech-tu/hdrshot/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/snaketech-tu/hdrshot/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/snaketech-tu/hdrshot/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/hdrshot?style=flat-square&color=0e7fc0)](https://crates.io/crates/hdrshot)
-[![License](https://img.shields.io/github/license/snaketech-tu/hdrshot?style=flat-square)](https://github.com/snaketech-tu/hdrshot/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/snaketech-tu/hdrshot?style=flat-square&cacheSeconds=3600)](https://github.com/snaketech-tu/hdrshot/blob/main/LICENSE)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555?style=flat-square)
 
 [**Download**](https://github.com/snaketech-tu/hdrshot/releases/latest) ·
