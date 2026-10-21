@@ -2,11 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- OpenEXR (`.exr`), Radiance (`.hdr`) and HDR PNG (PQ or HLG) inputs, in
+  the desktop app and on the command line. The format is detected from the
+  file's contents. Folder scans include `.exr` and `.hdr` files but not
+  PNGs.
+- `--input-white` and the desktop app's **Render white** setting choose the
+  brightness of 1.0 in OpenEXR and Radiance files. By default it is the
+  file's `whiteLuminance`, or 80 nits.
+- JPEG XL (`.jxl`) input, decoded in pure Rust: PQ and HLG files keep their
+  brightness, float files are read like OpenEXR, and SDR files give the SDR
+  PNG only.
+
 ### Changed
 
 - New app icon: a picture split between flat SDR and bright HDR. It has
   a simplified version for the smallest sizes, a macOS icon on Apple's
   icon grid, and Linux icons from 16 px to 512 px plus a scalable SVG.
+
+### Fixed
+
+- A conversion that would write its PNG over the input file now fails
+  instead.
 
 ## [1.2.0] - 2026-10-20
 

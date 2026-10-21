@@ -4,19 +4,23 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 
 use clap::{CommandFactory, Parser};
-use jxr2png_core::{ConvertOptions, Existing, HdrOptions, Naming, OutputMode, Outputs, SdrOptions};
+use jxr2png_core::{
+    ConvertOptions, Existing, HdrOptions, InputOptions, Naming, OutputMode, Outputs, SdrOptions,
+};
 use rayon::prelude::*;
 
-/// Convert HDR JPEG XR (.jxr) images to HDR and/or SDR PNG files.
+/// Convert HDR images (JPEG XR, OpenEXR, Radiance HDR, HDR PNG, JPEG XL)
+/// to HDR and/or SDR PNG files.
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
-    /// Input .jxr files or folders. Wildcards such as *.jxr also work in
-    /// cmd and PowerShell.
+    /// Input images or folders. Wildcards such as *.jxr also work in cmd and
+    /// PowerShell. Folders are searched for .jxr, .exr, .hdr and .jxl files; give
+    /// HDR PNGs by name.
     #[arg(required = true)]
     inputs: Vec<PathBuf>,
 
-    /// Also convert .jxr files in subfolders of the given folders.
+    /// Also convert images in subfolders of the given folders.
     #[arg(short, long)]
     recursive: bool,
 
@@ -55,6 +59,12 @@ struct Args {
     #[arg(long, value_name = "NITS")]
     sdr_peak: Option<f32>,
 
+    /// Brightness, in nits, of 1.0 in OpenEXR, Radiance and float JPEG XL
+    /// files. By default
+    /// the file's own value is used, or 80 nits if it has none.
+    #[arg(long, value_name = "NITS")]
+    input_white: Option<f32>,
+
     /// Scale images taller than this down to this height in pixels, keeping
     /// the aspect ratio (e.g. 1080). By default the source resolution is
     /// kept.
@@ -65,7 +75,7 @@ struct Args {
     #[arg(long)]
     overwrite: bool,
 
-    /// Give the PNGs the current time instead of the JXR's modified time.
+    /// Give the PNGs the current time instead of the input's modified time.
     #[arg(long)]
     no_keep_date: bool,
 
@@ -166,6 +176,9 @@ fn main() -> ExitCode {
     };
     let options = ConvertOptions {
         mode,
+        input: InputOptions {
+            white_nits: args.input_white,
+        },
         output_dir: args.output.clone(),
         naming: Naming {
             pattern: args.name.clone(),
@@ -195,9 +208,9 @@ fn main() -> ExitCode {
     let mut files = Vec::new();
     for input in &args.inputs {
         if input.is_dir() {
-            let found = jxr2png_core::find_jxr(input, args.recursive);
+            let found = jxr2png_core::find_inputs(input, args.recursive);
             if found.is_empty() && !args.quiet {
-                eprintln!("{}: no .jxr files found", input.display());
+                eprintln!("{}: no images found", input.display());
             }
             files.extend(found);
         } else if input.exists() {
