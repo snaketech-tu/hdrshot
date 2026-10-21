@@ -101,7 +101,7 @@ fn name() -> Option<Name<'static>> {
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         .collect();
-    format!("jxr2png-{user}.sock")
+    format!("hdrshot-{user}.sock")
         .to_ns_name::<GenericNamespaced>()
         .ok()
         .map(Name::into_owned)

@@ -4,8 +4,9 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 
 use clap::{CommandFactory, Parser};
-use jxr2png_core::{
-    ConvertOptions, Existing, HdrOptions, InputOptions, Naming, OutputMode, Outputs, SdrOptions,
+use hdrshot_core::{
+    AvifOptions, ConvertOptions, Existing, HdrFormat, HdrOptions, InputOptions, Naming, OutputMode,
+    Outputs, SdrOptions,
 };
 use rayon::prelude::*;
 
@@ -32,12 +33,34 @@ struct Args {
     #[arg(long)]
     sdr: bool,
 
+    /// File format of the HDR output: png (16-bit, lossless), avif (10-bit,
+    /// about a twentieth of the size) or ultrahdr (a JPEG that is SDR in
+    /// every viewer and HDR in those that read gain maps).
+    #[arg(long, value_enum, default_value_t = Format::Png)]
+    format: Format,
+
+    /// AVIF quality from 1 to 100; higher is closer to the original and
+    /// larger.
+    #[arg(long, value_name = "1-100", default_value_t = AvifOptions::default().quality,
+          value_parser = clap::value_parser!(u8).range(1..=100))]
+    avif_quality: u8,
+
+    /// AVIF encoder speed from 0 (slowest, smallest file) to 10 (fastest).
+    #[arg(long, value_name = "0-10", default_value_t = AvifOptions::default().speed,
+          value_parser = clap::value_parser!(u8).range(0..=10))]
+    avif_speed: u8,
+
+    /// Store AVIF color at half resolution (4:2:0): smaller, but colored
+    /// text and thin colored edges get softer.
+    #[arg(long)]
+    avif_420: bool,
+
     /// Output directory (defaults to each input's directory).
     #[arg(short, long)]
     output: Option<PathBuf>,
 
-    /// Output file name without .png: {name} is the input's name, {type}
-    /// is hdr or sdr.
+    /// Output file name without extension: {name} is the input's name,
+    /// {type} is hdr or sdr.
     #[arg(long, value_name = "PATTERN", default_value = Naming::DEFAULT_PATTERN)]
     name: String,
 
@@ -89,7 +112,8 @@ struct Args {
 
     /// Copy the last file's PNG (the HDR one if made) to the clipboard, to
     /// paste into Discord or a folder. The copy leaves out the cICP chunk,
-    /// which Discord turns yellow.
+    /// which Discord turns yellow. AVIF and Ultra HDR results are copied as
+    /// such a PNG, since Discord can't show them in HDR.
     #[arg(long)]
     copy: bool,
 
@@ -109,6 +133,14 @@ const HOLD_CLIPBOARD: &str = "--hold-clipboard";
 /// `--generate <WHAT>`: prints a shell completion script (bash, zsh, fish,
 /// powershell, elvish) or the man page (man), for packaging.
 const GENERATE: &str = "--generate";
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum Format {
+    Png,
+    Avif,
+    #[value(name = "ultrahdr")]
+    UltraHdr,
+}
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum Generate {
@@ -134,7 +166,7 @@ fn generate(what: Generate, out: &mut dyn Write) -> std::io::Result<()> {
             return clap_mangen::Man::new(command).render(out);
         }
     };
-    clap_complete::generate(shell, &mut command, "jxr2png", out);
+    clap_complete::generate(shell, &mut command, "hdrshot", out);
     Ok(())
 }
 
@@ -185,6 +217,16 @@ fn main() -> ExitCode {
             subfolders: args.subfolders,
         },
         hdr: HdrOptions {
+            format: match args.format {
+                Format::Png => HdrFormat::Png,
+                Format::Avif => HdrFormat::Avif,
+                Format::UltraHdr => HdrFormat::UltraHdr,
+            },
+            avif: AvifOptions {
+                quality: args.avif_quality,
+                speed: args.avif_speed,
+                full_color: !args.avif_420,
+            },
             peak_nits: args.hdr_peak,
         },
         sdr: SdrOptions {
@@ -208,7 +250,7 @@ fn main() -> ExitCode {
     let mut files = Vec::new();
     for input in &args.inputs {
         if input.is_dir() {
-            let found = jxr2png_core::find_inputs(input, args.recursive);
+            let found = hdrshot_core::find_inputs(input, args.recursive);
             if found.is_empty() && !args.quiet {
                 eprintln!("{}: no images found", input.display());
             }
@@ -234,7 +276,7 @@ fn main() -> ExitCode {
             .par_iter()
             .with_max_len(1)
             .map(|input| {
-                let result = jxr2png_core::convert_file(input, &options);
+                let result = hdrshot_core::convert_file(input, &options);
                 let outputs = result.as_ref().ok().cloned();
                 report.file(input, result);
                 outputs
@@ -304,7 +346,7 @@ impl<'a> Report<'a> {
         }
     }
 
-    fn file(&self, input: &Path, result: jxr2png_core::Result<Outputs>) {
+    fn file(&self, input: &Path, result: hdrshot_core::Result<Outputs>) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let (done, failed) = &mut *state;
         *done += 1;
@@ -378,17 +420,17 @@ mod clipboard {
     use std::path::{Path, PathBuf};
     use std::process::ExitCode;
 
-    use jxr2png_core::share::{self, DISCORD_LIMIT, megabytes};
-    use jxr2png_core::{ConvertOptions, Outputs};
+    use hdrshot_core::share::{self, DISCORD_LIMIT, megabytes};
+    use hdrshot_core::{ConvertOptions, Outputs};
 
-    /// The PNG of `input` to copy, preferring the HDR one, and whether it
+    /// The image of `input` to copy, preferring the HDR one, and whether it
     /// is HDR. A PNG skipped because it already existed counts too.
     pub fn pick(
         input: &Path,
         outputs: &Outputs,
         options: &ConvertOptions,
     ) -> Option<(PathBuf, bool)> {
-        let planned = jxr2png_core::output_paths(input, options);
+        let planned = hdrshot_core::output_paths(input, options);
         let made = |written: &Option<PathBuf>, planned: Option<PathBuf>| {
             written
                 .clone()
@@ -404,7 +446,9 @@ mod clipboard {
     }
 
     /// Copies `png`, made from `input`, to the clipboard; with `small`, a
-    /// version that fits Discord's limit. Returns the message to print.
+    /// version that fits Discord's limit. An AVIF or Ultra HDR output is
+    /// copied as an HDR PNG instead, since Discord shows AVIF too bright
+    /// and Ultra HDR JPEGs in SDR only. Returns the message to print.
     pub fn copy(
         input: &Path,
         png: &Path,
@@ -412,13 +456,28 @@ mod clipboard {
         options: &ConvertOptions,
         small: bool,
     ) -> Result<String, String> {
-        let name = png.file_name().unwrap_or_default().to_string_lossy();
-        let bytes = std::fs::read(png).map_err(|e| format!("{}: {e}", png.display()))?;
-        let size = if hdr {
-            jxr2png_core::for_discord(&bytes).len()
+        let is_png = png
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("png"));
+        let name = png
+            .with_extension("png")
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let (bytes, size) = if is_png {
+            let bytes = std::fs::read(png).map_err(|e| format!("{}: {e}", png.display()))?;
+            let size = if hdr {
+                hdrshot_core::for_discord(&bytes).len()
+            } else {
+                bytes.len()
+            };
+            (bytes, size as u64)
         } else {
-            bytes.len()
-        } as u64;
+            let bytes = share::discord_png(input, options).map_err(|e| e.to_string())?;
+            let size = bytes.len() as u64;
+            (bytes, size)
+        };
         let (bytes, message) = if size <= DISCORD_LIMIT {
             (bytes, format!("Copied {name} to the clipboard"))
         } else if small {
@@ -445,7 +504,7 @@ mod clipboard {
         Ok(message)
     }
 
-    /// Windows and macOS keep the file on the clipboard after jxr2png exits.
+    /// Windows and macOS keep the file on the clipboard after hdrshot exits.
     #[cfg(not(target_os = "linux"))]
     fn set(file: &Path) -> Result<(), String> {
         arboard::Clipboard::new()
@@ -454,7 +513,7 @@ mod clipboard {
     }
 
     /// On Linux the clipboard only holds what a running program offers, so
-    /// a background copy of jxr2png offers the file until something else
+    /// a background copy of hdrshot offers the file until something else
     /// is copied.
     #[cfg(target_os = "linux")]
     fn set(file: &Path) -> Result<(), String> {
@@ -523,7 +582,7 @@ mod tests {
         for (what, expect) in [
             (Generate::Bash, "--copy-small"),
             (Generate::Powershell, "--copy-small"),
-            (Generate::Man, ".TH jxr2png"),
+            (Generate::Man, ".TH hdrshot"),
         ] {
             let mut out = Vec::new();
             generate(what, &mut out).unwrap();

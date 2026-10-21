@@ -1,15 +1,15 @@
-//! Converts real `.jxr` files when `JXR2PNG_SAMPLES` points at a folder of them.
+//! Converts real `.jxr` files when `HDRSHOT_SAMPLES` points at a folder of them.
 //! Sample captures are large, so they aren't kept in the repository.
 
-use jxr2png_core::{ConvertOptions, convert_file, decode, dimensions};
+use hdrshot_core::{ConvertOptions, convert_file, decode, dimensions};
 
 #[test]
 fn convert_sample_folder() {
-    let Some(dir) = std::env::var_os("JXR2PNG_SAMPLES") else {
-        eprintln!("JXR2PNG_SAMPLES not set; skipping");
+    let Some(dir) = std::env::var_os("HDRSHOT_SAMPLES") else {
+        eprintln!("HDRSHOT_SAMPLES not set; skipping");
         return;
     };
-    let out = std::env::temp_dir().join("jxr2png-samples");
+    let out = std::env::temp_dir().join("hdrshot-samples");
     let options = ConvertOptions {
         output_dir: Some(out),
         ..Default::default()
@@ -32,8 +32,8 @@ fn convert_sample_folder() {
 
 #[test]
 fn sample_dimensions_match_decoder() {
-    let Some(dir) = std::env::var_os("JXR2PNG_SAMPLES") else {
-        eprintln!("JXR2PNG_SAMPLES not set; skipping");
+    let Some(dir) = std::env::var_os("HDRSHOT_SAMPLES") else {
+        eprintln!("HDRSHOT_SAMPLES not set; skipping");
         return;
     };
     for entry in std::fs::read_dir(dir).unwrap() {

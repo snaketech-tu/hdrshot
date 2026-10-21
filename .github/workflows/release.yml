@@ -8,11 +8,11 @@ name: Release
 # Each platform gets a separate download for the desktop app and for the CLI.
 # File names carry no version, so releases/latest/download/<name> always
 # points at the newest build:
-#   jxr2png-gui.exe, jxr2png.exe          Windows, ready to run
-#   jxr2png-gui-macos.dmg                 macOS app, drag to Applications
-#   jxr2png-cli-macos.tar.gz              macOS CLI, completions, man page
-#   jxr2png-gui-linux-x64.tar.gz          Linux app, .desktop file, icon
-#   jxr2png-cli-linux-x64.tar.gz          Linux CLI, completions, man page
+#   hdrshot-gui.exe, hdrshot.exe          Windows, ready to run
+#   hdrshot-gui-macos.dmg                 macOS app, drag to Applications
+#   hdrshot-cli-macos.tar.gz              macOS CLI, completions, man page
+#   hdrshot-gui-linux-x64.tar.gz          Linux app, .desktop file, icon
+#   hdrshot-cli-linux-x64.tar.gz          Linux CLI, completions, man page
 #   SHA256SUMS.txt
 # The tarballs keep the executable bit, which a bare binary loses when a
 # browser downloads it.
@@ -63,7 +63,7 @@ jobs:
         run: |
           cargo build --release --locked --workspace
           mkdir out
-          cp target/release/jxr2png.exe target/release/jxr2png-gui.exe out/
+          cp target/release/hdrshot.exe target/release/hdrshot-gui.exe out/
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
@@ -71,34 +71,34 @@ jobs:
           for target in aarch64-apple-darwin x86_64-apple-darwin; do
             cargo build --release --locked --workspace --target "$target"
           done
-          cli=jxr2png-cli-macos
+          cli=hdrshot-cli-macos
           gui="$RUNNER_TEMP/gui"
-          app="$gui/jxr2png.app/Contents"
+          app="$gui/hdrshot.app/Contents"
           mkdir -p out "$cli" "$app/MacOS" "$app/Resources"
-          for bin in jxr2png jxr2png-gui; do
+          for bin in hdrshot hdrshot-gui; do
             lipo -create -output "target/$bin" \
               "target/aarch64-apple-darwin/release/$bin" \
               "target/x86_64-apple-darwin/release/$bin"
           done
-          cp target/jxr2png README.md LICENSE "$cli/"
+          cp target/hdrshot README.md LICENSE "$cli/"
           mkdir "$cli/completions" "$cli/man"
-          target/jxr2png --generate bash > "$cli/completions/jxr2png.bash"
-          target/jxr2png --generate zsh > "$cli/completions/_jxr2png"
-          target/jxr2png --generate fish > "$cli/completions/jxr2png.fish"
-          target/jxr2png --generate man > "$cli/man/jxr2png.1"
-          cp target/jxr2png-gui "$app/MacOS/"
-          cp packaging/macos/jxr2png.icns "$app/Resources/"
+          target/hdrshot --generate bash > "$cli/completions/hdrshot.bash"
+          target/hdrshot --generate zsh > "$cli/completions/_hdrshot"
+          target/hdrshot --generate fish > "$cli/completions/hdrshot.fish"
+          target/hdrshot --generate man > "$cli/man/hdrshot.1"
+          cp target/hdrshot-gui "$app/MacOS/"
+          cp packaging/macos/hdrshot.icns "$app/Resources/"
           version="${TAG#v}"
           cat > "$app/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-            <key>CFBundleName</key><string>jxr2png</string>
-            <key>CFBundleDisplayName</key><string>jxr2png</string>
-            <key>CFBundleIdentifier</key><string>io.github.snaketech-tu.jxr2png</string>
-            <key>CFBundleExecutable</key><string>jxr2png-gui</string>
-            <key>CFBundleIconFile</key><string>jxr2png</string>
+            <key>CFBundleName</key><string>hdrshot</string>
+            <key>CFBundleDisplayName</key><string>hdrshot</string>
+            <key>CFBundleIdentifier</key><string>io.github.snaketech-tu.hdrshot</string>
+            <key>CFBundleExecutable</key><string>hdrshot-gui</string>
+            <key>CFBundleIconFile</key><string>hdrshot</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleShortVersionString</key><string>$version</string>
             <key>CFBundleVersion</key><string>$version</string>
@@ -111,7 +111,7 @@ jobs:
                 <key>CFBundleTypeRole</key><string>Viewer</string>
                 <key>LSHandlerRank</key><string>Alternate</string>
                 <key>LSItemContentTypes</key>
-                <array><string>io.github.snaketech-tu.jxr2png.jxr</string></array>
+                <array><string>io.github.snaketech-tu.hdrshot.jxr</string></array>
                 <key>CFBundleTypeExtensions</key>
                 <array><string>jxr</string><string>wdp</string></array>
               </dict>
@@ -119,7 +119,7 @@ jobs:
             <key>UTImportedTypeDeclarations</key>
             <array>
               <dict>
-                <key>UTTypeIdentifier</key><string>io.github.snaketech-tu.jxr2png.jxr</string>
+                <key>UTTypeIdentifier</key><string>io.github.snaketech-tu.hdrshot.jxr</string>
                 <key>UTTypeDescription</key><string>JPEG XR image</string>
                 <key>UTTypeConformsTo</key>
                 <array><string>public.image</string><string>public.data</string></array>
@@ -135,33 +135,33 @@ jobs:
           </plist>
           EOF
           # Ad-hoc signature: required for Apple silicon, not a notarization.
-          codesign --force --deep --sign - "$gui/jxr2png.app" "$cli/jxr2png"
+          codesign --force --deep --sign - "$gui/hdrshot.app" "$cli/hdrshot"
           tar -czf "out/$cli.tar.gz" "$cli"
           # The disk image shows the app next to a link to Applications.
           ln -s /Applications "$gui/Applications"
           # hdiutil now and then fails with "Resource busy" on CI runners.
           for attempt in 1 2 3; do
-            hdiutil create -volname jxr2png -srcfolder "$gui" -fs HFS+ \
-              -format UDZO -ov out/jxr2png-gui-macos.dmg && break
+            hdiutil create -volname hdrshot -srcfolder "$gui" -fs HFS+ \
+              -format UDZO -ov out/hdrshot-gui-macos.dmg && break
             test $attempt -lt 3 && sleep 5
           done
-          test -f out/jxr2png-gui-macos.dmg
+          test -f out/hdrshot-gui-macos.dmg
 
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
           cargo build --release --locked --workspace
-          cli=jxr2png-cli-linux-x64
-          gui=jxr2png-gui-linux-x64
+          cli=hdrshot-cli-linux-x64
+          gui=hdrshot-gui-linux-x64
           mkdir out "$cli" "$gui"
-          cp target/release/jxr2png README.md LICENSE "$cli/"
+          cp target/release/hdrshot README.md LICENSE "$cli/"
           mkdir "$cli/completions" "$cli/man"
-          target/release/jxr2png --generate bash > "$cli/completions/jxr2png.bash"
-          target/release/jxr2png --generate zsh > "$cli/completions/_jxr2png"
-          target/release/jxr2png --generate fish > "$cli/completions/jxr2png.fish"
-          target/release/jxr2png --generate man > "$cli/man/jxr2png.1"
-          cp target/release/jxr2png-gui README.md LICENSE packaging/linux/jxr2png.desktop "$gui/"
-          cp crates/jxr2png-gui/assets/icon.png "$gui/jxr2png.png"
+          target/release/hdrshot --generate bash > "$cli/completions/hdrshot.bash"
+          target/release/hdrshot --generate zsh > "$cli/completions/_hdrshot"
+          target/release/hdrshot --generate fish > "$cli/completions/hdrshot.fish"
+          target/release/hdrshot --generate man > "$cli/man/hdrshot.1"
+          cp target/release/hdrshot-gui README.md LICENSE packaging/linux/hdrshot.desktop "$gui/"
+          cp crates/hdrshot-gui/assets/icon.png "$gui/hdrshot.png"
           cp -r packaging/linux/icons "$gui/"
           tar -czf "out/$cli.tar.gz" "$cli"
           tar -czf "out/$gui.tar.gz" "$gui"
@@ -201,6 +201,6 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
-          name: jxr2png ${{ env.TAG }}
+          name: hdrshot ${{ env.TAG }}
           body_path: notes.md
           files: dist/*

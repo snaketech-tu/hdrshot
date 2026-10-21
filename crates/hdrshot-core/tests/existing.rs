@@ -4,14 +4,14 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use jxr2png_core::{ConvertOptions, Existing, OutputMode, convert_file};
+use hdrshot_core::{ConvertOptions, Existing, OutputMode, convert_file};
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/hdr64.jxr");
 
 /// A fresh folder holding a copy of the fixture with a known modified time.
 fn setup(name: &str) -> (PathBuf, PathBuf, SystemTime) {
     let dir = std::env::temp_dir()
-        .join("jxr2png-existing")
+        .join("hdrshot-existing")
         .join(format!("{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();

@@ -1,20 +1,23 @@
 [package]
-name = "jxr2png-gui"
-description = "Desktop JXR to PNG converter"
+name = "hdrshot-gui"
+description = "HDR image tool: desktop app for converting HDR screenshots and images"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories = ["multimedia::images", "gui"]
+readme = "../../README.md"
 
 [dependencies]
 arboard = { version = "3.7.0", default-features = false, features = ["wayland-data-control"] }
 bytemuck = "1.25.2"
 egui = { version = "0.37.0", features = ["default_fonts"] }
 egui-winit = "0.37.0"
-egui_software_backend = { path = "../egui-software-backend" }
+hdrshot-egui-backend = { version = "0.1.0", path = "../egui-software-backend" }
 egui_system_font_provider = "0.37.0"
 interprocess = "2.4.6"
-jxr2png-core = { version = "1.2.0", path = "../jxr2png-core" }
+hdrshot-core = { version = "2.0.0", path = "../hdrshot-core" }
 png = "0.18.1"
 rfd = "0.17.2"
 ron = "0.12.2"

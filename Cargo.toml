@@ -1,17 +1,19 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/jxr2png-core",
-    "crates/jxr2png-cli",
-    "crates/jxr2png-gui",
+    "crates/hdrshot-core",
+    "crates/hdrshot-cli",
+    "crates/hdrshot-gui",
     "crates/egui-software-backend",
 ]
 
 [workspace.package]
-version = "1.2.0"
+version = "2.0.0"
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/snaketech-tu/jxr2png"
+repository = "https://github.com/snaketech-tu/hdrshot"
+keywords = ["hdr", "jxr", "avif", "ultrahdr", "png"]
+categories = ["multimedia::images", "command-line-utilities"]
 
 [profile.release]
 lto = "thin"

@@ -8,6 +8,7 @@ mod previews;
 mod single;
 mod storage;
 mod taskbar;
+mod theme;
 mod update;
 mod window;
 
@@ -16,8 +17,9 @@ use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
-use jxr2png_core::{
-    ConvertOptions, Existing, HdrOptions, InputOptions, Naming, OutputMode, Outputs, SdrOptions,
+use hdrshot_core::{
+    ConvertOptions, Existing, HdrFormat, HdrOptions, InputOptions, Naming, OutputMode, Outputs,
+    SdrOptions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -52,15 +54,18 @@ fn main() {
         Some(single::Claim::First(listener)) => Some(listener),
         None => None,
     };
+    // Only once this is the running copy: a second one hands its files off
+    // and must not delete what the first made.
+    convert::clean_up();
     let viewport = egui::ViewportBuilder::default()
-        .with_title("jxr2png")
-        .with_app_id("jxr2png")
+        .with_title(format!("hdrshot {}", env!("CARGO_PKG_VERSION")))
+        .with_app_id("hdrshot")
         .with_inner_size([560.0, 760.0])
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());
     if let Err(e) = window::run(viewport, |ctx| App::new(ctx, files, listener, updated)) {
-        eprintln!("jxr2png: {e}");
+        eprintln!("hdrshot: {e}");
         std::process::exit(1);
     }
 }
@@ -92,6 +97,7 @@ fn icon() -> egui::IconData {
 #[serde(default)]
 struct Settings {
     mode: Mode,
+    hdr_format: Format,
     save_to_folder: bool,
     output_dir: Option<PathBuf>,
     copy_to_clipboard: bool,
@@ -125,6 +131,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             mode: Mode::Both,
+            hdr_format: Format::Png,
             save_to_folder: false,
             output_dir: None,
             copy_to_clipboard: true,
@@ -148,6 +155,24 @@ impl From<Mode> for OutputMode {
             Mode::Hdr => Self::Hdr,
             Mode::Sdr => Self::Sdr,
             Mode::Both => Self::Both,
+        }
+    }
+}
+
+/// File format of the HDR output.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+enum Format {
+    Png,
+    Avif,
+    UltraHdr,
+}
+
+impl From<Format> for HdrFormat {
+    fn from(format: Format) -> Self {
+        match format {
+            Format::Png => Self::Png,
+            Format::Avif => Self::Avif,
+            Format::UltraHdr => Self::UltraHdr,
         }
     }
 }
@@ -234,7 +259,7 @@ struct App {
     /// area, and of that area, from the last frame.
     bottom_rest: f32,
     advanced_height: f32,
-    /// Whether jxr2png opens `.jxr` files; rechecked when the window
+    /// Whether hdrshot opens `.jxr` files; rechecked when the window
     /// regains focus, since the choice is made in the system's settings.
     is_default_app: bool,
     was_focused: bool,
@@ -251,6 +276,8 @@ struct App {
     update: Update,
     /// Results of the update check and install, made in the background.
     updates: (Sender<UpdateMessage>, Receiver<UpdateMessage>),
+    /// The app icon, shown in the header.
+    logo: egui::TextureHandle,
 }
 
 /// Where the check for a newer version stands.
@@ -322,10 +349,18 @@ impl App {
         #[cfg(target_os = "macos")]
         macos::receive_opened_files(open.clone(), ctx.clone());
         drop(open);
-        ctx.global_style_mut(|style| {
-            style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-            style.spacing.button_padding = Vec2::new(10.0, 4.0);
-        });
+        theme::apply(ctx);
+        let logo = {
+            let icon = icon();
+            ctx.load_texture(
+                "logo",
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [icon.width as usize, icon.height as usize],
+                    &icon.rgba,
+                ),
+                egui::TextureOptions::LINEAR,
+            )
+        };
         let mut app = Self {
             settings,
             tuning: Tuning::default(),
@@ -350,13 +385,14 @@ impl App {
             asking: None,
             update: Update::Idle,
             updates: channel(),
+            logo,
         };
         if assoc::SUPPORTED {
             assoc::refresh();
         }
         app.add_paths(files);
         if updated {
-            app.show_toast(format!("Updated to jxr2png {}", update::CURRENT), ctx);
+            app.show_toast(format!("Updated to hdrshot {}", update::CURRENT), ctx);
         }
         app
     }
@@ -384,10 +420,10 @@ impl App {
         let mut skipped = 0;
         for path in paths {
             if path.is_dir() {
-                for file in jxr2png_core::find_inputs(&path, true) {
+                for file in hdrshot_core::find_inputs(&path, true) {
                     self.add_file(file);
                 }
-            } else if jxr2png_core::is_supported(&path) {
+            } else if hdrshot_core::is_supported(&path) {
                 self.add_file(path);
             } else {
                 skipped += 1;
@@ -404,7 +440,7 @@ impl App {
 
     fn add_file(&mut self, path: PathBuf) {
         if !self.files.iter().any(|e| e.path == path) {
-            let size = jxr2png_core::input::dimensions(&path).ok();
+            let size = hdrshot_core::input::dimensions(&path).ok();
             self.previews.request(&path);
             self.files.push(Entry {
                 path,
@@ -429,7 +465,9 @@ impl App {
             },
             naming: self.settings.naming(),
             hdr: HdrOptions {
+                format: self.settings.hdr_format.into(),
                 peak_nits: t.limit_hdr_peak.then_some(t.hdr_peak),
+                ..Default::default()
             },
             sdr: SdrOptions {
                 white_nits: t.sdr_white,
@@ -596,9 +634,9 @@ impl App {
             } else if self.skipped > 0 {
                 let (n, s) = (self.skipped, if self.skipped == 1 { "" } else { "s" });
                 self.notice = Some(if n == self.progress.1 {
-                    format!("Skipped {n} file{s}: the PNGs already exist.")
+                    format!("Skipped {n} file{s}: the files already exist.")
                 } else {
-                    format!("Skipped {n} file{s} whose PNGs already exist.")
+                    format!("Skipped {n} file{s} whose files already exist.")
                 });
             }
         } else {
@@ -620,10 +658,10 @@ impl App {
                     let name = asking.existing[0].file_name().unwrap_or_default();
                     format!("{} already exists", name.to_string_lossy())
                 } else {
-                    format!("{count} PNGs already exist")
+                    format!("{count} files already exist")
                 };
                 ui.label(RichText::new(title).strong().size(15.0));
-                ui.label("What should happen to the PNGs that are already there?");
+                ui.label("What should happen to the files that are already there?");
                 if count > 1 {
                     let names: Vec<String> = asking
                         .existing
@@ -636,21 +674,21 @@ impl App {
                 ui.horizontal(|ui| {
                     if ui
                         .button("Replace")
-                        .on_hover_text("Overwrite them with the new PNGs")
+                        .on_hover_text("Overwrite them with the new files")
                         .clicked()
                     {
                         choice = Some(Existing::Replace);
                     }
                     if ui
                         .button("Keep both")
-                        .on_hover_text("Save the new PNGs with a number, e.g. shot_hdr (2).png")
+                        .on_hover_text("Save the new files with a number, e.g. shot_hdr (2).png")
                         .clicked()
                     {
                         choice = Some(Existing::KeepBoth);
                     }
                     if ui
                         .button("Skip")
-                        .on_hover_text("Leave them alone and only make the PNGs that are missing")
+                        .on_hover_text("Leave them alone and only make the files that are missing")
                         .clicked()
                     {
                         choice = Some(Existing::Skip);
@@ -705,7 +743,7 @@ impl App {
             match message {
                 UpdateMessage::Checked(Ok(update::Checked::UpToDate)) => {
                     self.update = Update::Idle;
-                    let text = format!("jxr2png {} is the latest version", update::CURRENT);
+                    let text = format!("hdrshot {} is the latest version", update::CURRENT);
                     self.show_toast(text, ctx);
                 }
                 UpdateMessage::Checked(Ok(update::Checked::Newer(releases))) => {
@@ -723,7 +761,7 @@ impl App {
                         Ok(()) => self.quit(),
                         Err(_) => {
                             self.update = Update::Idle;
-                            let text = "The update is installed. Start jxr2png again to use it.";
+                            let text = "The update is installed. Start hdrshot again to use it.";
                             self.show_toast(text.into(), ctx);
                         }
                     }
@@ -765,7 +803,7 @@ impl App {
                     .show(ctx, |ui| {
                         ui.set_max_width(420.0);
                         ui.label(
-                            RichText::new(format!("jxr2png {} is available", newest.version))
+                            RichText::new(format!("hdrshot {} is available", newest.version))
                                 .strong()
                                 .size(15.0),
                         );
@@ -796,7 +834,7 @@ impl App {
                                 let hint = if cfg!(target_os = "macos") {
                                     "Download the new version and open its disk image"
                                 } else {
-                                    "Download the new version and restart jxr2png"
+                                    "Download the new version and restart hdrshot"
                                 };
                                 if ui
                                     .add_enabled(!running, egui::Button::new("Update"))
@@ -840,7 +878,7 @@ impl App {
                     .show(ctx, |ui| {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.label(format!("Downloading jxr2png {}…", releases[0].version));
+                            ui.label(format!("Downloading hdrshot {}…", releases[0].version));
                         });
                     });
             }
@@ -855,12 +893,12 @@ impl App {
                                 .size(15.0),
                         );
                         ui.label(
-                            "Quit jxr2png, then drag jxr2png from the opened disk image \
+                            "Quit hdrshot, then drag hdrshot from the opened disk image \
                              to Applications and choose Replace.",
                         );
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
-                            if ui.button("Quit jxr2png").clicked() {
+                            if ui.button("Quit hdrshot").clicked() {
                                 choice = Some(Choice::Quit);
                             }
                             ui.with_layout(
@@ -895,10 +933,9 @@ impl App {
         } else {
             "Check for updates"
         };
-        let selection = ui.visuals().selection;
         let label = RichText::new(text)
             .font(egui::FontId::proportional(12.0))
-            .color(selection.stroke.color);
+            .color(theme::accent(ui));
         let width = ui
             .painter()
             .layout_no_wrap(
@@ -918,14 +955,14 @@ impl App {
             egui::Layout::centered_and_justified(egui::Direction::TopDown),
         ));
         let button = egui::Button::new(label)
-            .fill(selection.bg_fill)
+            .fill(theme::accent(ui).gamma_multiply(0.14))
             .stroke(Stroke::NONE)
             .corner_radius(6.0)
             .wrap_mode(egui::TextWrapMode::Extend);
         if child
             .add_enabled(!checking, button)
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(format!("You have jxr2png {}", update::CURRENT))
+            .on_hover_text(format!("You have hdrshot {}", update::CURRENT))
             .clicked()
         {
             let ctx = ui.ctx().clone();
@@ -970,7 +1007,7 @@ impl App {
                             RichText::new(format!(
                                 "Copied {}. At {} it is over Discord's 10 MB limit.",
                                 too_big.name,
-                                jxr2png_core::share::megabytes(too_big.size)
+                                hdrshot_core::share::megabytes(too_big.size)
                             ))
                             .size(14.0),
                         );
@@ -1055,18 +1092,18 @@ impl App {
             return;
         }
         if ui
-            .small_button("Open .jxr files with jxr2png")
-            .on_hover_text("Make jxr2png the app that opens .jxr files when you double-click them")
+            .small_button("Open .jxr files with hdrshot")
+            .on_hover_text("Make hdrshot the app that opens .jxr files when you double-click them")
             .clicked()
         {
             let ctx = ui.ctx().clone();
             match assoc::make_default() {
                 Ok(assoc::Outcome::Done) => {
                     self.is_default_app = true;
-                    self.show_toast("jxr2png now opens .jxr files".into(), &ctx);
+                    self.show_toast("hdrshot now opens .jxr files".into(), &ctx);
                 }
                 Ok(assoc::Outcome::Confirm) => self.show_toast(
-                    "In Settings, choose jxr2png for .jxr to finish".into(),
+                    "In Settings, choose hdrshot for .jxr to finish".into(),
                     &ctx,
                 ),
                 Err(e) => self.show_toast(e, &ctx),
@@ -1118,10 +1155,15 @@ impl App {
         let stroke = if highlight {
             Stroke::new(2.0, accent)
         } else {
-            Stroke::new(1.5, visuals.widgets.noninteractive.bg_stroke.color)
+            Stroke::new(1.5, visuals.weak_text_color().gamma_multiply(0.5))
         };
         let painter = ui.painter();
-        painter.rect(rect, 10.0, fill, stroke, StrokeKind::Inside);
+        painter.rect_filled(rect, 12.0, fill);
+        if highlight {
+            painter.rect_stroke(rect, 12.0, stroke, StrokeKind::Inside);
+        } else {
+            dashed_outline(painter, rect.shrink(1.0), 12.0, stroke);
+        }
 
         let dim = |c: Color32| if enabled { c } else { c.gamma_multiply(0.4) };
         let text_color = dim(visuals.text_color());
@@ -1138,9 +1180,14 @@ impl App {
         let big = height > 120.0;
         if big {
             // Drawn as shapes: egui's bundled fonts have no arrow glyphs.
-            let arrow = Stroke::new(3.0, if highlight { accent } else { weak });
-            let tip = center - Vec2::new(0.0, 22.0);
-            painter.line_segment([center - Vec2::new(0.0, 48.0), tip], arrow);
+            painter.circle_filled(
+                center - Vec2::new(0.0, 38.0),
+                30.0,
+                accent.gamma_multiply(if highlight { 0.25 } else { 0.12 }),
+            );
+            let arrow = Stroke::new(3.0, dim(accent));
+            let tip = center - Vec2::new(0.0, 24.0);
+            painter.line_segment([center - Vec2::new(0.0, 52.0), tip], arrow);
             painter.line(
                 vec![
                     tip + Vec2::new(-10.0, -10.0),
@@ -1150,7 +1197,7 @@ impl App {
                 arrow,
             );
         }
-        let title_y = if big { 10.0 } else { -9.0 };
+        let title_y = if big { 14.0 } else { -9.0 };
         painter.text(
             center + Vec2::new(0.0, title_y),
             egui::Align2::CENTER_CENTER,
@@ -1183,23 +1230,24 @@ impl App {
         let running = self.running();
         let mut action = None;
         let mut hovered_thumb = None;
-        let stripe = ui.visuals().faint_bg_color;
-        let selection = ui.visuals().selection.bg_fill.gamma_multiply(0.35);
-        let hover = ui.visuals().widgets.hovered.weak_bg_fill;
+        let card = ui.visuals().faint_bg_color;
+        let selection = ui.visuals().selection.bg_fill.gamma_multiply(0.3);
+        let hover = ui.visuals().widgets.inactive.weak_bg_fill;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.spacing_mut().item_spacing.y = 4.0;
                 for (i, entry) in self.files.iter().enumerate() {
                     let (rect, row) = ui
-                        .allocate_exact_size(Vec2::new(ui.available_width(), 38.0), Sense::click());
-                    if self.selected == Some(i) {
-                        ui.painter().rect_filled(rect, 4.0, selection);
+                        .allocate_exact_size(Vec2::new(ui.available_width(), 44.0), Sense::click());
+                    let fill = if self.selected == Some(i) {
+                        selection
                     } else if row.hovered() {
-                        ui.painter().rect_filled(rect, 4.0, hover);
-                    } else if i % 2 == 0 {
-                        ui.painter().rect_filled(rect, 4.0, stripe);
-                    }
+                        hover
+                    } else {
+                        card
+                    };
+                    ui.painter().rect_filled(rect, 8.0, fill);
                     let outputs = match &entry.status {
                         Status::Done(outputs) if outputs.hdr.is_some() || outputs.sdr.is_some() => {
                             Some(outputs)
@@ -1222,7 +1270,7 @@ impl App {
                     });
 
                     let inner = egui::UiBuilder::new()
-                        .max_rect(rect.shrink2(Vec2::new(8.0, 0.0)))
+                        .max_rect(rect.shrink2(Vec2::new(10.0, 0.0)))
                         .layout(egui::Layout::right_to_left(egui::Align::Center));
                     ui.scope_builder(inner, |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
@@ -1239,15 +1287,19 @@ impl App {
                             && ui
                                 .small_button("Copy for Discord")
                                 .on_hover_text(
-                                    "Copy the PNG (the HDR one if made) to paste into Discord. \
-                                     The copy leaves out the cICP chunk, which Discord turns yellow.",
+                                    "Copy the image (the HDR one if made) as a PNG that Discord \
+                                     shows correctly",
                                 )
                                 .clicked()
                         {
                             action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
                         }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            if thumb_ui(ui, &entry.thumb, self.shown.as_ref().filter(|s| s.path == entry.path)) {
+                            if thumb_ui(
+                                ui,
+                                &entry.thumb,
+                                self.shown.as_ref().filter(|s| s.path == entry.path),
+                            ) {
                                 hovered_thumb = Some(i);
                             }
                             let name = entry.path.file_name().unwrap_or_default().to_string_lossy();
@@ -1266,8 +1318,9 @@ impl App {
             Some(RowAction::ShowInFolder(path)) => show_in_folder(&path),
             Some(RowAction::Copy(input, outputs)) => {
                 let clipboard = self.clipboard.clone();
+                let options = self.convert_options(Existing::Skip);
                 convert::in_background(self.copied.0.clone(), ctx, move || {
-                    convert::copy(&clipboard, &input, &outputs)
+                    convert::copy(&clipboard, &input, &outputs, &options)
                 });
             }
             Some(RowAction::Retry(i)) => self.start_some(vec![i], &ctx),
@@ -1303,25 +1356,70 @@ impl App {
     }
 
     fn settings_ui(&mut self, ui: &mut egui::Ui) {
+        theme::card(ui, |ui| self.settings_grid(ui));
+        ui.add_space(2.0);
+        self.advanced_section(ui);
+    }
+
+    fn settings_grid(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new("settings")
             .num_columns(2)
-            .spacing([12.0, 10.0])
+            .spacing([16.0, 10.0])
             .show(ui, |ui| {
-                ui.label("Create");
-                ui.horizontal(|ui| {
-                    let mode = &mut self.settings.mode;
-                    ui.selectable_value(mode, Mode::Both, "HDR + SDR")
-                        .on_hover_text("An HDR PNG and a tone-mapped SDR PNG for each image");
-                    ui.selectable_value(mode, Mode::Hdr, "HDR only")
-                        .on_hover_text(
-                            "16-bit HDR PNG, shown in HDR by Windows Photos, Chrome and Edge",
-                        );
-                    ui.selectable_value(mode, Mode::Sdr, "SDR only")
-                        .on_hover_text("Tone-mapped 8-bit PNG that looks right everywhere");
+                theme::row_label(ui, "Create");
+                theme::segmented(
+                    ui,
+                    &mut self.settings.mode,
+                    &[
+                        (
+                            Mode::Both,
+                            "HDR + SDR",
+                            "An HDR image and a tone-mapped SDR PNG for each image",
+                        ),
+                        (
+                            Mode::Hdr,
+                            "HDR only",
+                            "Only the HDR image, in the format chosen below",
+                        ),
+                        (
+                            Mode::Sdr,
+                            "SDR only",
+                            "Tone-mapped 8-bit PNG that looks right everywhere",
+                        ),
+                    ],
+                );
+                ui.end_row();
+
+                theme::row_label(ui, "HDR format");
+                ui.add_enabled_ui(self.settings.mode != Mode::Sdr, |ui| {
+                    theme::segmented(
+                        ui,
+                        &mut self.settings.hdr_format,
+                        &[
+                            (
+                                Format::Png,
+                                "PNG",
+                                "16-bit lossless PNG, shown in HDR by Windows Photos, Chrome \
+                                 and Edge. The largest files.",
+                            ),
+                            (
+                                Format::Avif,
+                                "AVIF",
+                                "10-bit AVIF, about a twentieth of the PNG's size, shown in HDR \
+                                 by Chrome, Edge and Firefox. Takes a few seconds per image.",
+                            ),
+                            (
+                                Format::UltraHdr,
+                                "Ultra HDR JPEG",
+                                "A JPEG that every app shows in SDR and that Chrome, Edge \
+                                 and Android show in HDR.",
+                            ),
+                        ],
+                    );
                 });
                 ui.end_row();
 
-                ui.label("Save to");
+                theme::row_label(ui, "Save to");
                 ui.vertical(|ui| {
                     let s = &mut self.settings;
                     ui.radio_value(&mut s.save_to_folder, false, "Same folder as each image");
@@ -1335,7 +1433,7 @@ impl App {
                             .add(egui::Button::new(label).truncate())
                             .on_hover_text("Choose the folder to save into");
                         if button.clicked() {
-                            let mut dialog = rfd::FileDialog::new().set_title("Save PNGs to");
+                            let mut dialog = rfd::FileDialog::new().set_title("Save images to");
                             if let Some(dir) = &s.output_dir {
                                 dialog = dialog.set_directory(dir);
                             }
@@ -1348,7 +1446,7 @@ impl App {
                 });
                 ui.end_row();
 
-                ui.label("Resolution");
+                theme::row_label(ui, "Resolution");
                 let label = |h: Option<u32>| {
                     let name = h.map_or_else(|| "Source".to_owned(), |h| format!("{h}p"));
                     match output_size(&self.files, h) {
@@ -1373,18 +1471,20 @@ impl App {
                     );
                 ui.end_row();
 
-                ui.label("Clipboard");
+                theme::row_label(ui, "Clipboard");
                 ui.checkbox(
                     &mut self.settings.copy_to_clipboard,
                     "Copy the last converted image",
                 )
                 .on_hover_text(
-                    "After converting, copy the last PNG to the clipboard as a file \
+                    "After converting, copy the last image to the clipboard as a file \
                      (the HDR one if made), ready to paste into Discord, a browser or a folder",
                 );
                 ui.end_row();
             });
+    }
 
+    fn advanced_section(&mut self, ui: &mut egui::Ui) {
         let custom = !self.tuning.is_default();
         let title = if custom {
             "Advanced (custom)"
@@ -1412,7 +1512,7 @@ impl App {
                          by date stay in capture order",
             );
         let s = &mut self.settings;
-        ui.checkbox(&mut s.subfolders, "Save HDR and SDR PNGs in subfolders")
+        ui.checkbox(&mut s.subfolders, "Save HDR and SDR images in subfolders")
             .on_hover_text("Put them in folders named hdr and sdr");
         let needed = s.suffix_needed();
         let mut suffix = s.type_suffix || needed;
@@ -1435,8 +1535,8 @@ impl App {
     fn tuning_ui(&mut self, ui: &mut egui::Ui) {
         ui.label(
             RichText::new(
-                "Not needed normally: by default the PNGs match the original \
-                 screenshot. Use these only to fine-tune the result.",
+                "Not needed normally: by default the results match the original \
+                 image. Use these only to fine-tune the result.",
             )
             .weak(),
         );
@@ -1455,7 +1555,7 @@ impl App {
                 ui.add_enabled_ui(mode != Mode::Sdr, |ui| {
                     ui.checkbox(&mut t.limit_hdr_peak, "Limit HDR peak")
                         .on_hover_text(
-                            "Roll off highlights brighter than this in the HDR PNG. \
+                            "Roll off highlights brighter than this in the HDR image. \
                              Off keeps the original brightness.",
                         );
                 });
@@ -1562,7 +1662,8 @@ impl App {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let big = |text: &str| {
                     egui::Button::new(RichText::new(text).strong().size(15.0))
-                        .min_size(Vec2::new(130.0, 32.0))
+                        .min_size(Vec2::new(150.0, 34.0))
+                        .corner_radius(8.0)
                 };
                 if let Some(job) = &self.job {
                     let stopping = job.is_cancelled();
@@ -1581,7 +1682,8 @@ impl App {
                     1 => "Convert 1 image".to_owned(),
                     n => format!("Convert {n} images"),
                 };
-                let response = ui.add_enabled(self.can_convert(), big(&label));
+                let button = theme::primary(ui, theme::primary_button(&label));
+                let response = ui.add_enabled(self.can_convert(), button);
                 let response = if self.settings.save_to_folder && self.settings.output_dir.is_none()
                 {
                     response.on_disabled_hover_text("Choose a folder to save into first")
@@ -1627,10 +1729,11 @@ impl window::App for App {
         let panel_fill = ui.visuals().panel_fill;
         self.advanced_height = 0.0;
         let bottom = egui::Panel::bottom("actions")
+            .show_separator_line(false)
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
             .show(ui, |ui| {
                 ui.add_enabled_ui(!self.running(), |ui| self.settings_ui(ui));
-                ui.separator();
+                ui.add_space(4.0);
                 self.action_bar(ui);
                 // Room for the update button, which is taller than the
                 // credit line it sits on.
@@ -1643,13 +1746,20 @@ impl window::App for App {
             .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading(RichText::new("jxr2png").strong());
-                    ui.label(RichText::new("HDR screenshots to PNG").weak());
+                    ui.add(
+                        egui::Image::new((self.logo.id(), Vec2::splat(30.0))).corner_radius(7.0),
+                    );
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.label(RichText::new("hdrshot").strong().size(19.0));
+                        ui.label(RichText::new("HDR image tool").size(12.0).weak());
+                    });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         self.default_app_ui(ui);
                     });
                 });
-                ui.add_space(4.0);
+                ui.add_space(8.0);
                 if self.files.is_empty() {
                     let height = ui.available_height().max(140.0);
                     self.drop_zone(ui, height);
@@ -1686,7 +1796,7 @@ fn existing_outputs<'a>(
 ) -> Vec<PathBuf> {
     inputs
         .flat_map(|input| {
-            let planned = jxr2png_core::output_paths(input, options);
+            let planned = hdrshot_core::output_paths(input, options);
             [planned.hdr, planned.sdr]
         })
         .flatten()
@@ -1713,7 +1823,7 @@ fn output_size(files: &[Entry], max_height: Option<u32>) -> OutputSize {
     let mut sizes = files
         .iter()
         .filter_map(|e| e.size)
-        .map(|(w, h)| max_height.map_or((w, h), |max| jxr2png_core::resize::fit_height(w, h, max)));
+        .map(|(w, h)| max_height.map_or((w, h), |max| hdrshot_core::resize::fit_height(w, h, max)));
     let Some(first) = sizes.next() else {
         return OutputSize::Unknown;
     };
@@ -1746,7 +1856,7 @@ fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) -> bool {
         return false;
     };
     let [w, h] = texture.size();
-    let (w, h) = jxr2png_core::resize::fit_box(w as u32, h as u32, THUMB_SIZE.0, THUMB_SIZE.1);
+    let (w, h) = hdrshot_core::resize::fit_box(w as u32, h as u32, THUMB_SIZE.0, THUMB_SIZE.1);
     let (rect, response) = ui.allocate_exact_size(box_size, Sense::hover());
     let image_rect = egui::Rect::from_center_size(rect.center(), Vec2::new(w as f32, h as f32));
     egui::Image::new((texture.id(), image_rect.size()))
@@ -1768,7 +1878,7 @@ fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) -> bool {
                 }
                 None => show(ui, &shown.auto),
             }
-            ui.weak("SDR preview; the HDR PNG keeps the full brightness.");
+            ui.weak("SDR preview; the HDR image keeps the full brightness.");
         });
     }
     hovered
@@ -1790,7 +1900,7 @@ fn row_menu(ui: &mut egui::Ui, i: usize, entry: &Entry, running: bool) -> Option
     let hdr = outputs.and_then(|o| o.hdr.clone());
     let sdr = outputs.and_then(|o| o.sdr.clone());
     if ui
-        .add_enabled(hdr.is_some(), egui::Button::new("Open HDR PNG"))
+        .add_enabled(hdr.is_some(), egui::Button::new("Open HDR image"))
         .clicked()
     {
         action = hdr.clone().map(RowAction::Open);
@@ -1834,11 +1944,11 @@ fn row_menu(ui: &mut egui::Ui, i: usize, entry: &Entry, running: bool) -> Option
 fn status_ui(ui: &mut egui::Ui, status: &Status) {
     match status {
         Status::Waiting => {
-            ui.weak("Waiting");
+            theme::pill(ui, "Waiting", ui.visuals().weak_text_color());
         }
         Status::Converting => {
-            ui.label("Converting");
             ui.spinner();
+            theme::pill(ui, "Converting", theme::accent(ui));
         }
         Status::Done(outputs) => {
             let list = |paths: &mut dyn Iterator<Item = &PathBuf>| {
@@ -1861,17 +1971,34 @@ fn status_ui(ui: &mut egui::Ui, status: &Status) {
                     format!("This is an SDR image, so only the SDR PNG was made.\n\n{tooltip}");
             }
             if saved.is_empty() {
-                ui.weak("Skipped").on_hover_text(tooltip);
+                theme::pill(ui, "Skipped", ui.visuals().weak_text_color()).on_hover_text(tooltip);
             } else {
-                ui.label(RichText::new("Done").color(ok_color(ui)))
-                    .on_hover_text(tooltip);
+                theme::pill(ui, "Done", ok_color(ui)).on_hover_text(tooltip);
             }
         }
         Status::Failed(error) => {
-            ui.label(RichText::new("Failed").color(ui.visuals().error_fg_color))
-                .on_hover_text(error);
+            theme::pill(ui, "Failed", ui.visuals().error_fg_color).on_hover_text(error);
         }
     }
+}
+
+/// A rounded rectangle's outline as dashes, for the empty drop zone.
+fn dashed_outline(painter: &egui::Painter, rect: egui::Rect, radius: f32, stroke: Stroke) {
+    let mut points = Vec::new();
+    let corners = [
+        (rect.right_top() + Vec2::new(-radius, radius), -90.0_f32),
+        (rect.right_bottom() + Vec2::new(-radius, -radius), 0.0),
+        (rect.left_bottom() + Vec2::new(radius, -radius), 90.0),
+        (rect.left_top() + Vec2::new(radius, radius), 180.0),
+    ];
+    for (center, start) in corners {
+        for step in 0..=8 {
+            let angle = (start + step as f32 * 90.0 / 8.0).to_radians();
+            points.push(center + radius * Vec2::new(angle.cos(), angle.sin()));
+        }
+    }
+    points.push(points[0]);
+    painter.extend(egui::Shape::dashed_line(&points, stroke, 7.0, 5.0));
 }
 
 fn ok_color(ui: &egui::Ui) -> Color32 {
@@ -2052,7 +2179,7 @@ mod tests {
 
     #[test]
     fn existing_outputs_lists_only_files_on_disk() {
-        let dir = std::env::temp_dir().join(format!("jxr2png-gui-existing-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("hdrshot-gui-existing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a_hdr.png"), b"png").unwrap();

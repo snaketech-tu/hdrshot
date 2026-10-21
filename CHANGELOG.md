@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.0] - 2026-10-21
 
 ### Added
 
@@ -14,9 +14,41 @@
 - JPEG XL (`.jxl`) input, decoded in pure Rust: PQ and HLG files keep their
   brightness, float files are read like OpenEXR, and SDR files give the SDR
   PNG only.
+- `--format avif` writes the HDR output as a 10-bit BT.2020 PQ AVIF with
+  `clli` and `mdcv` light levels, about a twentieth of the PNG's size.
+  `--avif-quality`, `--avif-speed` and `--avif-420` tune it.
+- `--format ultrahdr` writes an Ultra HDR JPEG: an SDR JPEG, the same
+  picture as the SDR PNG, with a gain map that Chrome, Edge, Android and
+  Instagram use to show it in HDR. It carries both Adobe gain map XMP and
+  ISO 21496-1 metadata.
+- Copying an AVIF or Ultra HDR result for Discord, in the desktop app or
+  with `--copy`, copies an HDR PNG made for Discord instead, because
+  Discord shows AVIF too bright and Ultra HDR JPEGs in SDR only. The
+  desktop app makes that PNG while converting, in a temporary folder, so
+  copying is instant.
+- The desktop app has an **HDR format** choice (PNG, AVIF or Ultra HDR
+  JPEG), and its window title shows the version.
 
 ### Changed
 
+- jxr2png is now **hdrshot**, an HDR image tool, since it reads and writes
+  more than JPEG XR and PNG. The command is `hdrshot`, the desktop app is
+  `hdrshot-gui`, and the downloads are named `hdrshot-gui.exe`,
+  `hdrshot.exe`, `hdrshot-gui-macos.dmg` and so on. Version 1.2 finds and
+  installs the update under the new name.
+- Settings saved by jxr2png are read on first start. On Windows the `.jxr`
+  association made by jxr2png now opens hdrshot, and Settings lists it
+  once, as hdrshot. On Linux the `jxr2png.desktop` entry is replaced by
+  `hdrshot.desktop`, keeping it as the default app for `.jxr` if it was.
+  On macOS, delete the old jxr2png app after installing hdrshot.
+- The crates are `hdrshot-core`, `hdrshot` and `hdrshot-gui`, with
+  crates.io metadata. The vendored CPU renderer is the
+  `hdrshot-egui-backend` package.
+- A refreshed desktop app look, in colors taken from the icon: the icon
+  and tagline in the header, a dashed drop area, joined choice buttons,
+  settings grouped on a card, files on rounded rows with status labels,
+  and a highlighted Convert button. Dark and light themes both follow the
+  system.
 - New app icon: a picture split between flat SDR and bright HDR. It has
   a simplified version for the smallest sizes, a macOS icon on Apple's
   icon grid, and Linux icons from 16 px to 512 px plus a scalable SVG.
@@ -25,6 +57,7 @@
 
 - A conversion that would write its PNG over the input file now fails
   instead.
+- Copying a file that is not a PNG to the clipboard no longer alters it.
 
 ## [1.2.0] - 2026-10-20
 

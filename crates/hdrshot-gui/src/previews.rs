@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use jxr2png_core::{Preview, SdrOptions};
+use hdrshot_core::{Preview, SdrOptions};
 
 /// Largest preview kept per file. The tooltip shows it at this size.
 pub const PREVIEW_SIZE: (u32, u32) = (360, 220);
@@ -32,7 +32,7 @@ impl Previews {
         std::thread::spawn(move || {
             for path in queue {
                 let (w, h) = PREVIEW_SIZE;
-                let preview = jxr2png_core::preview(&path, &Default::default(), w, h)
+                let preview = hdrshot_core::preview(&path, &Default::default(), w, h)
                     .map_err(|e| e.to_string());
                 if done.send((path, preview)).is_err() {
                     break;
@@ -55,13 +55,13 @@ impl Previews {
                 let thumb = match preview {
                     Ok(preview) => {
                         let (w, h) = THUMB_SIZE;
-                        let (tw, th) = jxr2png_core::resize::fit_box(
+                        let (tw, th) = hdrshot_core::resize::fit_box(
                             preview.image.width,
                             preview.image.height,
                             w * 2,
                             h * 2,
                         );
-                        let small = jxr2png_core::resize::resize(&preview.image, tw, th);
+                        let small = hdrshot_core::resize::resize(&preview.image, tw, th);
                         let texture = texture(
                             ctx,
                             "thumb",
@@ -92,7 +92,7 @@ pub fn texture(
     sdr: &SdrOptions,
 ) -> egui::TextureHandle {
     let image = &preview.image;
-    let rgb = jxr2png_core::sdr_rgb8(image, &preview.levels, sdr);
+    let rgb = hdrshot_core::sdr_rgb8(image, &preview.levels, sdr);
     let size = [image.width as usize, image.height as usize];
     let color = match &image.alpha {
         None => egui::ColorImage::from_rgb(size, &rgb),

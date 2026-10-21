@@ -66,33 +66,14 @@ pub fn write_hdr_png<W: Write>(
     sdr: &SdrOptions,
     out: W,
 ) -> Result<()> {
-    // Work in BT.2020 nits; take each pixel's brightest channel for the
-    // roll-off so hue is kept, as in the SDR path.
-    let to_nits = |p: [f32; 3]| bt709_to_bt2020(p).map(|c| c.max(0.0) * SCRGB_WHITE_NITS);
-    let source_peak = image
-        .pixels
-        .par_iter()
-        .map(|&p| to_nits(p).into_iter().fold(0.0, f32::max))
-        .reduce(|| 0.0, f32::max);
-    let roll_off = hdr
-        .peak_nits
-        .filter(|&peak| source_peak > peak)
-        .map(|peak| (peak, ToneCurve::new(source_peak / peak)));
-
+    let transform = HdrTransform::new(image, hdr);
     let channels = if image.alpha.is_some() { 4 } else { 3 };
     let mut data = vec![0u8; image.pixels.len() * 2 * channels];
-    let mut brightest: Vec<f32> = data
+    let brightest: Vec<f32> = data
         .par_chunks_mut(2 * channels)
         .zip(image.pixels.par_iter())
         .map(|(out, &p)| {
-            let mut rgb = to_nits(p);
-            let brightest = rgb.into_iter().fold(0.0, f32::max);
-            if let Some((peak, curve)) = &roll_off
-                && brightest > 0.0
-            {
-                let scale = curve.apply(brightest / peak) * peak / brightest;
-                rgb = rgb.map(|c| c * scale);
-            }
+            let rgb = transform.nits(p);
             for (i, c) in rgb.into_iter().enumerate() {
                 let v = quantize_pq(pq_encode(c));
                 out[i * 2..i * 2 + 2].copy_from_slice(&v.to_be_bytes());
@@ -108,10 +89,7 @@ pub fn write_hdr_png<W: Write>(
                 out[6..].copy_from_slice(&a.to_be_bytes());
             });
     }
-    let max = brightest.par_iter().copied().reduce(|| 0.0, f32::max);
-    let average = (brightest.par_iter().map(|&v| f64::from(v)).sum::<f64>()
-        / brightest.len().max(1) as f64) as f32;
-    let max_cll = max_content_light_level(&mut brightest);
+    let stats = transform.stats(brightest);
 
     let mut info = png::Info::with_size(image.width, image.height);
     info.color_type = if image.alpha.is_some() {
@@ -138,23 +116,108 @@ pub fn write_hdr_png<W: Write>(
     writer.write_chunk(png::chunk::sBIT, &sbit[..channels])?;
     // mDCV: BT.2020 primaries and D65 white in units of 0.00002, then the
     // display's peak and minimum luminance in units of 0.0001 nits.
-    let mastering_peak = roll_off.map_or(max, |(peak, _)| peak);
     let mut mdcv = Vec::with_capacity(24);
-    for xy in [0.708, 0.292, 0.170, 0.797, 0.131, 0.046, 0.3127, 0.3290] {
-        mdcv.extend_from_slice(&((xy * 50_000.0f64).round() as u16).to_be_bytes());
+    for xy in BT2020_PRIMARIES_XY {
+        mdcv.extend_from_slice(&xy_units(xy).to_be_bytes());
     }
-    mdcv.extend_from_slice(&to_clli_units(mastering_peak).to_be_bytes());
-    mdcv.extend_from_slice(&to_clli_units(0.005).to_be_bytes());
+    mdcv.extend_from_slice(&to_clli_units(stats.mastering_peak).to_be_bytes());
+    mdcv.extend_from_slice(&to_clli_units(MASTERING_MIN_NITS).to_be_bytes());
     writer.write_chunk(png::chunk::ChunkType(*b"mDCV"), &mdcv)?;
     // cLLI: MaxCLL and MaxFALL in units of 0.0001 nits.
     let mut clli = [0u8; 8];
-    clli[..4].copy_from_slice(&to_clli_units(max_cll).to_be_bytes());
-    clli[4..].copy_from_slice(&to_clli_units(average).to_be_bytes());
+    clli[..4].copy_from_slice(&to_clli_units(stats.max_cll).to_be_bytes());
+    clli[4..].copy_from_slice(&to_clli_units(stats.max_fall).to_be_bytes());
     writer.write_chunk(png::chunk::ChunkType(*b"cLLI"), &clli)?;
 
     writer.write_image_data(&data)?;
     writer.finish()?;
     Ok(())
+}
+
+/// BT.2020 red, green and blue primaries and the D65 white point, as CIE
+/// x, y pairs flattened in that order.
+pub(crate) const BT2020_PRIMARIES_XY: [f64; 8] =
+    [0.708, 0.292, 0.170, 0.797, 0.131, 0.046, 0.3127, 0.3290];
+
+/// Minimum luminance of the mastering display, in nits.
+pub(crate) const MASTERING_MIN_NITS: f32 = 0.005;
+
+/// A chromaticity coordinate in units of 0.00002, as `mDCV` and `mdcv`
+/// store them.
+pub(crate) fn xy_units(xy: f64) -> u16 {
+    (xy * 50_000.0).round() as u16
+}
+
+/// Turns scRGB pixels into the BT.2020 nits that the HDR outputs store,
+/// with the optional highlight roll-off of [`HdrOptions::peak_nits`].
+pub(crate) struct HdrTransform {
+    roll_off: Option<(f32, ToneCurve)>,
+}
+
+/// Light-level metadata of an HDR output, in nits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct HdrStats {
+    pub max_cll: f32,
+    pub max_fall: f32,
+    /// Peak of the mastering display: the brightest pixel, or the roll-off
+    /// peak if highlights were rolled off.
+    pub mastering_peak: f32,
+}
+
+impl HdrTransform {
+    pub fn new(image: &ScRgbImage, hdr: &HdrOptions) -> Self {
+        // Take each pixel's brightest channel for the roll-off so hue is
+        // kept, as in the SDR path.
+        let source_peak = image
+            .pixels
+            .par_iter()
+            .map(|&p| Self::to_nits(p).into_iter().fold(0.0, f32::max))
+            .reduce(|| 0.0, f32::max);
+        let roll_off = hdr
+            .peak_nits
+            .filter(|&peak| source_peak > peak)
+            .map(|peak| (peak, ToneCurve::new(source_peak / peak)));
+        Self { roll_off }
+    }
+
+    fn to_nits(p: [f32; 3]) -> [f32; 3] {
+        bt709_to_bt2020(p).map(|c| c.max(0.0) * SCRGB_WHITE_NITS)
+    }
+
+    /// One pixel in BT.2020 nits.
+    pub fn nits(&self, p: [f32; 3]) -> [f32; 3] {
+        let rgb = Self::to_nits(p);
+        let scale = self.scale_for(rgb);
+        rgb.map(|c| c * scale)
+    }
+
+    /// The factor the roll-off scales the scRGB pixel `p` by: 1 below the
+    /// roll-off or without one.
+    pub fn scale(&self, p: [f32; 3]) -> f32 {
+        self.scale_for(Self::to_nits(p))
+    }
+
+    fn scale_for(&self, nits: [f32; 3]) -> f32 {
+        let brightest = nits.into_iter().fold(0.0, f32::max);
+        match &self.roll_off {
+            Some((peak, curve)) if brightest > 0.0 => {
+                curve.apply(brightest / peak) * peak / brightest
+            }
+            _ => 1.0,
+        }
+    }
+
+    /// Metadata for the output, from each output pixel's brightest channel.
+    pub fn stats(&self, mut brightest: Vec<f32>) -> HdrStats {
+        let max = brightest.par_iter().copied().reduce(|| 0.0, f32::max);
+        let max_fall = (brightest.par_iter().map(|&v| f64::from(v)).sum::<f64>()
+            / brightest.len().max(1) as f64) as f32;
+        HdrStats {
+            max_cll: max_content_light_level(&mut brightest),
+            max_fall,
+            mastering_peak: self.roll_off.map_or(max, |(peak, _)| peak),
+        }
+    }
 }
 
 /// MaxCLL for the per-pixel brightest channel values in `brightest`: the
@@ -177,7 +240,7 @@ fn max_content_light_level(brightest: &mut [f32]) -> f32 {
 /// Bits of PQ precision kept in the 16-bit HDR samples. Ten bits is what
 /// HDR10 displays and video use; dropping the bits below it makes the PNG
 /// about half the size.
-const HDR_SIGNIFICANT_BITS: u32 = 10;
+pub(crate) const HDR_SIGNIFICANT_BITS: u32 = 10;
 
 /// Round a 0..1 PQ signal to [`HDR_SIGNIFICANT_BITS`] and store it as a
 /// 16-bit sample. The steps are multiples of 64 on the 16-bit scale, so
@@ -191,14 +254,14 @@ fn quantize_pq(signal: f32) -> u16 {
 }
 
 /// Brightness that maps to SDR maximum.
-fn sdr_peak_nits(levels: &LightLevels, options: &SdrOptions) -> f32 {
+pub(crate) fn sdr_peak_nits(levels: &LightLevels, options: &SdrOptions) -> f32 {
     options
         .peak_nits
         .unwrap_or(levels.p999)
         .max(options.white_nits)
 }
 
-fn to_clli_units(nits: f32) -> u32 {
+pub(crate) fn to_clli_units(nits: f32) -> u32 {
     (f64::from(nits.clamp(0.0, 10_000.0)) * 10_000.0).round() as u32
 }
 
@@ -209,11 +272,11 @@ fn to_clli_units(nits: f32) -> u32 {
 /// Without the chunk it keeps the ICC profile, whose `cicp` tag still marks
 /// the image as HDR, and shows it correctly. The `mDCV` chunk goes too,
 /// since the PNG spec only allows it alongside `cICP`. Every other chunk is
-/// copied byte for byte. Bytes that aren't a well-formed PNG are returned
-/// as is.
+/// copied byte for byte. Bytes that aren't a well-formed PNG, such as an
+/// AVIF, are returned as is.
 pub fn for_discord(png: &[u8]) -> Vec<u8> {
     const SIGNATURE: usize = 8;
-    if png.len() < SIGNATURE {
+    if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
         return png.to_vec();
     }
     let mut out = png[..SIGNATURE].to_vec();
@@ -400,6 +463,7 @@ mod tests {
             &levels,
             &HdrOptions {
                 peak_nits: Some(1000.0),
+                ..Default::default()
             },
             &SdrOptions::default(),
             &mut bytes,

@@ -1,0 +1,22 @@
+[package]
+name = "hdrshot-core"
+description = "Library behind hdrshot: decode HDR images and encode HDR PNG, AVIF, Ultra HDR JPEG and tone-mapped SDR PNG"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories = ["multimedia::images", "multimedia::encoding"]
+readme = "README.md"
+
+[dependencies]
+avif-serialize = "0.8"
+exr = "1.74"
+image = { version = "0.25", default-features = false, features = ["hdr"] }
+jpeg-encoder = "0.7"
+jxl-oxide = { version = "0.12", features = ["moxcms"] }
+jxr = "=0.2.1"
+png = "0.18"
+rav1e = { version = "0.8", default-features = false, features = ["threading"] }
+rayon = "1.12.0"
+thiserror = "2.0.21"
