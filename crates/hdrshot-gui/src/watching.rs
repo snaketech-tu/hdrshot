@@ -1,9 +1,13 @@
 //! The watch folder: new images saved there, such as Game Bar screenshots,
-//! are added to the list and converted with the current settings.
+//! are added to the list and converted with the current settings. Files
+//! from Explorer's "Convert with hdrshot" take the same way.
 
 use hdrshot_core::watch::{FolderWatch, watch_folder};
 
 use super::*;
+
+/// How long to wait for more files after one arrives before converting.
+const GATHER_SECONDS: f64 = 0.4;
 
 /// The folder being watched and its watch.
 pub(crate) struct Watching {
@@ -38,11 +42,23 @@ impl App {
         }
     }
 
-    /// Adds new images from the watch folder and converts them once no
-    /// batch is running, as a batch of their own.
+    /// Adds new images from the watch folder or from "Convert with hdrshot"
+    /// and converts them once no batch is running, as a batch of their
+    /// own. Files arriving close together, as Explorer starts one launch
+    /// per selected file, become one batch.
     pub(crate) fn receive_watched(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
+        let before = self.waiting.len();
         self.waiting.extend(self.watched.1.try_iter());
+        if self.waiting.len() > before {
+            self.last_arrival = now;
+        }
         if self.waiting.is_empty() || self.running() || self.asking.is_some() {
+            return;
+        }
+        let quiet = now - self.last_arrival;
+        if quiet < GATHER_SECONDS {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(GATHER_SECONDS - quiet));
             return;
         }
         let paths = std::mem::take(&mut self.waiting);

@@ -61,7 +61,14 @@ fn main() {
         single::wait_for_exit(std::time::Duration::from_secs(10));
     }
     update::clean_up();
-    let listener = match single::claim(&files) {
+    // From Explorer's "Convert with hdrshot": convert the files right away.
+    let convert = files
+        .first()
+        .is_some_and(|f| f.as_os_str() == single::CONVERT_FLAG);
+    if convert {
+        files.remove(0);
+    }
+    let listener = match single::claim(&files, convert) {
         Some(single::Claim::HandedOff) => return,
         Some(single::Claim::First(listener)) => Some(listener),
         None => None,
@@ -76,7 +83,9 @@ fn main() {
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());
-    if let Err(e) = window::run(viewport, |ctx| App::new(ctx, files, listener, updated)) {
+    if let Err(e) = window::run(viewport, |ctx| {
+        App::new(ctx, files, convert, listener, updated)
+    }) {
         eprintln!("hdrshot: {e}");
         std::process::exit(1);
     }
@@ -150,10 +159,13 @@ struct App {
     /// The app icon, shown in the header.
     logo: egui::TextureHandle,
     watching: Option<Watching>,
-    /// New images from the watch folder, and those waiting for the running
-    /// batch to end.
+    /// Images to convert right away: new ones from the watch folder and
+    /// those from "Convert with hdrshot" in another launch.
     watched: (Sender<PathBuf>, Receiver<PathBuf>),
+    /// Those not converted yet, waiting for the running batch to end.
     waiting: Vec<PathBuf>,
+    /// `egui` time when the last of them arrived.
+    last_arrival: f64,
 }
 
 /// Tooltip for the Copy for Discord buttons; the README's "Sharing on
@@ -172,16 +184,20 @@ const MIN_ADVANCED_HEIGHT: f32 = 120.0;
 const SETTINGS_KEY: &str = "settings";
 
 impl App {
+    /// Opens with `files` in the list, converting them right away with
+    /// `convert`.
     fn new(
         ctx: &egui::Context,
         files: Vec<PathBuf>,
+        convert: bool,
         listener: Option<single::Listener>,
         updated: bool,
     ) -> Self {
         let settings = storage::load(SETTINGS_KEY).unwrap_or_default();
         let (open, opened) = channel();
+        let watched = channel();
         if let Some(listener) = listener {
-            listener.serve(open.clone(), ctx.clone());
+            listener.serve(open.clone(), watched.0.clone(), ctx.clone());
         }
         #[cfg(target_os = "macos")]
         macos::receive_opened_files(open.clone(), ctx.clone());
@@ -225,13 +241,18 @@ impl App {
             updates: channel(),
             logo,
             watching: None,
-            watched: channel(),
+            watched,
             waiting: Vec::new(),
+            last_arrival: 0.0,
         };
         if assoc::SUPPORTED {
             assoc::refresh();
         }
-        app.add_paths(files);
+        if convert {
+            app.waiting = files;
+        } else {
+            app.add_paths(files);
+        }
         if updated {
             app.show_toast(format!("Updated to hdrshot {}", update::CURRENT), ctx);
         }
@@ -267,10 +288,14 @@ impl App {
         }
         if ui
             .small_button("Open .jxr files with hdrshot")
-            .on_hover_text(
+            .on_hover_text(if cfg!(windows) {
                 "Make hdrshot the app that opens .jxr files when you double-click them, \
-                 and list it under Open with for .wdp, .exr, .jxl and .hdr files",
-            )
+                 list it under Open with for .wdp, .exr, .jxl and .hdr files, and add \
+                 Convert with hdrshot to their right-click menu"
+            } else {
+                "Make hdrshot the app that opens .jxr files when you double-click them, \
+                 and list it under Open with for .wdp, .exr, .jxl and .hdr files"
+            })
             .clicked()
         {
             let ctx = ui.ctx().clone();
