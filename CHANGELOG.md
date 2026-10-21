@@ -24,6 +24,12 @@
 - The desktop app has an **HDR format** choice (PNG, AVIF or Ultra HDR
   JPEG), and its window title shows the version.
 
+### Changed
+
+- New app icon: a picture split between flat SDR and bright HDR. It has
+  a simplified version for the smallest sizes, a macOS icon on Apple's
+  icon grid, and Linux icons from 16 px to 512 px plus a scalable SVG.
+
 ### Fixed
 
 - A conversion that would write its PNG over the input file now fails
