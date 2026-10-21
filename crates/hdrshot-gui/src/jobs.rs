@@ -111,6 +111,7 @@ impl App {
             .collect();
         self.progress = (0, files.len());
         self.skipped = 0;
+        self.trashed = (0, Vec::new());
         self.notice = None;
         let clipboard = self
             .settings
@@ -120,6 +121,7 @@ impl App {
             files,
             self.convert_options(existing),
             clipboard,
+            self.settings.trash_originals,
             ctx.clone(),
         ));
     }
@@ -142,6 +144,13 @@ impl App {
                     };
                     self.progress.0 += 1;
                 }
+                Event::Trashed(i, result) => match result {
+                    Ok(()) => self.trashed.0 += 1,
+                    Err(e) => self
+                        .trashed
+                        .1
+                        .push(format!("{}: {e}", self.files[i].path.display())),
+                },
                 Event::Done(copied) => {
                     done = true;
                     if let Some(copied) = copied {
@@ -170,6 +179,12 @@ impl App {
                     "{failed} file{} could not be converted.",
                     if failed == 1 { "" } else { "s" }
                 ));
+            } else if let Some(error) = self.trashed.1.first() {
+                let n = self.trashed.1.len();
+                self.notice = Some(format!(
+                    "Could not move {n} original{} to the {RECYCLE_BIN}: {error}",
+                    if n == 1 { "" } else { "s" }
+                ));
             } else if self.skipped > 0 {
                 let (n, s) = (self.skipped, if self.skipped == 1 { "" } else { "s" });
                 self.notice = Some(if n == self.progress.1 {
@@ -177,6 +192,13 @@ impl App {
                 } else {
                     format!("Skipped {n} file{s} whose files already exist.")
                 });
+            } else if self.trashed.0 > 0 {
+                let (n, total) = (self.trashed.0, self.progress.1);
+                self.notice = Some(format!(
+                    "Converted {total} image{} and moved {n} original{} to the {RECYCLE_BIN}.",
+                    if total == 1 { "" } else { "s" },
+                    if n == 1 { "" } else { "s" }
+                ));
             }
         } else {
             self.job = Some(job);
@@ -246,6 +268,13 @@ impl App {
         }
     }
 }
+
+/// What the system calls the place deleted files go.
+pub(crate) const RECYCLE_BIN: &str = if cfg!(windows) {
+    "Recycle Bin"
+} else {
+    "Trash"
+};
 
 pub(crate) struct Asking {
     pub(crate) indices: Vec<usize>,

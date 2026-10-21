@@ -266,6 +266,15 @@ pub struct Outputs {
     pub sdr_input: bool,
 }
 
+impl Outputs {
+    /// Whether every output asked for was written: at least one, and none
+    /// left alone because it already existed. Only then may the input be
+    /// removed, as `--trash-originals` does.
+    pub fn complete(&self) -> bool {
+        (self.hdr.is_some() || self.sdr.is_some()) && self.skipped.is_empty()
+    }
+}
+
 /// Whether `path` names a JPEG XR file (`.jxr` or `.wdp`).
 pub fn is_jxr(path: &Path) -> bool {
     InputFormat::from_path(path) == Some(InputFormat::Jxr)
@@ -615,6 +624,23 @@ fn same_file(a: &Path, b: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn complete_only_when_everything_was_written() {
+        let written = Outputs {
+            hdr: Some("a_hdr.png".into()),
+            sdr: Some("a_sdr.png".into()),
+            ..Default::default()
+        };
+        assert!(written.complete());
+        let partly = Outputs {
+            hdr: Some("a_hdr.png".into()),
+            skipped: vec!["a_sdr.png".into()],
+            ..Default::default()
+        };
+        assert!(!partly.complete());
+        assert!(!Outputs::default().complete());
+    }
 
     #[test]
     fn output_paths_next_to_input() {

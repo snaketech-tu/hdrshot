@@ -113,6 +113,9 @@ struct App {
     progress: (usize, usize),
     /// Files in the running (or last) batch whose PNGs all existed already.
     skipped: usize,
+    /// Originals of the running (or last) batch moved to the Recycle Bin,
+    /// and why others couldn't be.
+    trashed: (usize, Vec<String>),
     notice: Option<String>,
     clipboard: SharedClipboard,
     toast: Option<Toast>,
@@ -196,6 +199,7 @@ impl App {
             job: None,
             progress: (0, 0),
             skipped: 0,
+            trashed: (0, Vec::new()),
             notice: None,
             clipboard: SharedClipboard::default(),
             toast: None,

@@ -175,6 +175,19 @@ impl App {
                      (the HDR one if made), ready to paste into Discord, a browser or a folder",
                 );
                 ui.end_row();
+
+                theme::row_label(ui, "Originals");
+                ui.checkbox(
+                    &mut self.settings.trash_originals,
+                    format!("Move to the {RECYCLE_BIN} after converting"),
+                )
+                .on_hover_text(format!(
+                    "Once all of an image's files are saved, move the original to the \
+                     {RECYCLE_BIN}, where it can be restored. Images that fail, or whose \
+                     files already existed, are kept, and so is everything when you stop \
+                     the batch."
+                ));
+                ui.end_row();
             });
     }
 
@@ -313,6 +326,8 @@ pub(crate) struct Settings {
     pub(crate) type_suffix: bool,
     /// Write HDR PNGs without `cICP`, so Discord shows them correctly.
     pub(crate) discord_png: bool,
+    /// Move each original to the Recycle Bin once its outputs are written.
+    pub(crate) trash_originals: bool,
 }
 
 impl Settings {
@@ -346,6 +361,7 @@ impl Default for Settings {
             subfolders: false,
             type_suffix: true,
             discord_png: false,
+            trash_originals: false,
         }
     }
 }

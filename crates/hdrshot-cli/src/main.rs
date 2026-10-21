@@ -112,6 +112,12 @@ struct Args {
     #[arg(long, value_name = "PIXELS")]
     max_height: Option<u32>,
 
+    /// Move each input to the Recycle Bin (Trash on macOS and Linux) once
+    /// all of its outputs are written. Inputs that failed, or whose outputs
+    /// already existed, are kept.
+    #[arg(long)]
+    trash_originals: bool,
+
     /// Replace output files that already exist. By default they are skipped.
     #[arg(long)]
     overwrite: bool,
@@ -372,7 +378,22 @@ fn main() -> ExitCode {
             }
         }
     }
-    if failed > 0 || missing || copy_failed {
+    // After the copy, which may still read the last input.
+    let mut trash_failed = false;
+    if args.trash_originals {
+        for (input, outputs) in files.iter().zip(&results) {
+            if outputs.as_ref().is_some_and(Outputs::complete)
+                && let Err(e) = trash::delete(input)
+            {
+                eprintln!(
+                    "{}: could not move to the Recycle Bin: {e}",
+                    input.display()
+                );
+                trash_failed = true;
+            }
+        }
+    }
+    if failed > 0 || missing || copy_failed || trash_failed {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
