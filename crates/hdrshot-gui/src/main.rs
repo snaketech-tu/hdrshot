@@ -326,6 +326,13 @@ struct Toast {
 
 const TOAST_SECONDS: f64 = 3.0;
 
+/// Tooltip for the Copy for Discord buttons; the README's "Sharing on
+/// Discord" section has the details.
+const DISCORD_COPY_HINT: &str = "Copy the image (the HDR one if made) as a PNG that Discord shows \
+     correctly.\nDiscord turns HDR PNGs with a cICP chunk yellow, shows AVIF too bright and \
+     Ultra HDR JPEGs in SDR, so the copy is an HDR PNG without that chunk.\nYour saved files \
+     are unchanged.";
+
 /// Height kept for the title, drop area and a few rows of the file list
 /// when the Advanced settings are open.
 const MIN_LIST_AREA: f32 = 220.0;
@@ -1286,10 +1293,7 @@ impl App {
                         if let Some(outputs) = outputs
                             && ui
                                 .small_button("Copy for Discord")
-                                .on_hover_text(
-                                    "Copy the image (the HDR one if made) as a PNG that Discord \
-                                     shows correctly",
-                                )
+                                .on_hover_text(DISCORD_COPY_HINT)
                                 .clicked()
                         {
                             action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
@@ -1912,7 +1916,10 @@ fn row_menu(ui: &mut egui::Ui, i: usize, entry: &Entry, running: bool) -> Option
         action = sdr.clone().map(RowAction::Open);
     }
     if let Some(outputs) = outputs
-        && ui.button("Copy for Discord").clicked()
+        && ui
+            .button("Copy for Discord")
+            .on_hover_text(DISCORD_COPY_HINT)
+            .clicked()
     {
         action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
     }
