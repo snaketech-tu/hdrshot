@@ -8,6 +8,7 @@
 //! input type and what hdrshot itself writes into the folder.
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{RecvTimeoutError, channel};
@@ -39,6 +40,13 @@ pub fn watch_folder(
     let (tx, rx) = channel();
     let mut watcher = notify::recommended_watcher(tx)?;
     watcher.watch(dir, RecursiveMode::NonRecursive)?;
+    // The folder's files from before watching started. macOS can report a
+    // change to one of them as a creation, so they are told apart by name
+    // (event paths may spell the folder differently, e.g. /private/var)
+    // until they are deleted or renamed away.
+    let mut existing: HashSet<OsString> = std::fs::read_dir(dir)?
+        .filter_map(|entry| Some(entry.ok()?.file_name()))
+        .collect();
     thread::spawn(move || {
         let mut pending: HashMap<PathBuf, Pending> = HashMap::new();
         let mut reported: HashSet<PathBuf> = HashSet::new();
@@ -50,6 +58,14 @@ pub fn watch_folder(
                         EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))
                     );
                     for path in event.paths {
+                        if let Some(name) = path.file_name()
+                            && existing.contains(name)
+                        {
+                            if !path.exists() {
+                                existing.remove(name);
+                            }
+                            continue;
+                        }
                         if !is_watched(&path) || reported.contains(&path) {
                             continue;
                         }
@@ -152,6 +168,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("hdrshot-watch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        // Event paths are canonical on macOS (/private/var/...).
+        let dir = dir.canonicalize().unwrap();
         std::fs::write(dir.join("old.jxr"), b"existing").unwrap();
         let found = Arc::new(Mutex::new(Vec::new()));
         let sink = found.clone();
