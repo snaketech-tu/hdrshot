@@ -231,6 +231,28 @@ Windows, create the PowerShell completion script with
 `hdrshot --generate powershell > _hdrshot.ps1`, then add
 `. path\to\_hdrshot.ps1` to your PowerShell profile to load it.
 
+## Sharing on Discord
+
+Discord does not show every HDR file the way an HDR viewer does, so the
+**Copy for Discord** button and `--copy` do not always copy the saved file
+unchanged. The saved files are never modified.
+
+| Saved HDR format | What Discord does with it | What gets copied |
+| --- | --- | --- |
+| PNG | Its image service converts PNGs that carry a `cICP` chunk to SDR with swapped colors, so warm scenes turn yellow. Without the chunk, it shows the image in HDR. | The same PNG without the `cICP` and `mDCV` chunks. The ICC profile, which also marks the image as BT.2020 PQ, stays and is kept under 32 KB, since Discord drops larger profiles. |
+| AVIF | Ignores the PQ transfer, so the image looks far too bright. | An HDR PNG made for Discord during conversion and kept in a temporary folder. |
+| Ultra HDR JPEG | Drops the gain map and shows only the SDR base image. | The same HDR PNG made for Discord. |
+
+The saved PNG keeps `cICP` because Windows Photos and most HDR image viewers
+need it to show the image in HDR; an ICC profile alone makes them show SDR.
+`mDCV` is left out of the copy because the PNG specification only allows it
+together with `cICP`.
+
+HDR in Discord works in the desktop app and in Chromium-based browsers on an
+HDR display. The mobile apps do not reliably show HDR images, at least in
+the inline preview. Discord's upload limit for free accounts is 10 MB, so the
+app offers a smaller copy when the PNG is larger.
+
 ## How it works
 
 Windows HDR screenshots store linear scRGB: BT.709 primaries, where 1.0 is
@@ -276,13 +298,7 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   layout: an XMP container directory and an MPF index in the base image,
   and the gain map's parameters as both Adobe `hdrgm` XMP and ISO 21496-1
   metadata. A 3440×1440 capture becomes about 2 MB.
-- **Discord**: its image service converts PNGs with a `cICP` chunk to SDR
-  with wrong colors (warm scenes turn yellow) but shows them correctly
-  without it, so the clipboard copy leaves the chunk out (and `mDCV`,
-  which the PNG spec only allows together with `cICP`). It ignores the
-  PQ transfer of AVIF files, so they look too bright, and drops the gain
-  map of Ultra HDR JPEGs, so they show in SDR; copies of those outputs are
-  therefore made as HDR PNGs.
+- **Discord**: see [Sharing on Discord](#sharing-on-discord).
 - **SDR**: scRGB 1.0 (80 nits) becomes SDR white by default, matching how
   Windows shows these screenshots in SDR viewers. Highlights above that roll
   off smoothly up to the image's 99.9th percentile brightness. The curve is
