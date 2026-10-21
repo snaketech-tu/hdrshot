@@ -33,6 +33,9 @@ the screenshot looks.
   viewers.
 - **HDR AVIF.** Optionally the same HDR picture as a 10-bit AVIF, about a
   twentieth of the PNG's size, shown in HDR by Chrome, Edge and Firefox.
+- **Ultra HDR JPEG.** Or as a JPEG with a gain map: every app shows the
+  SDR picture, and Chrome, Edge, Android and Instagram brighten it to HDR.
+  The safest choice for sharing.
 - **SDR PNG.** Tone-mapped the way Windows shows the
   screenshot on an SDR screen, with highlights that roll off smoothly and
   colors that keep their hue.
@@ -96,8 +99,9 @@ install -Dm644 jxr2png.png -t ~/.local/share/icons/hicolor/256x256/apps
    too. Files opened while the app is running, for example several
    screenshots picked with **Open with**, go to the window that is already
    open.
-2. Choose **HDR + SDR**, **HDR only** or **SDR only**, and whether to save
-   next to each image or into one folder.
+2. Choose **HDR + SDR**, **HDR only** or **SDR only**, the HDR format
+   (**PNG**, **AVIF** or **Ultra HDR JPEG**), and whether to save next to
+   each image or into one folder.
 3. Press **Convert**.
 
 <details>
@@ -182,7 +186,7 @@ Everything is automatic; these options are only for tuning:
 | `--hdr` / `--sdr` | Make only the HDR or only the SDR PNG |
 | `-r, --recursive` | Also convert files in subfolders of the given folders |
 | `-o, --output <DIR>` | Save into this folder instead of next to each input |
-| `--format <png\|avif>` | File format of the HDR output (default `png`) |
+| `--format <png\|avif\|ultrahdr>` | File format of the HDR output (default `png`) |
 | `--avif-quality <1-100>` | AVIF quality (default 90); lower is smaller |
 | `--avif-speed <0-10>` | AVIF encoder speed (default 8); 10 is faster but larger |
 | `--avif-420` | Store AVIF color at half resolution: smaller, softer colored edges |
@@ -244,6 +248,15 @@ Rust JPEG XR decoder, so no C toolchain is needed.
   carries the matching `nclx` color box and `clli`/`mdcv` light levels.
   A 3440×1440 capture becomes about 450 KB instead of 11 MB. Encoding takes
   a few seconds per image.
+- **Ultra HDR JPEG**: the base image is the SDR PNG's picture as a
+  quality-95 4:4:4 JPEG. The gain map is a full-resolution grayscale JPEG
+  holding, for each pixel, log2 of HDR over SDR brightness (relative to SDR
+  white). Because the SDR tone map scales a pixel's three channels
+  together, one channel restores the HDR picture exactly, apart from
+  rounding and colors outside sRGB. The file follows the Ultra HDR 1.1
+  layout: an XMP container directory and an MPF index in the base image,
+  and the gain map's parameters as both Adobe `hdrgm` XMP and ISO 21496-1
+  metadata. A 3440×1440 capture becomes about 2 MB.
 - **Discord**: its image service converts PNGs with a `cICP` chunk to SDR
   with wrong colors (warm scenes turn yellow) but shows them correctly
   without it, so the clipboard copy leaves the chunk out (and `mDCV`,

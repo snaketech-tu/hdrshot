@@ -17,7 +17,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
 use jxr2png_core::{
-    ConvertOptions, Existing, HdrOptions, InputOptions, Naming, OutputMode, Outputs, SdrOptions,
+    ConvertOptions, Existing, HdrFormat, HdrOptions, InputOptions, Naming, OutputMode, Outputs,
+    SdrOptions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -53,7 +54,7 @@ fn main() {
         None => None,
     };
     let viewport = egui::ViewportBuilder::default()
-        .with_title("jxr2png")
+        .with_title(format!("jxr2png {}", env!("CARGO_PKG_VERSION")))
         .with_app_id("jxr2png")
         .with_inner_size([560.0, 760.0])
         .with_min_inner_size([420.0, 480.0])
@@ -92,6 +93,7 @@ fn icon() -> egui::IconData {
 #[serde(default)]
 struct Settings {
     mode: Mode,
+    hdr_format: Format,
     save_to_folder: bool,
     output_dir: Option<PathBuf>,
     copy_to_clipboard: bool,
@@ -125,6 +127,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             mode: Mode::Both,
+            hdr_format: Format::Png,
             save_to_folder: false,
             output_dir: None,
             copy_to_clipboard: true,
@@ -148,6 +151,24 @@ impl From<Mode> for OutputMode {
             Mode::Hdr => Self::Hdr,
             Mode::Sdr => Self::Sdr,
             Mode::Both => Self::Both,
+        }
+    }
+}
+
+/// File format of the HDR output.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+enum Format {
+    Png,
+    Avif,
+    UltraHdr,
+}
+
+impl From<Format> for HdrFormat {
+    fn from(format: Format) -> Self {
+        match format {
+            Format::Png => Self::Png,
+            Format::Avif => Self::Avif,
+            Format::UltraHdr => Self::UltraHdr,
         }
     }
 }
@@ -429,6 +450,7 @@ impl App {
             },
             naming: self.settings.naming(),
             hdr: HdrOptions {
+                format: self.settings.hdr_format.into(),
                 peak_nits: t.limit_hdr_peak.then_some(t.hdr_peak),
                 ..Default::default()
             },
@@ -597,9 +619,9 @@ impl App {
             } else if self.skipped > 0 {
                 let (n, s) = (self.skipped, if self.skipped == 1 { "" } else { "s" });
                 self.notice = Some(if n == self.progress.1 {
-                    format!("Skipped {n} file{s}: the PNGs already exist.")
+                    format!("Skipped {n} file{s}: the files already exist.")
                 } else {
-                    format!("Skipped {n} file{s} whose PNGs already exist.")
+                    format!("Skipped {n} file{s} whose files already exist.")
                 });
             }
         } else {
@@ -621,10 +643,10 @@ impl App {
                     let name = asking.existing[0].file_name().unwrap_or_default();
                     format!("{} already exists", name.to_string_lossy())
                 } else {
-                    format!("{count} PNGs already exist")
+                    format!("{count} files already exist")
                 };
                 ui.label(RichText::new(title).strong().size(15.0));
-                ui.label("What should happen to the PNGs that are already there?");
+                ui.label("What should happen to the files that are already there?");
                 if count > 1 {
                     let names: Vec<String> = asking
                         .existing
@@ -637,21 +659,21 @@ impl App {
                 ui.horizontal(|ui| {
                     if ui
                         .button("Replace")
-                        .on_hover_text("Overwrite them with the new PNGs")
+                        .on_hover_text("Overwrite them with the new files")
                         .clicked()
                     {
                         choice = Some(Existing::Replace);
                     }
                     if ui
                         .button("Keep both")
-                        .on_hover_text("Save the new PNGs with a number, e.g. shot_hdr (2).png")
+                        .on_hover_text("Save the new files with a number, e.g. shot_hdr (2).png")
                         .clicked()
                     {
                         choice = Some(Existing::KeepBoth);
                     }
                     if ui
                         .button("Skip")
-                        .on_hover_text("Leave them alone and only make the PNGs that are missing")
+                        .on_hover_text("Leave them alone and only make the files that are missing")
                         .clicked()
                     {
                         choice = Some(Existing::Skip);
@@ -1240,7 +1262,7 @@ impl App {
                             && ui
                                 .small_button("Copy for Discord")
                                 .on_hover_text(
-                                    "Copy the PNG (the HDR one if made) to paste into Discord. \
+                                    "Copy the image (the HDR one if made) to paste into Discord. \
                                      The copy leaves out the cICP chunk, which Discord turns yellow.",
                                 )
                                 .clicked()
@@ -1312,13 +1334,34 @@ impl App {
                 ui.horizontal(|ui| {
                     let mode = &mut self.settings.mode;
                     ui.selectable_value(mode, Mode::Both, "HDR + SDR")
-                        .on_hover_text("An HDR PNG and a tone-mapped SDR PNG for each image");
+                        .on_hover_text("An HDR image and a tone-mapped SDR PNG for each image");
                     ui.selectable_value(mode, Mode::Hdr, "HDR only")
-                        .on_hover_text(
-                            "16-bit HDR PNG, shown in HDR by Windows Photos, Chrome and Edge",
-                        );
+                        .on_hover_text("Only the HDR image, in the format chosen below");
                     ui.selectable_value(mode, Mode::Sdr, "SDR only")
                         .on_hover_text("Tone-mapped 8-bit PNG that looks right everywhere");
+                });
+                ui.end_row();
+
+                ui.label("HDR format");
+                ui.add_enabled_ui(self.settings.mode != Mode::Sdr, |ui| {
+                    ui.horizontal(|ui| {
+                        let format = &mut self.settings.hdr_format;
+                        ui.selectable_value(format, Format::Png, "PNG")
+                            .on_hover_text(
+                                "16-bit lossless PNG, shown in HDR by Windows Photos, Chrome \
+                             and Edge. The largest files.",
+                            );
+                        ui.selectable_value(format, Format::Avif, "AVIF")
+                            .on_hover_text(
+                                "10-bit AVIF, about a twentieth of the PNG's size, shown in HDR \
+                             by Chrome, Edge and Firefox. Takes a few seconds per image.",
+                            );
+                        ui.selectable_value(format, Format::UltraHdr, "Ultra HDR JPEG")
+                            .on_hover_text(
+                                "A JPEG that every app shows in SDR and that Chrome, Edge, \
+                                 Android and Instagram show in HDR. Best for sharing.",
+                            );
+                    });
                 });
                 ui.end_row();
 
@@ -1336,7 +1379,7 @@ impl App {
                             .add(egui::Button::new(label).truncate())
                             .on_hover_text("Choose the folder to save into");
                         if button.clicked() {
-                            let mut dialog = rfd::FileDialog::new().set_title("Save PNGs to");
+                            let mut dialog = rfd::FileDialog::new().set_title("Save images to");
                             if let Some(dir) = &s.output_dir {
                                 dialog = dialog.set_directory(dir);
                             }
@@ -1380,7 +1423,7 @@ impl App {
                     "Copy the last converted image",
                 )
                 .on_hover_text(
-                    "After converting, copy the last PNG to the clipboard as a file \
+                    "After converting, copy the last image to the clipboard as a file \
                      (the HDR one if made), ready to paste into Discord, a browser or a folder",
                 );
                 ui.end_row();
@@ -1413,7 +1456,7 @@ impl App {
                          by date stay in capture order",
             );
         let s = &mut self.settings;
-        ui.checkbox(&mut s.subfolders, "Save HDR and SDR PNGs in subfolders")
+        ui.checkbox(&mut s.subfolders, "Save HDR and SDR images in subfolders")
             .on_hover_text("Put them in folders named hdr and sdr");
         let needed = s.suffix_needed();
         let mut suffix = s.type_suffix || needed;
@@ -1436,8 +1479,8 @@ impl App {
     fn tuning_ui(&mut self, ui: &mut egui::Ui) {
         ui.label(
             RichText::new(
-                "Not needed normally: by default the PNGs match the original \
-                 screenshot. Use these only to fine-tune the result.",
+                "Not needed normally: by default the results match the original \
+                 image. Use these only to fine-tune the result.",
             )
             .weak(),
         );
@@ -1456,7 +1499,7 @@ impl App {
                 ui.add_enabled_ui(mode != Mode::Sdr, |ui| {
                     ui.checkbox(&mut t.limit_hdr_peak, "Limit HDR peak")
                         .on_hover_text(
-                            "Roll off highlights brighter than this in the HDR PNG. \
+                            "Roll off highlights brighter than this in the HDR image. \
                              Off keeps the original brightness.",
                         );
                 });
@@ -1645,7 +1688,7 @@ impl window::App for App {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading(RichText::new("jxr2png").strong());
-                    ui.label(RichText::new("HDR screenshots to PNG").weak());
+                    ui.label(RichText::new("Convert HDR images").weak());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         self.default_app_ui(ui);
                     });
@@ -1769,7 +1812,7 @@ fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) -> bool {
                 }
                 None => show(ui, &shown.auto),
             }
-            ui.weak("SDR preview; the HDR PNG keeps the full brightness.");
+            ui.weak("SDR preview; the HDR image keeps the full brightness.");
         });
     }
     hovered
@@ -1791,7 +1834,7 @@ fn row_menu(ui: &mut egui::Ui, i: usize, entry: &Entry, running: bool) -> Option
     let hdr = outputs.and_then(|o| o.hdr.clone());
     let sdr = outputs.and_then(|o| o.sdr.clone());
     if ui
-        .add_enabled(hdr.is_some(), egui::Button::new("Open HDR PNG"))
+        .add_enabled(hdr.is_some(), egui::Button::new("Open HDR image"))
         .clicked()
     {
         action = hdr.clone().map(RowAction::Open);

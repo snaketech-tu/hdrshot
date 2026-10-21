@@ -10,6 +10,7 @@ repository.workspace = true
 avif-serialize = "0.8"
 exr = "1.74"
 image = { version = "0.25", default-features = false, features = ["hdr"] }
+jpeg-encoder = "0.7"
 jxl-oxide = { version = "0.12", features = ["moxcms"] }
 jxr = "=0.2.1"
 png = "0.18"

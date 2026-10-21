@@ -186,15 +186,25 @@ impl HdrTransform {
 
     /// One pixel in BT.2020 nits.
     pub fn nits(&self, p: [f32; 3]) -> [f32; 3] {
-        let mut rgb = Self::to_nits(p);
-        let brightest = rgb.into_iter().fold(0.0, f32::max);
-        if let Some((peak, curve)) = &self.roll_off
-            && brightest > 0.0
-        {
-            let scale = curve.apply(brightest / peak) * peak / brightest;
-            rgb = rgb.map(|c| c * scale);
+        let rgb = Self::to_nits(p);
+        let scale = self.scale_for(rgb);
+        rgb.map(|c| c * scale)
+    }
+
+    /// The factor the roll-off scales the scRGB pixel `p` by: 1 below the
+    /// roll-off or without one.
+    pub fn scale(&self, p: [f32; 3]) -> f32 {
+        self.scale_for(Self::to_nits(p))
+    }
+
+    fn scale_for(&self, nits: [f32; 3]) -> f32 {
+        let brightest = nits.into_iter().fold(0.0, f32::max);
+        match &self.roll_off {
+            Some((peak, curve)) if brightest > 0.0 => {
+                curve.apply(brightest / peak) * peak / brightest
+            }
+            _ => 1.0,
         }
-        rgb
     }
 
     /// Metadata for the output, from each output pixel's brightest channel.
@@ -244,7 +254,7 @@ fn quantize_pq(signal: f32) -> u16 {
 }
 
 /// Brightness that maps to SDR maximum.
-fn sdr_peak_nits(levels: &LightLevels, options: &SdrOptions) -> f32 {
+pub(crate) fn sdr_peak_nits(levels: &LightLevels, options: &SdrOptions) -> f32 {
     options
         .peak_nits
         .unwrap_or(levels.p999)

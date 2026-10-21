@@ -20,12 +20,14 @@ pub mod icc;
 pub mod input;
 pub mod resize;
 pub mod share;
+pub mod ultrahdr;
 
 pub use avif::{AvifOptions, write_hdr_avif};
 use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode, dimensions};
 pub use encode::{LightLevels, for_discord, light_levels, sdr_rgb8, write_hdr_png, write_sdr_png};
 pub use input::{InputFormat, InputOptions, is_supported};
+pub use ultrahdr::write_ultra_hdr;
 
 /// Which PNG files to produce for each input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -52,8 +54,11 @@ pub enum HdrFormat {
     /// 16-bit PNG, lossless; shown in HDR by Windows Photos and browsers.
     #[default]
     Png,
-    /// 10-bit AVIF, about a tenth of the PNG's size.
+    /// 10-bit AVIF, about a twentieth of the PNG's size.
     Avif,
+    /// SDR JPEG with a gain map (Ultra HDR): SDR in every viewer, HDR in
+    /// those that read gain maps.
+    UltraHdr,
 }
 
 impl HdrFormat {
@@ -62,6 +67,7 @@ impl HdrFormat {
         match self {
             Self::Png => "png",
             Self::Avif => "avif",
+            Self::UltraHdr => "jpg",
         }
     }
 }
@@ -203,6 +209,8 @@ pub enum Error {
     Encode(#[from] png::EncodingError),
     #[error("could not write AVIF: {0}")]
     EncodeAvif(String),
+    #[error("could not write Ultra HDR JPEG: {0}")]
+    EncodeUltraHdr(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -423,6 +431,7 @@ pub fn convert_file(input: &Path, options: &ConvertOptions) -> Result<Outputs> {
         write_file(path, modified, |w| match options.hdr.format {
             HdrFormat::Png => write_hdr_png(&image, &levels, &options.hdr, &options.sdr, w),
             HdrFormat::Avif => write_hdr_avif(&image, &options.hdr, &options.hdr.avif, w),
+            HdrFormat::UltraHdr => write_ultra_hdr(&image, &levels, &options.hdr, &options.sdr, w),
         })?;
     }
     if let Some(path) = &outputs.sdr {

@@ -17,6 +17,12 @@
 - `--format avif` writes the HDR output as a 10-bit BT.2020 PQ AVIF with
   `clli` and `mdcv` light levels, about a twentieth of the PNG's size.
   `--avif-quality`, `--avif-speed` and `--avif-420` tune it.
+- `--format ultrahdr` writes an Ultra HDR JPEG: an SDR JPEG, the same
+  picture as the SDR PNG, with a gain map that Chrome, Edge, Android and
+  Instagram use to show it in HDR. It carries both Adobe gain map XMP and
+  ISO 21496-1 metadata.
+- The desktop app has an **HDR format** choice (PNG, AVIF or Ultra HDR
+  JPEG), and its window title shows the version.
 
 ### Fixed
 

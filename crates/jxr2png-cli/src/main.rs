@@ -33,8 +33,9 @@ struct Args {
     #[arg(long)]
     sdr: bool,
 
-    /// File format of the HDR output: png (16-bit, lossless) or avif
-    /// (10-bit, about a tenth of the size).
+    /// File format of the HDR output: png (16-bit, lossless), avif (10-bit,
+    /// about a twentieth of the size) or ultrahdr (a JPEG that is SDR in
+    /// every viewer and HDR in those that read gain maps).
     #[arg(long, value_enum, default_value_t = Format::Png)]
     format: Format,
 
@@ -136,6 +137,8 @@ const GENERATE: &str = "--generate";
 enum Format {
     Png,
     Avif,
+    #[value(name = "ultrahdr")]
+    UltraHdr,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -216,6 +219,7 @@ fn main() -> ExitCode {
             format: match args.format {
                 Format::Png => HdrFormat::Png,
                 Format::Avif => HdrFormat::Avif,
+                Format::UltraHdr => HdrFormat::UltraHdr,
             },
             avif: AvifOptions {
                 quality: args.avif_quality,
