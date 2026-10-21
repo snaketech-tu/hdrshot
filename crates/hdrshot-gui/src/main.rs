@@ -24,7 +24,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Vec2};
 use hdrshot_core::{
     ConvertOptions, Existing, HdrFormat, HdrOptions, InputOptions, Naming, OutputMode, Outputs,
-    SdrOptions,
+    SdrFormat, SdrOptions,
 };
 use serde::{Deserialize, Serialize};
 

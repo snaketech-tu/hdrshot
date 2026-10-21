@@ -26,6 +26,7 @@ impl App {
                 white_nits: t.sdr_white,
                 peak_nits: t.fixed_sdr_peak.then_some(t.sdr_peak),
             },
+            sdr_format: self.settings.sdr_format.into(),
             max_height: self.max_height,
             existing,
             keep_date: self.settings.keep_date,

@@ -22,7 +22,7 @@ impl App {
                         (
                             Mode::Both,
                             "HDR + SDR",
-                            "An HDR image and a tone-mapped SDR PNG for each image",
+                            "An HDR image and a tone-mapped SDR image for each image",
                         ),
                         (
                             Mode::Hdr,
@@ -32,7 +32,7 @@ impl App {
                         (
                             Mode::Sdr,
                             "SDR only",
-                            "Tone-mapped 8-bit PNG that looks right everywhere",
+                            "Tone-mapped 8-bit image that looks right everywhere",
                         ),
                     ],
                 );
@@ -87,6 +87,28 @@ impl App {
                          so they show these PNGs in SDR only. Leave this off unless you \
                          upload the saved files to Discord yourself: Copy for Discord \
                          already copies a Discord-compatible version.",
+                    );
+                });
+                ui.end_row();
+
+                theme::row_label(ui, "SDR format");
+                ui.add_enabled_ui(self.settings.mode != Mode::Hdr, |ui| {
+                    theme::segmented(
+                        ui,
+                        &mut self.settings.sdr_format,
+                        &[
+                            (
+                                SdrKind::Png,
+                                "PNG",
+                                "8-bit lossless PNG, the exact tone-mapped picture",
+                            ),
+                            (
+                                SdrKind::Jpeg,
+                                "JPEG",
+                                "JPEG at quality 90, a fraction of the PNG's size, for chats \
+                                 and forums that don't show HDR. Transparency is lost.",
+                            ),
+                        ],
                     );
                 });
                 ui.end_row();
@@ -238,7 +260,7 @@ impl App {
                 ui.end_row();
 
                 ui.label("SDR white").on_hover_text(
-                    "HDR brightness that becomes white in the SDR PNG. \
+                    "HDR brightness that becomes white in the SDR image. \
                      Lower makes the SDR picture brighter.",
                 );
                 ui.horizontal(|ui| {
@@ -279,6 +301,7 @@ impl App {
 pub(crate) struct Settings {
     pub(crate) mode: Mode,
     pub(crate) hdr_format: Format,
+    pub(crate) sdr_format: SdrKind,
     pub(crate) save_to_folder: bool,
     pub(crate) output_dir: Option<PathBuf>,
     pub(crate) copy_to_clipboard: bool,
@@ -315,6 +338,7 @@ impl Default for Settings {
         Self {
             mode: Mode::Both,
             hdr_format: Format::Png,
+            sdr_format: SdrKind::Png,
             save_to_folder: false,
             output_dir: None,
             copy_to_clipboard: true,
@@ -357,6 +381,24 @@ impl From<Format> for HdrFormat {
             Format::Png => Self::Png,
             Format::Avif => Self::Avif,
             Format::UltraHdr => Self::UltraHdr,
+        }
+    }
+}
+
+/// File format of the SDR output.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum SdrKind {
+    Png,
+    Jpeg,
+}
+
+impl From<SdrKind> for SdrFormat {
+    fn from(kind: SdrKind) -> Self {
+        match kind {
+            SdrKind::Png => Self::Png,
+            SdrKind::Jpeg => Self::Jpeg {
+                quality: Self::DEFAULT_JPEG_QUALITY,
+            },
         }
     }
 }

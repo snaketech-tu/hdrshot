@@ -5,7 +5,7 @@
 //! - **HDR**: 16-bit PNG in Rec.2020 primaries with the PQ (SMPTE ST 2084)
 //!   transfer function, tagged with a `cICP` chunk and an ICC profile
 //!   `cicp` tag so HDR-aware viewers display it in HDR.
-//! - **SDR**: tone-mapped 8-bit sRGB PNG.
+//! - **SDR**: tone-mapped 8-bit sRGB PNG, or JPEG ([`SdrFormat`]).
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -28,7 +28,9 @@ pub mod ultrahdr;
 pub use avif::{AvifOptions, write_hdr_avif};
 use color::SCRGB_WHITE_NITS;
 pub use decode::{ScRgbImage, decode, dimensions};
-pub use encode::{LightLevels, for_discord, light_levels, sdr_rgb8, write_hdr_png, write_sdr_png};
+pub use encode::{
+    LightLevels, for_discord, light_levels, sdr_rgb8, write_hdr_png, write_sdr_jpeg, write_sdr_png,
+};
 pub use input::{InputFormat, InputOptions, is_supported};
 pub use ultrahdr::write_ultra_hdr;
 
@@ -114,6 +116,30 @@ impl Default for SdrOptions {
     }
 }
 
+/// File format of the SDR output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SdrFormat {
+    /// 8-bit PNG, lossless.
+    #[default]
+    Png,
+    /// Baseline JPEG of the given quality (1 to 100), a fraction of the
+    /// PNG's size. Transparency is lost.
+    Jpeg { quality: u8 },
+}
+
+impl SdrFormat {
+    /// The JPEG quality used unless another is chosen.
+    pub const DEFAULT_JPEG_QUALITY: u8 = 90;
+
+    /// File extension, without the dot.
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg { .. } => "jpg",
+        }
+    }
+}
+
 /// What to do when an output file already exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Existing {
@@ -174,6 +200,7 @@ pub struct ConvertOptions {
     pub naming: Naming,
     pub hdr: HdrOptions,
     pub sdr: SdrOptions,
+    pub sdr_format: SdrFormat,
     /// Scale images taller than this down to this height, keeping the
     /// aspect ratio. `None` (the default) keeps the source resolution.
     pub max_height: Option<u32>,
@@ -192,6 +219,7 @@ impl Default for ConvertOptions {
             naming: Naming::default(),
             hdr: HdrOptions::default(),
             sdr: SdrOptions::default(),
+            sdr_format: SdrFormat::default(),
             max_height: None,
             existing: Existing::default(),
             keep_date: true,
@@ -219,6 +247,8 @@ pub enum Error {
     EncodeAvif(String),
     #[error("could not write Ultra HDR JPEG: {0}")]
     EncodeUltraHdr(String),
+    #[error("could not write JPEG: {0}")]
+    EncodeJpeg(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -299,7 +329,10 @@ pub fn output_paths(input: &Path, options: &ConvertOptions) -> Outputs {
             .mode
             .hdr()
             .then(|| path("hdr", options.hdr.format.extension())),
-        sdr: options.mode.sdr().then(|| path("sdr", "png")),
+        sdr: options
+            .mode
+            .sdr()
+            .then(|| path("sdr", options.sdr_format.extension())),
         ..Outputs::default()
     }
 }
@@ -554,8 +587,11 @@ fn convert(
         })?;
     }
     if let Some(path) = &outputs.sdr {
-        write_file(path, modified, |w| {
-            write_sdr_png(&image, &levels, &options.sdr, w)
+        write_file(path, modified, |w| match options.sdr_format {
+            SdrFormat::Png => write_sdr_png(&image, &levels, &options.sdr, w),
+            SdrFormat::Jpeg { quality } => {
+                write_sdr_jpeg(&image, &levels, &options.sdr, quality, w)
+            }
         })?;
     }
     let discord = if discord_png && outputs.hdr.is_some() {

@@ -449,7 +449,7 @@ pub(crate) fn row_menu(
         action = hdr.clone().map(RowAction::Open);
     }
     if ui
-        .add_enabled(sdr.is_some(), egui::Button::new("Open SDR PNG"))
+        .add_enabled(sdr.is_some(), egui::Button::new("Open SDR image"))
         .clicked()
     {
         action = sdr.clone().map(RowAction::Open);
@@ -514,7 +514,7 @@ pub(crate) fn status_ui(ui: &mut egui::Ui, status: &Status) {
             };
             if outputs.sdr_input {
                 tooltip =
-                    format!("This is an SDR image, so only the SDR PNG was made.\n\n{tooltip}");
+                    format!("This is an SDR image, so only the SDR image was made.\n\n{tooltip}");
             }
             if saved.is_empty() {
                 theme::pill(ui, "Skipped", ui.visuals().weak_text_color()).on_hover_text(tooltip);

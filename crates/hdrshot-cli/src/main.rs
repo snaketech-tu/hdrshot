@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use clap::{CommandFactory, Parser};
 use hdrshot_core::{
     AvifOptions, ConvertOptions, Existing, HdrFormat, HdrOptions, InputOptions, Naming, OutputMode,
-    Outputs, SdrOptions,
+    Outputs, SdrFormat, SdrOptions,
 };
 use rayon::prelude::*;
 
@@ -30,7 +30,7 @@ struct Args {
     #[arg(long)]
     hdr: bool,
 
-    /// Write only the tone-mapped SDR PNG (8-bit sRGB).
+    /// Write only the tone-mapped SDR image (8-bit sRGB).
     #[arg(long)]
     sdr: bool,
 
@@ -55,6 +55,16 @@ struct Args {
     /// text and thin colored edges get softer.
     #[arg(long)]
     avif_420: bool,
+
+    /// File format of the SDR output: png (lossless) or jpeg (a fraction of
+    /// the size; transparency is lost).
+    #[arg(long, value_enum, default_value_t = SdrFileFormat::Png)]
+    sdr_format: SdrFileFormat,
+
+    /// JPEG quality of the SDR output from 1 to 100, with --sdr-format jpeg.
+    #[arg(long, value_name = "1-100", default_value_t = SdrFormat::DEFAULT_JPEG_QUALITY,
+          value_parser = clap::value_parser!(u8).range(1..=100))]
+    jpeg_quality: u8,
 
     /// Write HDR PNGs that Discord shows correctly, by leaving out their
     /// cICP and mDCV chunks. Windows Photos and most HDR viewers need cICP
@@ -149,6 +159,12 @@ enum Format {
     Avif,
     #[value(name = "ultrahdr")]
     UltraHdr,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum SdrFileFormat {
+    Png,
+    Jpeg,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -250,6 +266,12 @@ fn main() -> ExitCode {
         sdr: SdrOptions {
             white_nits: args.sdr_white,
             peak_nits: args.sdr_peak,
+        },
+        sdr_format: match args.sdr_format {
+            SdrFileFormat::Png => SdrFormat::Png,
+            SdrFileFormat::Jpeg => SdrFormat::Jpeg {
+                quality: args.jpeg_quality,
+            },
         },
         max_height: args.max_height,
         existing: if args.overwrite {
