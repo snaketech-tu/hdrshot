@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.1.0] - 2026-10-21
 
 ### Added
 
@@ -17,7 +17,6 @@
   whose files were all written are moved.
 - JPEG as the SDR format: the SDR format setting in the app and
   `--sdr-format jpeg` with `--jpeg-quality` (default 90).
-
 - Releases publish the crates to crates.io and update the winget packages
   from GitHub Actions. Manifests for winget (`SnakeTech.hdrshot`,
   `SnakeTech.hdrshot.CLI`) and a Scoop bucket are in `packaging/`.
