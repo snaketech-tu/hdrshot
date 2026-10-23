@@ -1,8 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod actions;
+mod adding;
 mod assoc;
 mod convert;
 mod files;
+mod icons;
 mod jobs;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -29,6 +32,7 @@ use hdrshot_core::{
 };
 use serde::{Deserialize, Serialize};
 
+use adding::drop_overlay;
 use convert::{Copied, Event, Job, SharedClipboard, TooBig};
 use files::*;
 use jobs::*;
@@ -79,7 +83,7 @@ fn main() {
     let viewport = egui::ViewportBuilder::default()
         .with_title(format!("hdrshot {}", env!("CARGO_PKG_VERSION")))
         .with_app_id("hdrshot")
-        .with_inner_size([560.0, 820.0])
+        .with_inner_size([560.0, 640.0])
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());
@@ -120,13 +124,14 @@ struct App {
     max_height: Option<u32>,
     files: Vec<Entry>,
     job: Option<Job>,
-    /// Files finished in the running (or last) batch, and its size.
-    progress: (usize, usize),
-    /// Files in the running (or last) batch whose PNGs all existed already.
-    skipped: usize,
-    /// Originals of the running (or last) batch moved to the Recycle Bin,
-    /// and why others couldn't be.
-    trashed: (usize, Vec<String>),
+    /// The running batch, or the last one.
+    batch: Batch,
+    /// Whether the banner summing up the last batch shows.
+    banner: bool,
+    /// The original converted last, whose row keeps its Copy for Discord
+    /// button.
+    last_converted: Option<PathBuf>,
+    /// A note about files just added, such as unsupported ones skipped.
     notice: Option<String>,
     clipboard: SharedClipboard,
     toast: Option<Toast>,
@@ -135,10 +140,8 @@ struct App {
     /// A copy over Discord's size limit, and whether a smaller one is
     /// being made.
     too_big: Option<(TooBig, bool)>,
-    /// Height of the bottom panel without the Advanced settings' scroll
-    /// area, and of that area, from the last frame.
-    bottom_rest: f32,
-    advanced_height: f32,
+    /// Whether the Settings page shows in place of the file list.
+    settings_open: bool,
     /// Whether hdrshot opens `.jxr` files; rechecked when the window
     /// regains focus, since the choice is made in the system's settings.
     is_default_app: bool,
@@ -159,6 +162,8 @@ struct App {
     /// The app icon, shown in the header.
     logo: egui::TextureHandle,
     watching: Option<Watching>,
+    /// Watching paused from the header, until resumed or hdrshot restarts.
+    watch_paused: bool,
     /// Images to convert right away: new ones from the watch folder and
     /// those from "Convert with hdrshot" in another launch.
     watched: (Sender<PathBuf>, Receiver<PathBuf>),
@@ -174,12 +179,6 @@ const DISCORD_COPY_HINT: &str = "Copy the image (the HDR one if made) as a PNG t
      correctly.\nDiscord turns HDR PNGs with a cICP chunk yellow, shows AVIF too bright and \
      Ultra HDR JPEGs in SDR, so the copy is an HDR PNG without that chunk.\nYour saved files \
      are unchanged.";
-
-/// Height kept for the title, drop area and a few rows of the file list
-/// when the Advanced settings are open.
-const MIN_LIST_AREA: f32 = 220.0;
-/// The Advanced settings never shrink below this; they scroll instead.
-const MIN_ADVANCED_HEIGHT: f32 = 120.0;
 
 const SETTINGS_KEY: &str = "settings";
 
@@ -220,16 +219,15 @@ impl App {
             max_height: None,
             files: Vec::new(),
             job: None,
-            progress: (0, 0),
-            skipped: 0,
-            trashed: (0, Vec::new()),
+            batch: Batch::default(),
+            banner: false,
+            last_converted: None,
             notice: None,
             clipboard: SharedClipboard::default(),
             toast: None,
             copied: channel(),
             too_big: None,
-            bottom_rest: 330.0,
-            advanced_height: 0.0,
+            settings_open: false,
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
             selected: None,
@@ -241,6 +239,7 @@ impl App {
             updates: channel(),
             logo,
             watching: None,
+            watch_paused: false,
             watched,
             waiting: Vec::new(),
             last_arrival: 0.0,
@@ -270,6 +269,7 @@ impl App {
         for files in batches {
             self.add_paths(files);
         }
+        self.settings_open = false;
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
@@ -278,16 +278,34 @@ impl App {
         self.job.is_some()
     }
 
-    fn default_app_ui(&mut self, ui: &mut egui::Ui) {
-        if !assoc::SUPPORTED {
-            return;
+    /// Makes hdrshot the app that opens `.jxr` files, or opens the
+    /// system's settings to finish that.
+    fn make_default_app(&mut self, ctx: &egui::Context) {
+        match assoc::make_default() {
+            Ok(assoc::Outcome::Done) => {
+                self.is_default_app = true;
+                self.show_toast("hdrshot now opens .jxr files".into(), ctx);
+            }
+            Ok(assoc::Outcome::Confirm) => {
+                self.show_toast("In Settings, choose hdrshot for .jxr to finish".into(), ctx)
+            }
+            Err(e) => self.show_toast(e, ctx),
         }
+    }
+
+    /// Whether hdrshot opens `.jxr` files, with a button to make it, on the
+    /// Settings page.
+    fn default_app_ui(&mut self, ui: &mut egui::Ui) {
         if self.is_default_app {
-            ui.weak("Opens .jxr files");
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+                icons::done(ui.painter(), rect.center(), 7.0, ok_color(ui));
+                ui.label("hdrshot opens .jxr files");
+            });
             return;
         }
         if ui
-            .small_button("Open .jxr files with hdrshot")
+            .button("Open .jxr files with hdrshot")
             .on_hover_text(if cfg!(windows) {
                 "Make hdrshot the app that opens .jxr files when you double-click them, \
                  list it under Open with for .wdp, .exr, .jxl and .hdr files, and add \
@@ -299,119 +317,25 @@ impl App {
             .clicked()
         {
             let ctx = ui.ctx().clone();
-            match assoc::make_default() {
-                Ok(assoc::Outcome::Done) => {
-                    self.is_default_app = true;
-                    self.show_toast("hdrshot now opens .jxr files".into(), &ctx);
-                }
-                Ok(assoc::Outcome::Confirm) => self.show_toast(
-                    "In Settings, choose hdrshot for .jxr to finish".into(),
-                    &ctx,
-                ),
-                Err(e) => self.show_toast(e, &ctx),
-            }
+            self.make_default_app(&ctx);
         }
     }
 
-    fn action_bar(&mut self, ui: &mut egui::Ui) {
-        let ctx = ui.ctx().clone();
-        let (done, total) = self.progress;
-        if self.running() {
-            ui.add(
-                egui::ProgressBar::new(done as f32 / total.max(1) as f32)
-                    .text(format!("Converting {} of {total}", (done + 1).min(total))),
-            );
-        } else if let Some(notice) = &self.notice {
-            ui.label(notice);
-        } else if total > 0 && done == total {
-            ui.label(format!(
-                "Converted {total} image{}.",
-                if total == 1 { "" } else { "s" }
-            ));
-        } else if let Some(watching) = &self.watching {
-            ui.weak(format!(
-                "Watching {} for new images.",
-                watching.dir.display()
-            ));
-        }
-
+    /// The app's icon and name, with the Settings button and, while the
+    /// watch folder is on, its pill.
+    fn header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if !self.running() {
-                let finished = self
-                    .files
-                    .iter()
-                    .any(|e| matches!(e.status, Status::Done(_)));
-                ui.add_enabled_ui(!self.files.is_empty(), |ui| {
-                    ui.menu_button("Clear", |ui| {
-                        if ui.button("All files").clicked() {
-                            self.files.clear();
-                            self.selected = None;
-                            self.progress = (0, 0);
-                            self.notice = None;
-                        }
-                        if ui
-                            .add_enabled(finished, egui::Button::new("Converted files"))
-                            .on_hover_text("Keep the files still waiting or failed")
-                            .clicked()
-                        {
-                            self.clear_finished();
-                        }
-                    })
-                    .response
-                    .on_hover_text("Remove files from the list");
-                });
-                let failed = self.failed();
-                if !failed.is_empty()
-                    && ui
-                        .add_enabled(self.can_convert(), egui::Button::new("Retry failed"))
-                        .on_hover_text("Convert the files that failed again")
-                        .clicked()
-                {
-                    self.start_some(failed, &ctx);
-                }
-                if let Some(dir) = self.output_folder()
-                    && ui
-                        .button("Open folder")
-                        .on_hover_text(dir.display().to_string())
-                        .clicked()
-                {
-                    reveal(&dir);
-                }
-            }
+            ui.add(egui::Image::new((self.logo.id(), Vec2::splat(26.0))).corner_radius(6.0));
+            ui.add_space(2.0);
+            ui.label(RichText::new("hdrshot").font(theme::semibold(18.0)));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let big = |text: &str| {
-                    egui::Button::new(RichText::new(text).strong().size(15.0))
-                        .min_size(Vec2::new(150.0, 34.0))
-                        .corner_radius(8.0)
-                };
-                if let Some(job) = &self.job {
-                    let stopping = job.is_cancelled();
-                    let label = if stopping { "Stopping…" } else { "Stop" };
-                    if ui
-                        .add_enabled(!stopping, big(label))
-                        .on_hover_text("Stop after the current image")
-                        .clicked()
-                    {
-                        job.cancel();
-                    }
-                    return;
-                }
-                let label = match self.files.len() {
-                    0 => "Convert".to_owned(),
-                    1 => "Convert 1 image".to_owned(),
-                    n => format!("Convert {n} images"),
-                };
-                let button = theme::primary(ui, theme::primary_button(&label));
-                let response = ui.add_enabled(self.can_convert(), button);
-                let response = if self.settings.save_to_folder && self.settings.output_dir.is_none()
+                if theme::icon_button(ui, icons::settings)
+                    .on_hover_text("Settings")
+                    .clicked()
                 {
-                    response.on_disabled_hover_text("Choose a folder to save into first")
-                } else {
-                    response
-                };
-                if response.clicked() {
-                    self.start(&ctx);
+                    self.settings_open = true;
                 }
+                self.watch_pill(ui);
             });
         });
     }
@@ -435,6 +359,7 @@ impl window::App for App {
         });
         if !dropped.is_empty() {
             self.add_paths(dropped);
+            self.settings_open = false;
         }
         self.shortcuts(&ctx);
         self.receive_opened(&ctx);
@@ -448,53 +373,42 @@ impl window::App for App {
 
         let margin = egui::Margin::same(16);
         let panel_fill = ui.visuals().panel_fill;
-        self.advanced_height = 0.0;
-        let bottom = egui::Panel::bottom("actions")
-            .show_separator_line(false)
-            .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
-            .show(ui, |ui| {
-                ui.add_enabled_ui(!self.running(), |ui| self.settings_ui(ui));
-                ui.add_space(4.0);
-                self.action_bar(ui);
-                // Room for the update button, which is taller than the
-                // credit line it sits on.
+        let frame = egui::Frame::new().inner_margin(margin).fill(panel_fill);
+        if self.settings_open {
+            egui::CentralPanel::default()
+                .frame(frame)
+                .show(ui, |ui| self.settings_page(ui));
+        } else {
+            egui::Panel::bottom("actions")
+                .show_separator_line(false)
+                .frame(frame.inner_margin(egui::Margin { top: 4, ..margin }))
+                .show(ui, |ui| self.bottom_bar(ui));
+            egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+                self.header(ui);
                 ui.add_space(10.0);
-                let row = credit(ui);
-                self.update_button(ui, row);
-            });
-        self.bottom_rest = bottom.response.rect.height() - self.advanced_height;
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::Image::new((self.logo.id(), Vec2::splat(30.0))).corner_radius(7.0),
-                    );
-                    ui.spacing_mut().item_spacing.x = 10.0;
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.label(RichText::new("hdrshot").strong().size(19.0));
-                        ui.label(RichText::new("HDR image tool").size(12.0).weak());
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        self.default_app_ui(ui);
-                    });
-                });
-                ui.add_space(8.0);
                 if self.files.is_empty() {
-                    let height = ui.available_height().max(140.0);
-                    self.drop_zone(ui, height);
+                    self.empty_ui(ui);
                 } else {
-                    self.drop_zone(ui, 64.0);
+                    self.toolbar(ui);
+                    ui.add_space(2.0);
                     self.file_list(ui);
                 }
             });
+        }
+        drop_overlay(&ctx);
         self.existing_dialog(&ctx);
         self.update_dialog(&ctx);
         self.toast_ui(&ctx);
     }
 
-    fn on_exit(&mut self) {
+    fn place(&self) -> Option<window::Place> {
+        self.settings.window
+    }
+
+    fn on_exit(&mut self, place: Option<window::Place>) {
+        if place.is_some() {
+            self.settings.window = place;
+        }
         storage::save(SETTINGS_KEY, &self.settings);
         // Let the file being converted finish, so its temporary file
         // doesn't stay behind in the user's folder.
@@ -504,8 +418,9 @@ impl window::App for App {
     }
 
     fn taskbar_progress(&self) -> Option<f32> {
-        let (done, total) = self.progress;
-        self.running().then(|| done as f32 / total.max(1) as f32)
+        let batch = &self.batch;
+        self.running()
+            .then(|| batch.done as f32 / batch.total.max(1) as f32)
     }
 
     fn paste_files(&mut self, files: Vec<PathBuf>) {

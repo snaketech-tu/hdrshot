@@ -33,6 +33,13 @@ impl App {
         }
     }
 
+    /// Rows not converted yet: waiting, or failed last time.
+    pub(crate) fn pending(&self) -> Vec<usize> {
+        (0..self.files.len())
+            .filter(|&i| matches!(self.files[i].status, Status::Waiting | Status::Failed(_)))
+            .collect()
+    }
+
     pub(crate) fn can_convert(&self) -> bool {
         !self.files.is_empty()
             && !self.running()
@@ -109,9 +116,17 @@ impl App {
                 (i, entry.path.clone())
             })
             .collect();
-        self.progress = (0, files.len());
-        self.skipped = 0;
-        self.trashed = (0, Vec::new());
+        let place = match (&self.settings.output_dir, self.settings.save_to_folder) {
+            (Some(dir), true) => format!("in {}", folder_name(dir)),
+            _ => "next to the originals".to_owned(),
+        };
+        self.batch = Batch {
+            total: files.len(),
+            place,
+            started: ctx.input(|i| i.time),
+            ..Default::default()
+        };
+        self.banner = false;
         self.notice = None;
         let clipboard = self
             .settings
@@ -129,26 +144,37 @@ impl App {
     pub(crate) fn poll_job(&mut self, ctx: &egui::Context) {
         let Some(job) = self.job.take() else { return };
         let mut done = false;
+        let now = ctx.input(|i| i.time);
         while let Ok(event) = job.events.try_recv() {
             match event {
                 Event::Started(i) => self.files[i].status = Status::Converting,
                 Event::Finished(i, result) => {
-                    self.files[i].status = match result {
+                    let entry = &mut self.files[i];
+                    entry.status = match result {
                         Ok(outputs) => {
+                            let (saved, bytes) = saved_summary(&outputs);
+                            entry.saved = saved;
+                            self.batch.bytes += bytes;
                             if outputs.hdr.is_none() && outputs.sdr.is_none() {
-                                self.skipped += 1;
+                                self.batch.skipped += 1;
+                            } else {
+                                self.last_converted = Some(entry.path.clone());
                             }
                             Status::Done(outputs)
                         }
-                        Err(e) => Status::Failed(e),
+                        Err(e) => {
+                            self.batch.failed += 1;
+                            Status::Failed(e)
+                        }
                     };
-                    self.progress.0 += 1;
+                    self.batch.done += 1;
+                    self.batch.last_finished = now;
                 }
                 Event::Trashed(i, result) => match result {
-                    Ok(()) => self.trashed.0 += 1,
+                    Ok(()) => self.batch.trashed += 1,
                     Err(e) => self
-                        .trashed
-                        .1
+                        .batch
+                        .trash_errors
                         .push(format!("{}: {e}", self.files[i].path.display())),
                 },
                 Event::Done(copied) => {
@@ -167,40 +193,11 @@ impl App {
                     egui::UserAttentionType::Informational,
                 ));
             }
-            let failed = self
-                .files
-                .iter()
-                .filter(|e| matches!(e.status, Status::Failed(_)))
-                .count();
-            if job.is_cancelled() {
-                self.notice = Some("Stopped.".into());
-            } else if failed > 0 {
-                self.notice = Some(format!(
-                    "{failed} file{} could not be converted.",
-                    if failed == 1 { "" } else { "s" }
-                ));
-            } else if let Some(error) = self.trashed.1.first() {
-                let n = self.trashed.1.len();
-                self.notice = Some(format!(
-                    "Could not move {n} original{} to the {RECYCLE_BIN}: {error}",
-                    if n == 1 { "" } else { "s" }
-                ));
-            } else if self.skipped > 0 {
-                let (n, s) = (self.skipped, if self.skipped == 1 { "" } else { "s" });
-                self.notice = Some(if n == self.progress.1 {
-                    format!("Skipped {n} file{s}: the files already exist.")
-                } else {
-                    format!("Skipped {n} file{s} whose files already exist.")
-                });
-            } else if self.trashed.0 > 0 {
-                let (n, total) = (self.trashed.0, self.progress.1);
-                self.notice = Some(format!(
-                    "Converted {total} image{} and moved {n} original{} to the {RECYCLE_BIN}.",
-                    if total == 1 { "" } else { "s" },
-                    if n == 1 { "" } else { "s" }
-                ));
-            }
+            self.batch.stopped = job.is_cancelled();
+            self.banner = true;
         } else {
+            // For the time left and the progress between files.
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
             self.job = Some(job);
         }
     }
@@ -276,6 +273,182 @@ pub(crate) const RECYCLE_BIN: &str = if cfg!(windows) {
     "Trash"
 };
 
+/// The running batch, or the last one: what the progress and the banner
+/// after it show.
+#[derive(Default)]
+pub(crate) struct Batch {
+    pub(crate) total: usize,
+    /// Files finished, however they went.
+    pub(crate) done: usize,
+    pub(crate) failed: usize,
+    /// Files whose outputs all existed already.
+    pub(crate) skipped: usize,
+    /// Size of the files written.
+    pub(crate) bytes: u64,
+    /// Originals moved to the Recycle Bin, and why others couldn't be.
+    pub(crate) trashed: usize,
+    pub(crate) trash_errors: Vec<String>,
+    pub(crate) stopped: bool,
+    /// Where the files went, e.g. "next to the originals".
+    pub(crate) place: String,
+    /// `egui` times the batch started and its last file finished.
+    pub(crate) started: f64,
+    pub(crate) last_finished: f64,
+}
+
+/// How a batch went, for the banner's icon.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Outcome {
+    Done,
+    Problem,
+    Nothing,
+}
+
+impl Batch {
+    /// Files written, at least partly.
+    pub(crate) fn written(&self) -> usize {
+        self.done - self.failed - self.skipped
+    }
+
+    /// Average time per file so far.
+    fn seconds_per_file(&self) -> Option<f64> {
+        (self.done > 0).then(|| (self.last_finished - self.started) / self.done as f64)
+    }
+
+    /// How far along the batch is at `now`, from 0 to 1. The file being
+    /// converted counts in part, by how long files have taken so far.
+    pub(crate) fn fraction(&self, now: f64) -> f32 {
+        let partial = self.seconds_per_file().map_or(0.0, |per_file| {
+            ((now - self.last_finished) / per_file.max(0.001)).clamp(0.0, 0.9)
+        });
+        let done = (self.done as f64 + partial).min(self.total as f64);
+        (done / self.total.max(1) as f64) as f32
+    }
+
+    /// "Converting 3 of 6 · about 40 s left", once a file has finished to
+    /// go by.
+    pub(crate) fn progress_text(&self, now: f64) -> String {
+        let current = (self.done + 1).min(self.total);
+        let mut text = format!("Converting {current} of {}", self.total);
+        if let Some(per_file) = self.seconds_per_file() {
+            let left = (self.total - self.done) as f64 * per_file - (now - self.last_finished);
+            text = format!("{text} · {}", time_left(left));
+        }
+        text
+    }
+
+    pub(crate) fn outcome(&self) -> Outcome {
+        if self.failed > 0 || !self.trash_errors.is_empty() {
+            Outcome::Problem
+        } else if self.stopped || self.written() == 0 {
+            Outcome::Nothing
+        } else {
+            Outcome::Done
+        }
+    }
+
+    /// The banner's title, e.g. "Converted 6 images".
+    pub(crate) fn title(&self) -> String {
+        let written = self.written();
+        if self.stopped {
+            if written == 0 {
+                "Stopped".to_owned()
+            } else {
+                format!("Stopped after {}", images(written))
+            }
+        } else if written == 0 && self.failed > 0 {
+            if self.failed == 1 {
+                "Couldn't convert the image".to_owned()
+            } else {
+                format!("Couldn't convert {}", images(self.failed))
+            }
+        } else if written == 0 {
+            "Nothing new to save".to_owned()
+        } else {
+            format!("Converted {}", images(written))
+        }
+    }
+
+    /// The line under the banner's title: the size, where the files went
+    /// and anything that didn't go to plan.
+    pub(crate) fn details(&self) -> String {
+        let plural = |n: usize, one: &str, many: &str| {
+            if n == 1 {
+                format!("1 {one}")
+            } else {
+                format!("{n} {many}")
+            }
+        };
+        let mut parts = Vec::new();
+        if self.bytes > 0 {
+            parts.push(format!(
+                "{}, saved {}",
+                hdrshot_core::share::megabytes(self.bytes),
+                self.place
+            ));
+        }
+        if self.failed > 0 && self.written() == 0 && !self.stopped {
+            // The title already says none could be converted.
+            let why = if self.failed == 1 {
+                "Its row says why"
+            } else {
+                "Their rows say why"
+            };
+            parts.push(why.to_owned());
+        } else if self.failed > 0 {
+            parts.push(plural(
+                self.failed,
+                "failed: its row says why",
+                "failed: their rows say why",
+            ));
+        }
+        if self.skipped > 0 {
+            parts.push(plural(
+                self.skipped,
+                "skipped, as its files already exist",
+                "skipped, as their files already exist",
+            ));
+        }
+        if self.trashed > 0 {
+            let originals = plural(self.trashed, "original", "originals");
+            parts.push(format!("{originals} moved to the {RECYCLE_BIN}"));
+        }
+        if let Some(error) = self.trash_errors.first() {
+            let originals = plural(self.trash_errors.len(), "original", "originals");
+            parts.push(format!(
+                "Couldn't move {originals} to the {RECYCLE_BIN}: {error}"
+            ));
+        }
+        parts.join(" · ")
+    }
+}
+
+/// "1 image" or "3 images".
+pub(crate) fn images(n: usize) -> String {
+    if n == 1 {
+        "1 image".to_owned()
+    } else {
+        format!("{n} images")
+    }
+}
+
+/// A rough time left, rounded so it doesn't flicker.
+pub(crate) fn time_left(seconds: f64) -> String {
+    if seconds < 8.0 {
+        "a few seconds left".to_owned()
+    } else if seconds < 60.0 {
+        format!("about {} s left", ((seconds / 5.0).round() * 5.0) as u32)
+    } else {
+        format!("about {} min left", (seconds / 60.0).ceil() as u32)
+    }
+}
+
+/// A folder's name rather than its whole path, for short labels.
+pub(crate) fn folder_name(dir: &Path) -> String {
+    dir.file_name()
+        .map_or_else(|| dir.display().to_string(), |n| n.to_string_lossy().into())
+}
+
 pub(crate) struct Asking {
     pub(crate) indices: Vec<usize>,
     /// Rows left out of the batch, and why (see `App::start_some`).
@@ -302,6 +475,76 @@ pub(crate) fn existing_outputs<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn banner_sums_up_the_batch() {
+        let mut batch = Batch {
+            total: 6,
+            done: 6,
+            bytes: 48_200_000,
+            place: "next to the originals".into(),
+            ..Default::default()
+        };
+        assert_eq!(batch.title(), "Converted 6 images");
+        assert_eq!(batch.details(), "48.2 MB, saved next to the originals");
+        assert_eq!(batch.outcome(), Outcome::Done);
+
+        batch.failed = 1;
+        batch.skipped = 2;
+        assert_eq!(batch.title(), "Converted 3 images");
+        assert_eq!(
+            batch.details(),
+            "48.2 MB, saved next to the originals · 1 failed: its row says why · \
+             2 skipped, as their files already exist"
+        );
+        assert_eq!(batch.outcome(), Outcome::Problem);
+
+        let skipped = Batch {
+            total: 1,
+            done: 1,
+            skipped: 1,
+            ..Default::default()
+        };
+        assert_eq!(skipped.title(), "Nothing new to save");
+        assert_eq!(skipped.outcome(), Outcome::Nothing);
+
+        let failed = Batch {
+            total: 2,
+            done: 2,
+            failed: 2,
+            ..Default::default()
+        };
+        assert_eq!(failed.title(), "Couldn't convert 2 images");
+        assert_eq!(failed.details(), "Their rows say why");
+
+        let stopped = Batch {
+            total: 5,
+            done: 2,
+            stopped: true,
+            ..Default::default()
+        };
+        assert_eq!(stopped.title(), "Stopped after 2 images");
+    }
+
+    #[test]
+    fn progress_counts_the_file_being_converted() {
+        let mut batch = Batch {
+            total: 4,
+            ..Default::default()
+        };
+        assert_eq!(batch.progress_text(1.0), "Converting 1 of 4");
+        assert_eq!(batch.fraction(1.0), 0.0);
+        batch.done = 2;
+        batch.last_finished = 20.0;
+        // 10 s per file, 5 s into the third.
+        assert_eq!(batch.fraction(25.0), 2.5 / 4.0);
+        assert_eq!(
+            batch.progress_text(25.0),
+            "Converting 3 of 4 · about 15 s left"
+        );
+        assert_eq!(time_left(3.0), "a few seconds left");
+        assert_eq!(time_left(61.0), "about 2 min left");
+    }
 
     #[test]
     fn existing_outputs_lists_only_files_on_disk() {

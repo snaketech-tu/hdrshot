@@ -12,19 +12,39 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use egui_software_backend::{BufferMutRef, ColorFieldOrder, EguiSoftwareRender};
+use serde::{Deserialize, Serialize};
 
 use crate::taskbar::Taskbar;
 use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalPosition;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
+use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowId};
+
+/// Where the window was and how large, to open it there again.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Place {
+    /// Position of the window's outer top-left corner, in physical pixels.
+    pub x: i32,
+    pub y: i32,
+    /// Size of the window's inside, in points.
+    pub width: f32,
+    pub height: f32,
+}
 
 /// What the window needs from the app.
 pub trait App {
     fn ui(&mut self, ui: &mut egui::Ui);
 
-    /// Called once before the window closes.
-    fn on_exit(&mut self) {}
+    /// Where to open the window, if it should open where it was.
+    fn place(&self) -> Option<Place> {
+        None
+    }
+
+    /// Called once before the window closes, with its place unless it is
+    /// minimized, maximized or full screen.
+    fn on_exit(&mut self, _place: Option<Place>) {}
 
     /// Files pasted with Ctrl+V (Cmd+V on macOS), e.g. copied in Explorer.
     /// egui only passes on pasted text, so the window reads files itself.
@@ -101,8 +121,30 @@ struct Running {
 
 impl<A: App> Runner<A> {
     fn open(&mut self, event_loop: &ActiveEventLoop) {
-        let attributes =
-            egui_winit::create_winit_window_attributes(&self.ctx, self.viewport.clone());
+        let monitors: Vec<MonitorHandle> = event_loop.available_monitors().collect();
+        let mut viewport = self.viewport.clone();
+        let mut position = None;
+        let mut monitor = None;
+        if let Some(place) = self.app.place() {
+            viewport.inner_size = Some(egui::vec2(place.width, place.height));
+            // Back where it was only if a monitor still shows its title bar.
+            let grip = (place.x + 100, place.y + 10);
+            monitor = monitors.iter().find(|m| shows(m, grip)).cloned();
+            if monitor.is_some() {
+                position = Some(PhysicalPosition::new(place.x, place.y));
+            }
+        }
+        if let Some(monitor) = monitor
+            .or_else(|| event_loop.primary_monitor())
+            .or_else(|| monitors.first().cloned())
+        {
+            fit_on(&mut viewport, &monitor);
+        }
+        let mut attributes =
+            egui_winit::create_winit_window_attributes(&self.ctx, viewport.clone());
+        if let Some(position) = position {
+            attributes = attributes.with_position(position);
+        }
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(e) => {
@@ -111,7 +153,7 @@ impl<A: App> Runner<A> {
                 return;
             }
         };
-        egui_winit::apply_viewport_builder_to_window(&self.ctx, &window, &self.viewport);
+        egui_winit::apply_viewport_builder_to_window(&self.ctx, &window, &viewport);
         let surface = match softbuffer::Surface::new(&self.softbuffer, window.clone()) {
             Ok(surface) => surface,
             Err(e) => {
@@ -291,9 +333,10 @@ impl<A: App> ApplicationHandler<Repaint> for Runner<A> {
         match event {
             WindowEvent::RedrawRequested => self.redraw(),
             WindowEvent::CloseRequested => {
+                let place = place(&running.window);
                 // Hidden first, since the app may still finish writing a file.
                 running.window.set_visible(false);
-                self.app.on_exit();
+                self.app.on_exit(place);
                 event_loop.exit();
             }
             event => {
@@ -325,6 +368,43 @@ impl<A: App> ApplicationHandler<Repaint> for Runner<A> {
             None => ControlFlow::Wait,
         });
     }
+}
+
+/// Whether `monitor` shows the physical pixel `point`.
+fn shows(monitor: &MonitorHandle, point: (i32, i32)) -> bool {
+    let (pos, size) = (monitor.position(), monitor.size());
+    (pos.x..pos.x + size.width as i32).contains(&point.0)
+        && (pos.y..pos.y + size.height as i32).contains(&point.1)
+}
+
+/// Shrinks the window to fit on `monitor`, leaving room for the title bar
+/// and the taskbar, but not below its smallest size.
+fn fit_on(viewport: &mut egui::ViewportBuilder, monitor: &MonitorHandle) {
+    let Some(size) = viewport.inner_size.as_mut() else {
+        return;
+    };
+    let screen = monitor.size().to_logical::<f32>(monitor.scale_factor());
+    size.x = size.x.min(screen.width - 40.0);
+    size.y = size.y.min(screen.height - 100.0);
+    if let Some(min) = viewport.min_inner_size {
+        *size = size.max(min);
+    }
+}
+
+/// The window's place, unless it is minimized, maximized or full screen.
+fn place(window: &Window) -> Option<Place> {
+    if window.is_minimized() == Some(true) || window.is_maximized() || window.fullscreen().is_some()
+    {
+        return None;
+    }
+    let position = window.outer_position().ok()?;
+    let size = window.inner_size().to_logical::<f32>(window.scale_factor());
+    Some(Place {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    })
 }
 
 fn is_paste(event: &WindowEvent, modifiers: winit::keyboard::ModifiersState) -> bool {

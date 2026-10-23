@@ -1,7 +1,15 @@
 //! The app's look: colors taken from the icon (slate and a bright blue),
-//! rounded widgets, and a few shared widgets built from them.
+//! the Inter typeface, rounded widgets, and a few shared widgets built
+//! from them.
 
-use egui::{Color32, CornerRadius, RichText, Sense, Stroke, StrokeKind, Theme, Vec2, Visuals};
+use std::sync::Arc;
+
+use egui::{
+    Color32, CornerRadius, FontData, FontFamily, FontId, RichText, Sense, Stroke, StrokeKind,
+    Theme, Vec2, Visuals,
+};
+
+use crate::icons;
 
 /// Height of buttons, segmented choices and setting rows.
 pub const ROW_HEIGHT: f32 = 26.0;
@@ -17,7 +25,10 @@ struct Palette {
     active: Color32,
     border: Color32,
     text: Color32,
+    /// Secondary text, such as hints and setting labels.
+    weak: Color32,
     accent: Color32,
+    error: Color32,
 }
 
 const DARK: Palette = Palette {
@@ -29,7 +40,9 @@ const DARK: Palette = Palette {
     active: Color32::from_rgb(56, 64, 80),
     border: Color32::from_rgb(44, 50, 61),
     text: Color32::from_rgb(230, 233, 239),
+    weak: Color32::from_rgb(154, 160, 170),
     accent: Color32::from_rgb(31, 142, 241),
+    error: Color32::from_rgb(242, 104, 96),
 };
 
 const LIGHT: Palette = Palette {
@@ -41,7 +54,9 @@ const LIGHT: Palette = Palette {
     active: Color32::from_rgb(208, 216, 226),
     border: Color32::from_rgb(213, 219, 227),
     text: Color32::from_rgb(27, 31, 39),
+    weak: Color32::from_rgb(89, 97, 112),
     accent: Color32::from_rgb(15, 111, 216),
+    error: Color32::from_rgb(196, 43, 28),
 };
 
 fn visuals(base: Visuals, p: &Palette) -> Visuals {
@@ -55,6 +70,8 @@ fn visuals(base: Visuals, p: &Palette) -> Visuals {
     v.window_stroke = Stroke::new(1.0, p.border);
     v.window_corner_radius = CornerRadius::same(12);
     v.menu_corner_radius = CornerRadius::same(10);
+    v.weak_text_color = Some(p.weak);
+    v.error_fg_color = p.error;
     v.hyperlink_color = p.accent;
     v.selection.bg_fill = p.accent;
     v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
@@ -80,6 +97,9 @@ fn visuals(base: Visuals, p: &Palette) -> Visuals {
         state.expansion = 0.0;
     }
     w.hovered.bg_stroke = Stroke::new(1.0, p.border);
+    // Pressed and keyboard-focused widgets get an accent outline, so Tab
+    // shows where it is.
+    w.active.bg_stroke = Stroke::new(1.5, p.accent);
     for state in [
         &mut w.noninteractive,
         &mut w.inactive,
@@ -92,9 +112,49 @@ fn visuals(base: Visuals, p: &Palette) -> Visuals {
     v
 }
 
-/// Sets the colors and spacing for both the dark and light theme; the
-/// system's choice decides which one shows.
+/// The family of [`semibold`].
+const SEMIBOLD: &str = "semibold";
+
+/// Inter for all text, in a regular and a semibold weight. Both are
+/// subsets with the Latin letters, and digits of equal width so counts
+/// don't jiggle; other characters, such as Cyrillic or Chinese file names,
+/// come from egui's fonts and the system's.
+fn fonts() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    for (name, data) in [
+        (
+            "Inter",
+            &include_bytes!("../assets/fonts/Inter-Regular.ttf")[..],
+        ),
+        (
+            "Inter SemiBold",
+            &include_bytes!("../assets/fonts/Inter-SemiBold.ttf")[..],
+        ),
+    ] {
+        fonts
+            .font_data
+            .insert(name.to_owned(), Arc::new(FontData::from_static(data)));
+    }
+    let proportional = fonts.families.entry(FontFamily::Proportional).or_default();
+    let fallbacks = proportional.clone();
+    proportional.insert(0, "Inter".to_owned());
+    let mut semibold = vec!["Inter SemiBold".to_owned()];
+    semibold.extend(fallbacks);
+    fonts
+        .families
+        .insert(FontFamily::Name(SEMIBOLD.into()), semibold);
+    fonts
+}
+
+/// Inter SemiBold, for titles, headings and the main button.
+pub fn semibold(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(SEMIBOLD.into()))
+}
+
+/// Sets the fonts, colors and spacing for both the dark and light theme;
+/// the system's choice decides which one shows.
 pub fn apply(ctx: &egui::Context) {
+    ctx.set_fonts(fonts());
     ctx.set_visuals_of(Theme::Dark, visuals(Visuals::dark(), &DARK));
     ctx.set_visuals_of(Theme::Light, visuals(Visuals::light(), &LIGHT));
     ctx.all_styles_mut(|style| {
@@ -171,12 +231,59 @@ pub fn info_icon(ui: &mut egui::Ui) -> egui::Response {
 pub fn primary_button(text: &str) -> egui::Button<'static> {
     egui::Button::new(
         RichText::new(text.to_owned())
-            .strong()
-            .size(15.0)
+            .font(semibold(14.5))
             .color(Color32::WHITE),
     )
-    .min_size(Vec2::new(150.0, 34.0))
+    .min_size(Vec2::new(150.0, BIG_HEIGHT))
     .corner_radius(8.0)
+}
+
+/// A button as large as [`primary_button`], without the accent fill.
+pub fn secondary_button(text: &str) -> egui::Button<'static> {
+    egui::Button::new(RichText::new(text.to_owned()).font(semibold(14.5)))
+        .min_size(Vec2::new(90.0, BIG_HEIGHT))
+        .corner_radius(8.0)
+}
+
+/// Height of the main button and those beside it.
+pub const BIG_HEIGHT: f32 = 34.0;
+
+/// A wide button-shaped progress bar: the accent fills it from the left as
+/// `fraction` grows, and `text` shows white over the filled part.
+pub fn progress_bar(ui: &mut egui::Ui, width: f32, fraction: f32, text: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, BIG_HEIGHT), Sense::hover());
+    let accent = accent(ui);
+    let text_color = ui.visuals().strong_text_color();
+    let painter = ui.painter();
+    painter.rect_filled(rect, 8.0, accent.gamma_multiply(0.22));
+    let split = rect.left() + rect.width() * fraction.clamp(0.0, 1.0);
+    let filled = rect.with_max_x(split);
+    if filled.width() > 0.5 {
+        painter
+            .with_clip_rect(filled)
+            .rect_filled(rect, 8.0, accent);
+    }
+    let galley = painter.layout_no_wrap(text.to_owned(), semibold(14.0), Color32::PLACEHOLDER);
+    let pos = rect.center() - galley.size() / 2.0;
+    painter
+        .with_clip_rect(filled)
+        .galley_with_override_text_color(pos, galley.clone(), Color32::WHITE);
+    painter
+        .with_clip_rect(rect.with_min_x(split))
+        .galley_with_override_text_color(pos, galley, text_color);
+    response
+}
+
+/// The outline around a custom widget that has keyboard focus.
+pub fn focus_ring(ui: &egui::Ui, response: &egui::Response, radius: f32) {
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            response.rect.expand(2.0),
+            radius + 2.0,
+            Stroke::new(1.5, accent(ui)),
+            StrokeKind::Outside,
+        );
+    }
 }
 
 /// Applies [`primary_button`]'s accent fill, which needs the theme.
@@ -224,6 +331,7 @@ pub fn segmented<T: PartialEq + Copy>(
         let response = ui
             .interact(segment, id, Sense::click())
             .on_hover_text(*hint);
+        focus_ring(ui, &response, f32::from(RADIUS - 2));
         let selected = *value == *option;
         if response.clicked() && !selected {
             *value = *option;
@@ -255,14 +363,130 @@ pub fn segmented<T: PartialEq + Copy>(
     changed
 }
 
-/// A small rounded label with a tinted background, for a file's status.
-pub fn pill(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Response {
+/// A rounded button summing up one group of settings, with a chevron
+/// pointing up while its menu (`open`) shows. Accented ones stand out, for
+/// settings that differ from the usual.
+pub fn chip(ui: &mut egui::Ui, text: &str, open: bool, accented: bool) -> egui::Response {
     let font = egui::FontId::proportional(12.0);
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
-    let size = galley.size() + Vec2::new(16.0, 6.0);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font, Color32::PLACEHOLDER);
+    let chevron = 8.0;
+    let size = Vec2::new(galley.size().x + chevron + 21.0, ROW_HEIGHT + 2.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let visuals = ui.visuals();
+    let enabled = ui.is_enabled();
+    let accent = visuals.selection.bg_fill;
+    let (fill, stroke) = if open || accented {
+        (accent.gamma_multiply(0.16), Stroke::new(1.0, accent))
+    } else if response.hovered() && enabled {
+        (
+            visuals.widgets.hovered.bg_fill,
+            visuals.widgets.noninteractive.bg_stroke,
+        )
+    } else {
+        (
+            visuals.faint_bg_color,
+            visuals.widgets.noninteractive.bg_stroke,
+        )
+    };
+    let mut text_color = visuals.text_color();
+    let mut weak = visuals.weak_text_color();
+    if !enabled {
+        text_color = text_color.gamma_multiply(0.45);
+        weak = weak.gamma_multiply(0.45);
+    }
     let painter = ui.painter();
-    painter.rect_filled(rect, size.y / 2.0, color.gamma_multiply(0.16));
-    painter.galley(rect.center() - galley.size() / 2.0, galley, color);
+    painter.rect(rect, size.y / 2.0, fill, stroke, StrokeKind::Inside);
+    let text_pos = egui::pos2(rect.left() + 9.0, rect.center().y - galley.size().y / 2.0);
+    painter.galley_with_override_text_color(text_pos, galley, text_color);
+    let center = egui::pos2(rect.right() - 7.0 - chevron / 2.0, rect.center().y);
+    icons::chevron(painter, center, chevron, open, Stroke::new(1.5, weak));
+    focus_ring(ui, &response, size.y / 2.0);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A square button with a drawn icon (see [`icons`]), as the bundled
+/// fonts have no icon glyphs.
+pub fn icon_button(ui: &mut egui::Ui, paint: icons::Icon) -> egui::Response {
+    let size = Vec2::splat(ROW_HEIGHT + 4.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let visuals = ui.visuals();
+    let fill = if response.hovered() {
+        visuals.widgets.hovered.bg_fill
+    } else {
+        visuals.widgets.inactive.bg_fill
+    };
+    let color = if response.hovered() {
+        visuals.strong_text_color()
+    } else {
+        visuals.text_color()
+    };
+    ui.painter().rect_filled(rect, RADIUS, fill);
+    paint(ui.painter(), rect.shrink(8.0), color);
+    focus_ring(ui, &response, f32::from(RADIUS));
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A small icon button without a background until hovered, for the
+/// actions on a file's row.
+pub fn small_icon_button(ui: &mut egui::Ui, paint: icons::Icon) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
+    let visuals = ui.visuals();
+    let color = if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, 6.0, visuals.widgets.hovered.bg_fill);
+        visuals.strong_text_color()
+    } else {
+        visuals.text_color()
+    };
+    paint(ui.painter(), rect.shrink(6.0), color);
+    focus_ring(ui, &response, 6.0);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A button with a drawn icon before its text.
+pub fn icon_text_button(ui: &mut egui::Ui, paint: icons::Icon, text: &str) -> egui::Response {
+    let font = FontId::proportional(13.5);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font, Color32::PLACEHOLDER);
+    let icon = 12.0;
+    let size = Vec2::new(galley.size().x + icon + 6.0 + 20.0, ROW_HEIGHT);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let visuals = ui.visuals();
+    let enabled = ui.is_enabled();
+    let fill = if response.hovered() && enabled {
+        visuals.widgets.hovered.bg_fill
+    } else {
+        visuals.widgets.inactive.bg_fill
+    };
+    let mut color = visuals.text_color();
+    if !enabled {
+        color = color.gamma_multiply(0.45);
+    }
+    let painter = ui.painter();
+    painter.rect_filled(rect, RADIUS, fill);
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 10.0 + icon / 2.0, rect.center().y),
+        Vec2::splat(icon),
+    );
+    paint(painter, icon_rect, color);
+    let text_pos = egui::pos2(
+        icon_rect.right() + 6.0,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    painter.galley_with_override_text_color(text_pos, galley, color);
+    focus_ring(ui, &response, f32::from(RADIUS));
     response
+}
+
+/// The heading above a card of settings.
+pub fn section(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(6.0);
+    ui.label(
+        RichText::new(text)
+            .font(semibold(12.5))
+            .color(ui.visuals().weak_text_color()),
+    );
 }

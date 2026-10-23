@@ -9,8 +9,8 @@ use hdrshot_core::{LightLevels, Preview, ScRgbImage, SdrOptions};
 
 /// Largest preview kept per file. The tooltip shows it at this size.
 pub const PREVIEW_SIZE: (u32, u32) = (360, 220);
-/// Largest thumbnail in the file list.
-pub const THUMB_SIZE: (u32, u32) = (56, 32);
+/// Size of a thumbnail in the file list, which crops the image to fill it.
+pub const THUMB_SIZE: (u32, u32) = (80, 45);
 
 pub enum Thumb {
     Loading,
@@ -55,13 +55,7 @@ impl Previews {
             .map(|(path, preview)| {
                 let thumb = match preview {
                     Ok(preview) => {
-                        let (w, h) = THUMB_SIZE;
-                        let (tw, th) = hdrshot_core::resize::fit_box(
-                            preview.image.width,
-                            preview.image.height,
-                            w * 2,
-                            h * 2,
-                        );
+                        let (tw, th) = cover_size(preview.image.width, preview.image.height);
                         let small = hdrshot_core::resize::resize(&preview.image, tw, th);
                         let texture = texture(
                             ctx,
@@ -83,6 +77,20 @@ impl Previews {
             })
             .collect()
     }
+}
+
+/// Size of a `width` × `height` image scaled to cover twice
+/// [`THUMB_SIZE`], for sharp thumbnails on high-DPI screens, but never
+/// scaled up.
+fn cover_size(width: u32, height: u32) -> (u32, u32) {
+    let (w, h) = THUMB_SIZE;
+    let scale = f64::max(
+        f64::from(2 * w) / f64::from(width.max(1)),
+        f64::from(2 * h) / f64::from(height.max(1)),
+    )
+    .min(1.0);
+    let scaled = |n: u32| ((f64::from(n) * scale).round() as u32).max(1);
+    (scaled(width), scaled(height))
 }
 
 /// A preview as kept for its row: half floats and 8-bit alpha take less
@@ -164,6 +172,14 @@ pub fn texture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thumbnails_cover_their_box() {
+        assert_eq!(cover_size(360, 203), (160, 90));
+        // Ultrawide: as tall as the box, wider than it.
+        assert_eq!(cover_size(360, 151), (215, 90));
+        assert_eq!(cover_size(40, 20), (40, 20));
+    }
 
     #[test]
     fn stored_preview_tone_maps_the_same() {
