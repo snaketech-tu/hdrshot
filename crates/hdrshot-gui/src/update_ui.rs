@@ -2,13 +2,30 @@
 
 use super::*;
 
+/// How long hdrshot waits between the checks it makes by itself, in
+/// seconds: a week.
+const CHECK_INTERVAL: u64 = 7 * 24 * 60 * 60;
+
 impl App {
     pub(crate) fn check_for_updates(&mut self, ctx: &egui::Context) {
         self.update = Update::Checking;
+        self.start_check(false, ctx);
+    }
+
+    /// Looks for a newer version if the last check was a week ago, unless
+    /// the user turned that off. Only a newer version is reported: the
+    /// footer link then offers it.
+    pub(crate) fn weekly_update_check(&mut self, ctx: &egui::Context) {
+        if self.settings.update_check && check_due(self.settings.last_update_check, unix_now()) {
+            self.start_check(true, ctx);
+        }
+    }
+
+    fn start_check(&self, quiet: bool, ctx: &egui::Context) {
         let sender = self.updates.0.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let _ = sender.send(UpdateMessage::Checked(update::check()));
+            let _ = sender.send(UpdateMessage::Checked(update::check(), quiet));
             ctx.request_repaint();
         });
     }
@@ -37,19 +54,30 @@ impl App {
 
     pub(crate) fn receive_update(&mut self, ctx: &egui::Context) {
         while let Ok(message) = self.updates.1.try_recv() {
+            if let UpdateMessage::Checked(Ok(_), _) = message {
+                self.settings.last_update_check = unix_now();
+            }
             match message {
-                UpdateMessage::Checked(Ok(update::Checked::UpToDate)) => {
+                // A check of its own says nothing unless it finds a newer
+                // version, and leaves an open dialog alone.
+                UpdateMessage::Checked(Ok(update::Checked::Newer(releases)), true) => {
+                    if let Update::Idle = self.update {
+                        self.update = Update::Found(releases);
+                    }
+                }
+                UpdateMessage::Checked(_, true) => {}
+                UpdateMessage::Checked(Ok(update::Checked::UpToDate), false) => {
                     self.update = Update::Idle;
                     let text = format!("hdrshot {} is the latest version", update::CURRENT);
                     self.show_toast(text, ctx);
                 }
-                UpdateMessage::Checked(Ok(update::Checked::Newer(releases))) => {
+                UpdateMessage::Checked(Ok(update::Checked::Newer(releases)), false) => {
                     self.update = Update::Available {
                         releases,
                         error: None,
                     };
                 }
-                UpdateMessage::Checked(Err(e)) => {
+                UpdateMessage::Checked(Err(e), false) => {
                     self.update = Update::Idle;
                     self.show_toast(e, ctx);
                 }
@@ -92,7 +120,7 @@ impl App {
         let running = self.running();
         let frame = egui::Frame::popup(&ctx.global_style()).inner_margin(16);
         match &self.update {
-            Update::Idle | Update::Checking => return,
+            Update::Idle | Update::Checking | Update::Found(_) => return,
             Update::Available { releases, error } => {
                 let newest = &releases[0];
                 let modal = egui::Modal::new(egui::Id::unique("update"))
@@ -227,31 +255,37 @@ impl App {
         }
         match choice {
             Some(Choice::Update) => self.install_update(ctx),
-            Some(Choice::Page | Choice::Skip) => self.update = Update::Idle,
+            // The footer link keeps offering the new version.
+            Some(Choice::Page | Choice::Skip) => {
+                self.update = match std::mem::take(&mut self.update) {
+                    Update::Available { releases, .. } => Update::Found(releases),
+                    _ => Update::Idle,
+                };
+            }
             Some(Choice::Quit) => self.quit(),
             None => {}
         }
     }
 
     /// The small blue "Check for updates" button at the right end of the
-    /// credit line `row`.
+    /// credit line `row`, or "Update to" and the version once one is found.
     pub(crate) fn update_button(&mut self, ui: &mut egui::Ui, row: egui::Rect) {
         let checking = matches!(self.update, Update::Checking);
-        let text = if checking {
-            "Checking…"
-        } else {
-            "Check for updates"
+        let found = match &self.update {
+            Update::Found(releases) => Some(releases[0].version.clone()),
+            _ => None,
         };
-        let label = RichText::new(text)
+        let text = match &found {
+            Some(version) => format!("Update to {version}"),
+            None if checking => "Checking…".to_owned(),
+            None => "Check for updates".to_owned(),
+        };
+        let label = RichText::new(&text)
             .font(egui::FontId::proportional(12.0))
             .color(theme::accent(ui));
         let width = ui
             .painter()
-            .layout_no_wrap(
-                text.to_owned(),
-                egui::FontId::proportional(12.0),
-                Color32::PLACEHOLDER,
-            )
+            .layout_no_wrap(text, egui::FontId::proportional(12.0), Color32::PLACEHOLDER)
             .size()
             .x
             + 24.0;
@@ -263,19 +297,35 @@ impl App {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
             egui::Layout::centered_and_justified(egui::Direction::TopDown),
         ));
+        // Stronger once there is a newer version.
+        let fill = theme::accent(ui).gamma_multiply(if found.is_some() { 0.26 } else { 0.14 });
         let button = egui::Button::new(label)
-            .fill(theme::accent(ui).gamma_multiply(0.14))
+            .fill(fill)
             .stroke(Stroke::NONE)
             .corner_radius(6.0)
             .wrap_mode(egui::TextWrapMode::Extend);
+        let hint = match &found {
+            Some(version) => format!(
+                "hdrshot {version} is available; you have {}. Click for what's new.",
+                update::CURRENT
+            ),
+            None => format!("You have hdrshot {}", update::CURRENT),
+        };
         if child
             .add_enabled(!checking, button)
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(format!("You have hdrshot {}", update::CURRENT))
+            .on_hover_text(hint)
             .clicked()
         {
-            let ctx = ui.ctx().clone();
-            self.check_for_updates(&ctx);
+            if let Update::Found(releases) = std::mem::take(&mut self.update) {
+                self.update = Update::Available {
+                    releases,
+                    error: None,
+                };
+            } else {
+                let ctx = ui.ctx().clone();
+                self.check_for_updates(&ctx);
+            }
         }
     }
 }
@@ -286,6 +336,9 @@ pub(crate) enum Update {
     #[default]
     Idle,
     Checking,
+    /// Newer releases found by the weekly check, newest first, offered by
+    /// the footer link.
+    Found(Vec<update::Release>),
     /// Newer releases, newest first, and why installing the newest failed.
     Available {
         releases: Vec<update::Release>,
@@ -297,8 +350,22 @@ pub(crate) enum Update {
 }
 
 pub(crate) enum UpdateMessage {
-    Checked(Result<update::Checked, String>),
+    /// A check's result, and whether it was the weekly one, which reports
+    /// only a newer version.
+    Checked(Result<update::Checked, String>, bool),
     Installed(Result<update::Installed, String>),
+}
+
+/// Whether the weekly check is due, a check having last succeeded at
+/// `last` (seconds since 1970). A clock set back makes it due too.
+fn check_due(last: u64, now: u64) -> bool {
+    now < last || now - last >= CHECK_INTERVAL
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// Release notes, as headings, list items and paragraphs.
@@ -323,5 +390,20 @@ pub(crate) fn notes_ui(ui: &mut egui::Ui, notes: &str) {
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checks_once_a_week() {
+        let now = 1_800_000_000;
+        assert!(check_due(0, now));
+        assert!(!check_due(now - 60, now));
+        assert!(!check_due(now - CHECK_INTERVAL + 1, now));
+        assert!(check_due(now - CHECK_INTERVAL, now));
+        assert!(check_due(now + 3600, now));
     }
 }

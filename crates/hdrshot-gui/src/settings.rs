@@ -89,10 +89,10 @@ impl App {
                 if self.running() {
                     ui.weak("Settings can be changed once the images are converted.");
                 }
-                if assoc::SUPPORTED {
-                    theme::section(ui, "General");
-                    theme::card(ui, |ui| self.default_app_ui(ui));
-                }
+                theme::section(ui, "General");
+                theme::card(ui, |ui| {
+                    settings_grid(ui, "general", |ui| self.general_rows(ui));
+                });
                 ui.add_enabled_ui(!self.running(), |ui| {
                     theme::section(ui, "Output");
                     theme::card(ui, |ui| {
@@ -113,6 +113,46 @@ impl App {
                     theme::card(ui, |ui| self.tuning_ui(ui));
                 });
             });
+    }
+
+    /// The theme, the weekly update check and the default app: rows of a
+    /// two-column grid.
+    fn general_rows(&mut self, ui: &mut egui::Ui) {
+        theme::row_label(ui, "Theme");
+        if theme::segmented(
+            ui,
+            &mut self.settings.theme,
+            &[
+                (
+                    ThemeChoice::System,
+                    "System",
+                    "Light or dark, as the system is set",
+                ),
+                (ThemeChoice::Light, "Light", "Always light"),
+                (ThemeChoice::Dark, "Dark", "Always dark"),
+            ],
+        ) {
+            self.settings.theme.apply(ui.ctx());
+        }
+        ui.end_row();
+
+        theme::row_label(ui, "Updates");
+        ui.checkbox(
+            &mut self.settings.update_check,
+            "Check for updates once a week",
+        )
+        .on_hover_text(
+            "When hdrshot starts, ask GitHub for its latest release at most once \
+             a week. If there is a newer one, the link at the bottom of the window \
+             offers it; nothing is downloaded until you choose Update.",
+        );
+        ui.end_row();
+
+        if assoc::SUPPORTED {
+            theme::row_label(ui, "Files");
+            self.default_app_ui(ui);
+            ui.end_row();
+        }
     }
 
     /// What to create, in which formats: rows of a two-column grid.
@@ -322,6 +362,32 @@ impl App {
                 s.type_suffix = suffix;
             }
         });
+        self.name_preview_ui(ui);
+    }
+
+    /// The names of the files an image gets with the current settings,
+    /// using the first listed image or a sample name.
+    fn name_preview_ui(&self, ui: &mut egui::Ui) {
+        let input = self
+            .files
+            .first()
+            .map_or_else(|| PathBuf::from(SAMPLE_INPUT), |entry| entry.path.clone());
+        let names = name_preview(&input, &self.convert_options(Existing::Skip));
+        ui.add_space(6.0);
+        // The page's color, set into the card.
+        egui::Frame::new()
+            .fill(ui.visuals().panel_fill)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 3.0;
+                let source = input.file_name().unwrap_or_default().to_string_lossy();
+                ui.label(RichText::new(format!("{source} becomes")).size(12.0).weak());
+                for name in names {
+                    ui.add(egui::Label::new(RichText::new(name).size(13.0)).truncate());
+                }
+            });
     }
 
     /// The clipboard copy and the Recycle Bin: rows of a two-column grid.
@@ -424,6 +490,31 @@ const RESOLUTION_HINT: &str = "Scale images taller than this down to this height
      aspect ratio, so ultrawide images stay ultrawide. Smaller images are never scaled up. \
      The size in brackets is what the listed files come out at.";
 
+/// The image whose names the Settings page shows while the list is empty.
+const SAMPLE_INPUT: &str = "Screenshot 2026-10-14 212314.jxr";
+
+/// The files `input` becomes with `options`, as paths from the folder they
+/// are saved in, e.g. `hdr/shot_hdr.png` with subfolders.
+pub(crate) fn name_preview(input: &Path, options: &ConvertOptions) -> Vec<String> {
+    let outputs = hdrshot_core::output_paths(input, options);
+    let dir = options
+        .output_dir
+        .clone()
+        .or_else(|| input.parent().map(Path::to_path_buf))
+        .unwrap_or_default();
+    [outputs.hdr, outputs.sdr]
+        .into_iter()
+        .flatten()
+        .map(|path| {
+            let path = path.strip_prefix(&dir).unwrap_or(&path);
+            path.components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .collect()
+}
+
 /// A two-column grid of labelled settings.
 fn settings_grid(ui: &mut egui::Ui, id: &str, add_rows: impl FnOnce(&mut egui::Ui)) {
     egui::Grid::new(id)
@@ -492,6 +583,11 @@ pub(crate) struct Settings {
     pub(crate) recent_dirs: Vec<PathBuf>,
     /// Tips of the empty window the user hid.
     pub(crate) hidden_tips: Vec<String>,
+    pub(crate) theme: ThemeChoice,
+    /// Look for a newer version once a week when hdrshot starts.
+    pub(crate) update_check: bool,
+    /// When a check for updates last succeeded, in seconds since 1970.
+    pub(crate) last_update_check: u64,
     /// Where the window was when hdrshot last closed.
     pub(crate) window: Option<window::Place>,
 }
@@ -594,8 +690,35 @@ impl Default for Settings {
             watch_dir: watching::default_watch_dir(),
             recent_dirs: Vec::new(),
             hidden_tips: Vec::new(),
+            theme: ThemeChoice::System,
+            update_check: true,
+            last_update_check: 0,
             window: None,
         }
+    }
+}
+
+/// Light or dark, or as the system is set.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum ThemeChoice {
+    System,
+    Light,
+    Dark,
+}
+
+impl ThemeChoice {
+    /// Uses this theme for the window's contents and its title bar.
+    pub(crate) fn apply(self, ctx: &egui::Context) {
+        let (preference, title_bar) = match self {
+            Self::System => (
+                egui::ThemePreference::System,
+                egui::SystemTheme::SystemDefault,
+            ),
+            Self::Light => (egui::ThemePreference::Light, egui::SystemTheme::Light),
+            Self::Dark => (egui::ThemePreference::Dark, egui::SystemTheme::Dark),
+        };
+        ctx.set_theme(preference);
+        ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(title_bar));
     }
 }
 
@@ -765,6 +888,36 @@ mod tests {
         s.recent_dirs.push(base.clone());
         s.output_dir = Some(base.clone());
         assert_eq!(s.save_folders(), [base]);
+    }
+
+    #[test]
+    fn name_preview_lists_the_files() {
+        let input = Path::new("shots").join("Screenshot 1.jxr");
+        let mut s = Settings::default();
+        let names = |s: &Settings| {
+            let options = ConvertOptions {
+                mode: s.mode.into(),
+                output_dir: s.save_to_folder.then(|| s.output_dir.clone()).flatten(),
+                naming: s.naming(),
+                hdr: HdrOptions {
+                    format: s.hdr_format.into(),
+                    ..Default::default()
+                },
+                sdr_format: s.sdr_format.into(),
+                ..Default::default()
+            };
+            name_preview(&input, &options)
+        };
+        assert_eq!(names(&s), ["Screenshot 1_hdr.png", "Screenshot 1_sdr.png"]);
+        s.subfolders = true;
+        s.type_suffix = false;
+        s.hdr_format = Format::Avif;
+        s.sdr_format = SdrKind::Jpeg;
+        assert_eq!(names(&s), ["hdr/Screenshot 1.avif", "sdr/Screenshot 1.jpg"]);
+        s.mode = Mode::Hdr;
+        s.save_to_folder = true;
+        s.output_dir = Some(std::env::temp_dir().join("out"));
+        assert_eq!(names(&s), ["hdr/Screenshot 1.avif"]);
     }
 
     #[test]

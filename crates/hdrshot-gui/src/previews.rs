@@ -150,10 +150,15 @@ pub fn texture(
     preview: &Preview,
     sdr: &SdrOptions,
 ) -> egui::TextureHandle {
+    ctx.load_texture(name, sdr_image(preview, sdr), egui::TextureOptions::LINEAR)
+}
+
+/// `preview` tone-mapped like the SDR PNG, as an image for a texture.
+pub fn sdr_image(preview: &Preview, sdr: &SdrOptions) -> egui::ColorImage {
     let image = &preview.image;
     let rgb = hdrshot_core::sdr_rgb8(image, &preview.levels, sdr);
     let size = [image.width as usize, image.height as usize];
-    let color = match &image.alpha {
+    match &image.alpha {
         None => egui::ColorImage::from_rgb(size, &rgb),
         Some(alpha) => {
             let rgba: Vec<u8> = rgb
@@ -165,8 +170,7 @@ pub fn texture(
                 .collect();
             egui::ColorImage::from_rgba_unmultiplied(size, &rgba)
         }
-    };
-    ctx.load_texture(name, color, egui::TextureOptions::LINEAR)
+    }
 }
 
 #[cfg(test)]

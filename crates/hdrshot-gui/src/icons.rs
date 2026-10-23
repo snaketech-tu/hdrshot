@@ -40,6 +40,18 @@ pub fn back(painter: &Painter, rect: Rect, color: Color32) {
     );
 }
 
+/// A ">": forward.
+pub fn forward(painter: &Painter, rect: Rect, color: Color32) {
+    painter.line(
+        vec![
+            at(rect, 0.38, 0.18),
+            at(rect, 0.7, 0.5),
+            at(rect, 0.38, 0.82),
+        ],
+        stroke(rect, color),
+    );
+}
+
 /// A "+": add.
 pub fn plus(painter: &Painter, rect: Rect, color: Color32) {
     let stroke = stroke(rect, color);

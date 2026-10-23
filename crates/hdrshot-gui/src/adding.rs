@@ -223,15 +223,16 @@ impl App {
                 }
                 ui.add_enabled_ui(!self.running(), |ui| {
                     ui.menu_button("Clear", |ui| {
+                        let ctx = ui.ctx().clone();
                         if ui.button("All files").clicked() {
-                            self.clear_all();
+                            self.clear_all(&ctx);
                         }
                         if ui
                             .add_enabled(converted > 0, egui::Button::new("Converted files"))
                             .on_hover_text("Keep the files still waiting or failed")
                             .clicked()
                         {
-                            self.clear_finished();
+                            self.clear_finished(&ctx);
                         }
                     })
                     .response

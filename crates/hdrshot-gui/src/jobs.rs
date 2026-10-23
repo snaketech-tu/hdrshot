@@ -128,6 +128,8 @@ impl App {
         };
         self.banner = false;
         self.notice = None;
+        // Undo would put rows back between the batch's rows.
+        self.removed = None;
         let clipboard = self
             .settings
             .copy_to_clipboard

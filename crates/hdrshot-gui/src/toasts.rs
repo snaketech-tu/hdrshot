@@ -79,6 +79,60 @@ impl App {
         }
     }
 
+    /// "Removed 5 images" with Undo, for a few seconds after removing
+    /// files; longer while the pointer is on it. Returns whether it shows.
+    pub(crate) fn undo_ui(&mut self, ctx: &egui::Context) -> bool {
+        let running = self.running();
+        let Some(removed) = &mut self.removed else {
+            return false;
+        };
+        let now = ctx.input(|i| i.time);
+        if now >= removed.until || running {
+            self.removed = None;
+            return false;
+        }
+        let count = removed.rows.len();
+        let mut undo = false;
+        let area = egui::Area::new(egui::Id::unique("undo"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 56.0))
+            .show(ctx, |ui| {
+                let visuals = ui.visuals();
+                egui::Frame::new()
+                    .fill(visuals.extreme_bg_color)
+                    .stroke(visuals.window_stroke)
+                    .corner_radius(8.0)
+                    .shadow(visuals.popup_shadow)
+                    .inner_margin(egui::Margin::symmetric(14, 8))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!("Removed {}", images(count))).size(14.0),
+                            );
+                            ui.add_space(8.0);
+                            let shortcut = if cfg!(target_os = "macos") {
+                                "Cmd+Z"
+                            } else {
+                                "Ctrl+Z"
+                            };
+                            undo = ui
+                                .button("Undo")
+                                .on_hover_text(format!("Put them back ({shortcut})"))
+                                .clicked();
+                        });
+                    });
+            });
+        if area.response.contains_pointer() {
+            removed.until = removed.until.max(now + 2.0);
+        }
+        if undo {
+            self.undo_remove();
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(removed.until - now));
+        }
+        true
+    }
+
     pub(crate) fn toast_ui(&mut self, ctx: &egui::Context) {
         while let Ok(copied) = self.copied.1.try_recv() {
             self.copied_ui(copied, ctx);
@@ -87,6 +141,8 @@ impl App {
             self.too_big_ui(ctx);
             return;
         }
+        // Below Undo, if it shows.
+        let top = if self.undo_ui(ctx) { 104.0 } else { 56.0 };
         let Some(toast) = &self.toast else { return };
         let left = toast.until - ctx.input(|i| i.time);
         if left <= 0.0 {
@@ -97,7 +153,7 @@ impl App {
         let opacity = (left / 0.5).min(1.0) as f32;
         egui::Area::new(egui::Id::unique("toast"))
             .order(egui::Order::Foreground)
-            .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 56.0))
+            .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, top))
             .interactable(false)
             .show(ctx, |ui| {
                 ui.set_opacity(opacity);

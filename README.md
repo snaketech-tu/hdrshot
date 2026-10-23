@@ -180,17 +180,36 @@ where it was last closed, at the same size.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
   preview. When the fine-tuning settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.
+  Click a thumbnail, or select a row and press Space, to see the image as
+  large as the window; the arrow keys and the buttons at the sides show the
+  previous and next image, and Escape, Space or a click beside the image
+  closes it. It is made when you open it and freed when you close it.
 - **The file list.** Each row shows a thumbnail, the image's size and type,
   and once converted the files made and their sizes, or why it failed.
   Hovering a row shows buttons to open the image, show it in its folder and
   remove it. Double-click a converted image to open it. Right-click a row to
   open the HDR or SDR image, show it in its folder, convert it again or
   remove it. **Clear**, above the list, removes all files or only the
-  converted ones. Click a row to select it; Delete removes it, Enter
-  converts the files not converted yet and the arrow keys move the
-  selection. Once every file is converted, the button turns into
+  converted ones. After removing, **Undo** puts the files back for a few
+  seconds. Once every file is converted, the button turns into
   **Convert again**, which converts them all again, for example after
   changing the settings.
+- **Selecting rows.** Click a row to select it, Ctrl-click to add or take
+  out more, Shift-click to select a range, and press Ctrl+A to select all
+  (Cmd on macOS). Right-click a selection to convert or remove all of it.
+  The keyboard shortcuts:
+
+  | Key | Does |
+  |---|---|
+  | Delete | Removes the selected rows |
+  | Ctrl+Z | Puts removed rows back |
+  | Enter | Converts the files not converted yet |
+  | Space | Shows the selected image as large as the window |
+  | Ctrl+C | Copies the selected image for Discord |
+  | Ctrl+O | Adds files |
+  | Ctrl+V | Adds files copied in Explorer or Finder |
+  | Arrow keys | Move the selection |
+  | Escape | Clears the selection, or closes Settings and the large preview |
 - **PNGs that already exist.** When some of the PNGs a batch would make
   are already there, the app asks once per batch whether to replace them,
   keep both (the new ones get a number, e.g. `shot_hdr (2).png`) or skip
@@ -214,7 +233,10 @@ where it was last closed, at the same size.
   each PNG the date of its screenshot so folders sorted by date stay in
   capture order. **Save HDR and SDR images in subfolders** writes them
   to `hdr` and `sdr` subfolders, and with that on, **End file names in _hdr
-  and _sdr** can be turned off. Under **Fine-tuning** it holds the tuning
+  and _sdr** can be turned off. Below these, it shows the exact names an
+  image gets with the current settings, using the first listed file.
+  **Theme** picks light or dark, or follows the system (the default).
+  Under **Fine-tuning** it holds the tuning
   options from the command line. They are off by default and reset every
   time the app starts, so results always match the original screenshot
   unless you change them; while they are changed, a **Custom tuning**
@@ -224,7 +246,11 @@ where it was last closed, at the same size.
   against the release's `SHA256SUMS.txt`: on Windows and Linux it replaces
   the app and restarts it, on macOS it opens the new disk image to drag to
   Applications. **Skip** keeps the current version.
-  The app only connects to GitHub when you press the button.
+  The app also checks by itself when it starts, at most once a week; when
+  there is a newer version, the button becomes **Update to** and the
+  version, and nothing else happens until you click it. Turn this off with
+  **Check for updates once a week** in Settings. The app connects only to
+  GitHub, only for these checks and updates.
 - While converting, the Windows taskbar button shows the progress, and the
   button flashes (the Dock icon bounces on macOS) when a batch finishes
   while you're in another window.

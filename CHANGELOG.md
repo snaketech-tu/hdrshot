@@ -17,6 +17,18 @@
   clicking it pauses watching.
 - While the list is empty, the app offers to watch the Game Bar folder and
   to open `.jxr` files with hdrshot.
+- Several rows can be selected with Ctrl-click, Shift-click and Ctrl+A, then
+  converted or removed together from the right-click menu or with Delete.
+  Ctrl+C copies the selected image for Discord and Ctrl+O adds files.
+- **Undo** after removing files or clearing the list, for a few seconds, or
+  Ctrl+Z.
+- Clicking a thumbnail, or pressing Space, shows the image as large as the
+  window, with the previous and next image a click or arrow key away.
+- Settings shows the exact names an image gets with the current settings.
+- A **Theme** setting: System, Light or Dark.
+- The desktop app checks for a newer version by itself once a week; when
+  there is one, the button at the bottom right becomes **Update to** and the
+  version. **Check for updates once a week** in Settings turns this off.
 
 ### Changed
 
