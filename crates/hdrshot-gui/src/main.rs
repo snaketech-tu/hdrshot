@@ -79,7 +79,7 @@ fn main() {
     let viewport = egui::ViewportBuilder::default()
         .with_title(format!("hdrshot {}", env!("CARGO_PKG_VERSION")))
         .with_app_id("hdrshot")
-        .with_inner_size([560.0, 820.0])
+        .with_inner_size([560.0, 640.0])
         .with_min_inner_size([420.0, 480.0])
         .with_drag_and_drop(true)
         .with_icon(icon());
@@ -135,10 +135,8 @@ struct App {
     /// A copy over Discord's size limit, and whether a smaller one is
     /// being made.
     too_big: Option<(TooBig, bool)>,
-    /// Height of the bottom panel without the Advanced settings' scroll
-    /// area, and of that area, from the last frame.
-    bottom_rest: f32,
-    advanced_height: f32,
+    /// Whether the Settings page shows in place of the file list.
+    settings_open: bool,
     /// Whether hdrshot opens `.jxr` files; rechecked when the window
     /// regains focus, since the choice is made in the system's settings.
     is_default_app: bool,
@@ -174,12 +172,6 @@ const DISCORD_COPY_HINT: &str = "Copy the image (the HDR one if made) as a PNG t
      correctly.\nDiscord turns HDR PNGs with a cICP chunk yellow, shows AVIF too bright and \
      Ultra HDR JPEGs in SDR, so the copy is an HDR PNG without that chunk.\nYour saved files \
      are unchanged.";
-
-/// Height kept for the title, drop area and a few rows of the file list
-/// when the Advanced settings are open.
-const MIN_LIST_AREA: f32 = 220.0;
-/// The Advanced settings never shrink below this; they scroll instead.
-const MIN_ADVANCED_HEIGHT: f32 = 120.0;
 
 const SETTINGS_KEY: &str = "settings";
 
@@ -228,8 +220,7 @@ impl App {
             toast: None,
             copied: channel(),
             too_big: None,
-            bottom_rest: 330.0,
-            advanced_height: 0.0,
+            settings_open: false,
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
             selected: None,
@@ -270,6 +261,7 @@ impl App {
         for files in batches {
             self.add_paths(files);
         }
+        self.settings_open = false;
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
@@ -435,6 +427,7 @@ impl window::App for App {
         });
         if !dropped.is_empty() {
             self.add_paths(dropped);
+            self.settings_open = false;
         }
         self.shortcuts(&ctx);
         self.receive_opened(&ctx);
@@ -448,24 +441,26 @@ impl window::App for App {
 
         let margin = egui::Margin::same(16);
         let panel_fill = ui.visuals().panel_fill;
-        self.advanced_height = 0.0;
-        let bottom = egui::Panel::bottom("actions")
-            .show_separator_line(false)
-            .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
-            .show(ui, |ui| {
-                ui.add_enabled_ui(!self.running(), |ui| self.settings_ui(ui));
-                ui.add_space(4.0);
-                self.action_bar(ui);
-                // Room for the update button, which is taller than the
-                // credit line it sits on.
-                ui.add_space(10.0);
-                let row = credit(ui);
-                self.update_button(ui, row);
-            });
-        self.bottom_rest = bottom.response.rect.height() - self.advanced_height;
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().inner_margin(margin).fill(panel_fill))
-            .show(ui, |ui| {
+        let frame = egui::Frame::new().inner_margin(margin).fill(panel_fill);
+        if self.settings_open {
+            egui::CentralPanel::default()
+                .frame(frame)
+                .show(ui, |ui| self.settings_page(ui));
+        } else {
+            egui::Panel::bottom("actions")
+                .show_separator_line(false)
+                .frame(frame)
+                .show(ui, |ui| {
+                    ui.add_enabled_ui(!self.running(), |ui| self.summary_chips(ui));
+                    ui.add_space(6.0);
+                    self.action_bar(ui);
+                    // Room for the update button, which is taller than the
+                    // credit line it sits on.
+                    ui.add_space(10.0);
+                    let row = credit(ui);
+                    self.update_button(ui, row);
+                });
+            egui::CentralPanel::default().frame(frame).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::Image::new((self.logo.id(), Vec2::splat(30.0))).corner_radius(7.0),
@@ -477,6 +472,12 @@ impl window::App for App {
                         ui.label(RichText::new("HDR image tool").size(12.0).weak());
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if theme::icon_button(ui, theme::paint_settings)
+                            .on_hover_text("Settings")
+                            .clicked()
+                        {
+                            self.settings_open = true;
+                        }
                         self.default_app_ui(ui);
                     });
                 });
@@ -489,6 +490,7 @@ impl window::App for App {
                     self.file_list(ui);
                 }
             });
+        }
         self.existing_dialog(&ctx);
         self.update_dialog(&ctx);
         self.toast_ui(&ctx);

@@ -61,11 +61,21 @@ impl App {
 
     /// Delete removes the selected row, Enter converts, and the arrow keys
     /// move the selection; not while a text field has focus or a batch runs.
+    /// On the Settings page, Escape goes back to the files.
     pub(crate) fn shortcuts(&mut self, ctx: &egui::Context) {
-        if self.running() || self.asking.is_some() || ctx.memory(|m| m.focused().is_some()) {
+        if self.asking.is_some() || ctx.memory(|m| m.focused().is_some()) {
             return;
         }
         let pressed = |key| ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
+        if self.settings_open {
+            if pressed(egui::Key::Escape) {
+                self.settings_open = false;
+            }
+            return;
+        }
+        if self.running() {
+            return;
+        }
         if let Some(i) = self.selected
             && (pressed(egui::Key::Delete) || pressed(egui::Key::Backspace))
         {
@@ -353,7 +363,7 @@ pub(crate) struct Entry {
 }
 
 /// The large preview of the row under the mouse, tone-mapped automatically
-/// and, if the Advanced settings are changed, with them.
+/// and, if the fine-tuning settings are changed, with them.
 pub(crate) struct Shown {
     pub(crate) path: PathBuf,
     pub(crate) sdr: SdrOptions,
@@ -417,7 +427,7 @@ pub(crate) fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) 
                 Some(tuned) => {
                     ui.label("Automatic");
                     show(ui, &shown.auto);
-                    ui.label("With your Advanced settings");
+                    ui.label("With your fine-tuning");
                     show(ui, tuned);
                 }
                 None => show(ui, &shown.auto),

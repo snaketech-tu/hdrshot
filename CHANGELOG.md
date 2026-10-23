@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- The desktop app's settings moved off the main window: a row of buttons
+  under the file list sums them up (what to create, where to save, the
+  largest size, what happens after converting) and opens a small menu for
+  each, and a Settings page, opened from the top right, holds all of them,
+  including the former Advanced section. The file list gets most of the
+  window, which opens 640 points tall, so it fits 1080p screens at 150%
+  scaling.
+
 ## [2.1.0] - 2026-10-21
 
 ### Added

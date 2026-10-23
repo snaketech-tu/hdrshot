@@ -255,6 +255,130 @@ pub fn segmented<T: PartialEq + Copy>(
     changed
 }
 
+/// A rounded button summing up one group of settings, with a chevron
+/// pointing up while its menu (`open`) shows. Accented ones stand out, for
+/// settings that differ from the usual.
+pub fn chip(ui: &mut egui::Ui, text: &str, open: bool, accented: bool) -> egui::Response {
+    let font = egui::FontId::proportional(12.5);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font, Color32::PLACEHOLDER);
+    let chevron = 8.0;
+    let size = Vec2::new(galley.size().x + chevron + 24.0, ROW_HEIGHT + 2.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let visuals = ui.visuals();
+    let enabled = ui.is_enabled();
+    let accent = visuals.selection.bg_fill;
+    let (fill, stroke) = if open || accented {
+        (accent.gamma_multiply(0.16), Stroke::new(1.0, accent))
+    } else if response.hovered() && enabled {
+        (
+            visuals.widgets.hovered.bg_fill,
+            visuals.widgets.noninteractive.bg_stroke,
+        )
+    } else {
+        (
+            visuals.faint_bg_color,
+            visuals.widgets.noninteractive.bg_stroke,
+        )
+    };
+    let mut text_color = visuals.text_color();
+    let mut weak = visuals.weak_text_color();
+    if !enabled {
+        text_color = text_color.gamma_multiply(0.45);
+        weak = weak.gamma_multiply(0.45);
+    }
+    let painter = ui.painter();
+    painter.rect(rect, size.y / 2.0, fill, stroke, StrokeKind::Inside);
+    let text_pos = egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0);
+    painter.galley_with_override_text_color(text_pos, galley, text_color);
+    let center = egui::pos2(rect.right() - 8.0 - chevron / 2.0, rect.center().y);
+    paint_chevron(painter, center, chevron, open, Stroke::new(1.5, weak));
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A small "v" `size` points wide, centered on `center`, or "^" when `up`.
+pub fn paint_chevron(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    size: f32,
+    up: bool,
+    stroke: Stroke,
+) {
+    let h = size / 4.0;
+    let (edge, tip) = if up { (h, -h) } else { (-h, h) };
+    painter.line(
+        vec![
+            center + Vec2::new(-size / 2.0, edge),
+            center + Vec2::new(0.0, tip),
+            center + Vec2::new(size / 2.0, edge),
+        ],
+        stroke,
+    );
+}
+
+/// A square button with a drawn icon, as the bundled fonts have no icon
+/// glyphs. `paint` draws it in the given rectangle and color.
+pub fn icon_button(
+    ui: &mut egui::Ui,
+    paint: impl FnOnce(&egui::Painter, egui::Rect, Color32),
+) -> egui::Response {
+    let size = Vec2::splat(ROW_HEIGHT + 4.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let visuals = ui.visuals();
+    let fill = if response.hovered() {
+        visuals.widgets.hovered.bg_fill
+    } else {
+        visuals.widgets.inactive.bg_fill
+    };
+    let color = if response.hovered() {
+        visuals.strong_text_color()
+    } else {
+        visuals.text_color()
+    };
+    ui.painter().rect_filled(rect, RADIUS, fill);
+    paint(ui.painter(), rect.shrink(8.0), color);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Two sliders, the icon of the Settings button.
+pub fn paint_settings(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let r = rect.width() * 0.15;
+    for (y, knob) in [(0.28, 0.68), (0.72, 0.36)] {
+        let y = rect.top() + rect.height() * y;
+        let x = rect.left() + rect.width() * knob;
+        painter.line_segment([egui::pos2(rect.left(), y), egui::pos2(x - r, y)], stroke);
+        painter.line_segment([egui::pos2(x + r, y), egui::pos2(rect.right(), y)], stroke);
+        painter.circle_stroke(egui::pos2(x, y), r, stroke);
+    }
+}
+
+/// A "<", the icon of the Back button.
+pub fn paint_back(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let c = rect.center();
+    let h = rect.height() * 0.32;
+    painter.line(
+        vec![
+            c + Vec2::new(h * 0.45, -h),
+            c + Vec2::new(-h * 0.55, 0.0),
+            c + Vec2::new(h * 0.45, h),
+        ],
+        Stroke::new(1.8, color),
+    );
+}
+
+/// The heading above a card of settings.
+pub fn section(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(6.0);
+    ui.label(
+        RichText::new(text)
+            .size(12.5)
+            .strong()
+            .color(ui.visuals().weak_text_color()),
+    );
+}
+
 /// A small rounded label with a tinted background, for a file's status.
 pub fn pill(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Response {
     let font = egui::FontId::proportional(12.0);

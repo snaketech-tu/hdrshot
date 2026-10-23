@@ -76,13 +76,13 @@ impl App {
         self.start_some(indices, ctx);
     }
 
-    /// The watch folder setting, at the top of the Advanced section.
+    /// The watch folder setting, on the Settings page.
     pub(crate) fn watch_ui(&mut self, ui: &mut egui::Ui) {
         let s = &mut self.settings;
         ui.horizontal(|ui| {
             ui.add_enabled(
                 s.watch_dir.is_some(),
-                egui::Checkbox::new(&mut s.watch, "Watch folder: convert new images in"),
+                egui::Checkbox::new(&mut s.watch, "Convert new images saved in"),
             )
             .on_hover_text(
                 "Convert each image saved to this folder from now on, such as a new \

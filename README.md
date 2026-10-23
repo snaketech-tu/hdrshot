@@ -120,10 +120,16 @@ cargo install hdrshot-gui    # desktop app
    too. Files opened while the app is running, for example several
    screenshots picked with **Open with**, go to the window that is already
    open.
-2. Choose **HDR + SDR**, **HDR only** or **SDR only**, the HDR format
-   (**PNG**, **AVIF** or **Ultra HDR JPEG**), the SDR format (**PNG** or
-   **JPEG**), and whether to save next to each image or into one folder.
+2. Check the row of buttons under the list, which sums up the settings:
+   what to create (for example **HDR PNG + SDR PNG**), where to save, the
+   largest size, and what happens after converting. Click one to change it:
+   **HDR + SDR**, **HDR only** or **SDR only**, the HDR format (**PNG**,
+   **AVIF** or **Ultra HDR JPEG**), the SDR format (**PNG** or **JPEG**),
+   and whether to save next to each image or into one folder.
 3. Press **Convert**.
+
+All settings are also on the **Settings** page, opened with the button at
+the top right; Esc or the back button returns to the list.
 
 <details>
 <summary>More options</summary>
@@ -153,7 +159,7 @@ cargo install hdrshot-gui    # desktop app
   macOS and Linux) clears out the originals once all of their files are
   saved. Images that fail, or whose files already existed, are kept, and so
   is everything when you stop a batch. It is off by default.
-- **Watch folder**, at the top of **Advanced**, converts each image saved to
+- **Watch folder**, in Settings, converts each image saved to
   the chosen folder from then on, with the current settings, as soon as it
   is completely written. On Windows it suggests the Game Bar captures
   folder (`Videos\Captures`). Images already in the folder are left alone,
@@ -162,7 +168,7 @@ cargo install hdrshot-gui    # desktop app
   last converted image** on, each new screenshot is on the clipboard, ready
   to paste into Discord.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
-  preview. When the Advanced settings are changed, the preview shows the
+  preview. When the fine-tuning settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.
 - **The file list.** Double-click a converted image to open it.
   Right-click a row to open the HDR or SDR PNG, show it in its folder,
@@ -188,14 +194,15 @@ cargo install hdrshot-gui    # desktop app
   On macOS, hdrshot is listed under **Open With** for all of these; to make
   it the default for a type, choose it in a file's **Get Info** window and
   click **Change All**.
-- **Advanced** also has **Keep the capture date** (on by default), which gives
+- **Settings** also has **Keep the capture date** (on by default), which gives
   each PNG the date of its screenshot so folders sorted by date stay in
   capture order. **Save HDR and SDR images in subfolders** writes them
   to `hdr` and `sdr` subfolders, and with that on, **End file names in _hdr
-  and _sdr** can be turned off. It also holds the tuning options from the
-  command line.
-  They are off by default and reset every time the app starts, so results
-  always match the original screenshot unless you change them.
+  and _sdr** can be turned off. Under **Fine-tuning** it holds the tuning
+  options from the command line. They are off by default and reset every
+  time the app starts, so results always match the original screenshot
+  unless you change them; while they are changed, a **Custom tuning**
+  button shows under the list.
 - **Check for updates**, at the bottom right, looks for a newer release on
   GitHub and shows its release notes. **Update** downloads it and checks it
   against the release's `SHA256SUMS.txt`: on Windows and Linux it replaces
