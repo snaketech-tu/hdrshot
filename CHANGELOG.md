@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- The desktop app shows a summary when a batch finishes: how many images
+  were saved, their size, where they went and anything that went wrong,
+  with **Open folder** and **Retry failed**.
+- While converting, the Convert button fills up as the batch progresses
+  and shows the time left.
+- Files can be dropped anywhere on the window.
+- The window opens where it was last closed, at the same size, and never
+  taller than the screen.
+- The save menu offers the last three folders used.
+- A pill at the top of the window shows the watch folder while it is on;
+  clicking it pauses watching.
+- While the list is empty, the app offers to watch the Game Bar folder and
+  to open `.jxr` files with hdrshot.
+
 ### Changed
 
 - The desktop app's settings moved off the main window: a row of buttons
@@ -11,6 +27,13 @@
   including the former Advanced section. The file list gets most of the
   window, which opens 640 points tall, so it fits 1080p screens at 150%
   scaling.
+- A new look for the desktop app: the Inter typeface, drawn icons, larger
+  thumbnails, rows that show each image's size and type and, once
+  converted, the files made and their sizes, or why it failed, and buttons
+  on each row that show when you hover it. Secondary text has more
+  contrast, and keyboard focus is outlined.
+- **Convert** converts only the files not converted yet; once all are
+  converted, **Convert again** converts them all again.
 
 ## [2.1.0] - 2026-10-21
 

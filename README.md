@@ -114,8 +114,9 @@ cargo install hdrshot-gui    # desktop app
 
 ## Desktop app
 
-1. Drop `.jxr` files or folders onto the window, click the drop area to
-   choose files, or paste files copied in Explorer or Finder with Ctrl+V.
+1. Drop `.jxr` files or folders anywhere on the window, click the drop
+   area or **Add files** to choose files, or paste files copied in Explorer
+   or Finder with Ctrl+V.
    On Windows and Linux, files dropped onto the program's icon are added
    too. Files opened while the app is running, for example several
    screenshots picked with **Open with**, go to the window that is already
@@ -125,11 +126,16 @@ cargo install hdrshot-gui    # desktop app
    largest size, and what happens after converting. Click one to change it:
    **HDR + SDR**, **HDR only** or **SDR only**, the HDR format (**PNG**,
    **AVIF** or **Ultra HDR JPEG**), the SDR format (**PNG** or **JPEG**),
-   and whether to save next to each image or into one folder.
-3. Press **Convert**.
+   and whether to save next to each image, into one of the last three
+   folders used, or into a new one.
+3. Press **Convert**. It converts the files not converted yet and shows
+   the progress and the time left. When it is done, a summary above the
+   settings shows how many images were saved, their size and anything that
+   went wrong, with **Open folder** and **Retry failed**.
 
 All settings are also on the **Settings** page, opened with the button at
-the top right; Esc or the back button returns to the list.
+the top right; Esc or the back button returns to the list. The window opens
+where it was last closed, at the same size.
 
 <details>
 <summary>More options</summary>
@@ -142,7 +148,8 @@ the top right; Esc or the back button returns to the list.
   for Windows Photos and HDR viewers. When the copy is larger than
   Discord's 10 MB upload limit, the app offers **Copy a smaller version**,
   which copies it at 1440p, or 1080p or 720p if needed, so it fits. The
-  saved PNGs stay at full size. With AVIF or Ultra HDR JPEG as the HDR
+  saved PNGs stay at full size. The button shows when you hover a row, and
+  stays on the image converted last. With AVIF or Ultra HDR JPEG as the HDR
   format, the copy is an HDR PNG made for Discord, since Discord shows
   AVIF too bright and Ultra HDR JPEGs in SDR only. For the last image of a
   batch, which is copied automatically, the app makes it while converting;
@@ -164,18 +171,26 @@ the top right; Esc or the back button returns to the list.
   is completely written. On Windows it suggests the Game Bar captures
   folder (`Videos\Captures`). Images already in the folder are left alone,
   and PNGs are ignored, since hdrshot writes its own there. It works while
-  the app is open, and resumes when the app starts again. With **Copy the
+  the app is open, and resumes when the app starts again. While it is on, a
+  pill at the top of the window names the folder; click it to pause
+  watching until you click it again or restart the app. With **Copy the
   last converted image** on, each new screenshot is on the clipboard, ready
-  to paste into Discord.
+  to paste into Discord. While the list is empty, the app offers to turn it
+  on for the Game Bar folder.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
   preview. When the fine-tuning settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.
-- **The file list.** Double-click a converted image to open it.
-  Right-click a row to open the HDR or SDR PNG, show it in its folder,
-  convert it again or remove it. **Clear** removes all files or only the
-  converted ones, and **Retry failed** converts the failed ones again.
-  Click a row to select it; Delete removes it, Enter converts the list and
-  the arrow keys move the selection.
+- **The file list.** Each row shows a thumbnail, the image's size and type,
+  and once converted the files made and their sizes, or why it failed.
+  Hovering a row shows buttons to open the image, show it in its folder and
+  remove it. Double-click a converted image to open it. Right-click a row to
+  open the HDR or SDR image, show it in its folder, convert it again or
+  remove it. **Clear**, above the list, removes all files or only the
+  converted ones. Click a row to select it; Delete removes it, Enter
+  converts the files not converted yet and the arrow keys move the
+  selection. Once every file is converted, the button turns into
+  **Convert again**, which converts them all again, for example after
+  changing the settings.
 - **PNGs that already exist.** When some of the PNGs a batch would make
   are already there, the app asks once per batch whether to replace them,
   keep both (the new ones get a number, e.g. `shot_hdr (2).png`) or skip
@@ -183,8 +198,9 @@ the top right; Esc or the back button returns to the list.
 - **Resolution** scales the output down to 2160p, 1440p, 1080p or 720p,
   keeping the aspect ratio and never scaling up. It starts at Source every
   time.
-- **Open .jxr files with hdrshot** (Windows and Linux) makes a double-click
-  on a screenshot open it in the app. Windows asks you to confirm the choice
+- **Open .jxr files with hdrshot** (Windows and Linux), in Settings and
+  offered while the list is empty, makes a double-click on a screenshot
+  open it in the app. Windows asks you to confirm the choice
   in Settings. It also lists hdrshot under **Open with** for `.wdp`, `.exr`,
   `.jxl` and `.hdr` files, without making it their default.
   On Windows it also adds **Convert with hdrshot** to the right-click menu
@@ -492,6 +508,10 @@ platforms and publishes the release with notes from
 ## License
 
 [Apache-2.0](https://github.com/snaketech-tu/hdrshot/blob/main/LICENSE)
+
+The desktop app uses the [Inter](https://rsms.me/inter/) typeface by
+Rasmus Andersson, under the
+[SIL Open Font License 1.1](https://github.com/snaketech-tu/hdrshot/blob/main/crates/hdrshot-gui/assets/fonts/Inter-LICENSE.txt).
 
 Made by snake.tech. If hdrshot is useful to you, you can support it on
 [Ko-fi](https://ko-fi.com/snake_tech).

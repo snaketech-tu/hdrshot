@@ -3,6 +3,9 @@
 
 use super::*;
 
+/// How many folders saved into before the save menu offers.
+const RECENT_DIRS: usize = 3;
+
 /// Height limits offered for the output, `None` keeping the source size.
 const HEIGHTS: [Option<u32>; 5] = [None, Some(2160), Some(1440), Some(1080), Some(720)];
 
@@ -10,7 +13,7 @@ impl App {
     /// The row of chips under the file list.
     pub(crate) fn summary_chips(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+            ui.spacing_mut().item_spacing = Vec2::new(5.0, 6.0);
             let output = self.settings.output_summary();
             chip_menu(ui, "output", &output, false, "What to create", |ui| {
                 settings_grid(ui, "output menu", |ui| self.output_rows(ui));
@@ -18,7 +21,9 @@ impl App {
             let save = self.settings.save_summary();
             let no_folder = self.settings.save_to_folder && self.settings.output_dir.is_none();
             chip_menu(ui, "save", &save, no_folder, "Where to save", |ui| {
-                self.save_to_ui(ui);
+                if self.save_menu(ui) {
+                    ui.close();
+                }
             });
             let size = size_summary(self.max_height);
             chip_menu(ui, "size", &size, false, "Largest output size", |ui| {
@@ -68,14 +73,14 @@ impl App {
     /// The Settings page, in place of the file list.
     pub(crate) fn settings_page(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if theme::icon_button(ui, theme::paint_back)
+            if theme::icon_button(ui, icons::back)
                 .on_hover_text("Back to the files (Esc)")
                 .clicked()
             {
                 self.settings_open = false;
             }
             ui.add_space(2.0);
-            ui.label(RichText::new("Settings").strong().size(19.0));
+            ui.label(RichText::new("Settings").font(theme::semibold(18.0)));
         });
         ui.add_space(4.0);
         egui::ScrollArea::vertical()
@@ -83,6 +88,10 @@ impl App {
             .show(ui, |ui| {
                 if self.running() {
                     ui.weak("Settings can be changed once the images are converted.");
+                }
+                if assoc::SUPPORTED {
+                    theme::section(ui, "General");
+                    theme::card(ui, |ui| self.default_app_ui(ui));
                 }
                 ui.add_enabled_ui(!self.running(), |ui| {
                     theme::section(ui, "Output");
@@ -234,39 +243,59 @@ impl App {
         }
     }
 
-    /// The choice between each image's folder and one chosen folder.
-    pub(crate) fn save_to_ui(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            let s = &mut self.settings;
-            ui.radio_value(&mut s.save_to_folder, false, "Same folder as each image");
-            ui.horizontal(|ui| {
-                ui.radio_value(&mut s.save_to_folder, true, "");
-                let label = match &s.output_dir {
-                    Some(dir) => dir.display().to_string(),
-                    None => "Choose a folder…".to_owned(),
-                };
-                let button = ui
-                    .add(egui::Button::new(label).truncate())
-                    .on_hover_text("Choose the folder to save into");
-                if button.clicked() {
-                    let mut dialog = rfd::FileDialog::new().set_title("Save images to");
-                    if let Some(dir) = &s.output_dir {
-                        dialog = dialog.set_directory(dir);
-                    }
-                    if let Some(dir) = dialog.pick_folder() {
-                        s.output_dir = Some(dir);
-                        s.save_to_folder = true;
-                    }
-                }
-            });
-        });
+    /// The choices of where to save: next to each original, one of the
+    /// folders chosen lately, or a new one. Returns whether one was made.
+    pub(crate) fn save_menu(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut chosen = false;
+        let folders = self.settings.save_folders();
+        let s = &mut self.settings;
+        if ui
+            .selectable_label(!s.save_to_folder, "Next to each original")
+            .on_hover_text("Save the new files in the folder of the image they come from")
+            .clicked()
+        {
+            s.save_to_folder = false;
+            chosen = true;
+        }
+        for dir in folders {
+            let selected = s.save_to_folder && s.output_dir.as_ref() == Some(&dir);
+            if ui
+                .selectable_label(selected, folder_name(&dir))
+                .on_hover_text(dir.display().to_string())
+                .clicked()
+            {
+                s.use_output_dir(dir);
+                chosen = true;
+            }
+        }
+        ui.separator();
+        if ui.button("Choose a folder…").clicked() {
+            let mut dialog = rfd::FileDialog::new().set_title("Save images to");
+            if let Some(dir) = &s.output_dir {
+                dialog = dialog.set_directory(dir);
+            }
+            if let Some(dir) = dialog.pick_folder() {
+                s.use_output_dir(dir);
+            }
+            chosen = true;
+        }
+        chosen
     }
 
     /// Where the images go and how they are named.
     pub(crate) fn saving_ui(&mut self, ui: &mut egui::Ui) {
         settings_grid(ui, "saving", |ui| {
             theme::row_label(ui, "Save to");
-            self.save_to_ui(ui);
+            let selected = match (&self.settings.output_dir, self.settings.save_to_folder) {
+                (_, false) => "Next to each original".to_owned(),
+                (Some(dir), true) => dir.display().to_string(),
+                (None, true) => "Choose a folder…".to_owned(),
+            };
+            egui::ComboBox::from_id_salt("save to")
+                .selected_text(selected)
+                .width(ui.available_width().min(300.0))
+                .truncate()
+                .show_ui(ui, |ui| self.save_menu(ui));
             ui.end_row();
         });
         ui.add_space(4.0);
@@ -459,6 +488,12 @@ pub(crate) struct Settings {
     /// Convert new images saved to `watch_dir`.
     pub(crate) watch: bool,
     pub(crate) watch_dir: Option<PathBuf>,
+    /// Folders saved into before, newest first, offered in the save menu.
+    pub(crate) recent_dirs: Vec<PathBuf>,
+    /// Tips of the empty window the user hid.
+    pub(crate) hidden_tips: Vec<String>,
+    /// Where the window was when hdrshot last closed.
+    pub(crate) window: Option<window::Place>,
 }
 
 impl Settings {
@@ -503,14 +538,31 @@ impl Settings {
             return "Next to originals".to_owned();
         }
         match &self.output_dir {
-            Some(dir) => {
-                let name = dir
-                    .file_name()
-                    .map_or_else(|| dir.display().to_string(), |n| n.to_string_lossy().into());
-                format!("In {name}")
-            }
+            Some(dir) => format!("In {}", folder_name(dir)),
             None => "Choose a folder".to_owned(),
         }
+    }
+
+    /// Saves into `dir` from now on and puts it first in the save menu.
+    pub(crate) fn use_output_dir(&mut self, dir: PathBuf) {
+        self.recent_dirs.retain(|d| d != &dir);
+        self.recent_dirs.insert(0, dir.clone());
+        self.recent_dirs.truncate(RECENT_DIRS);
+        self.output_dir = Some(dir);
+        self.save_to_folder = true;
+    }
+
+    /// The folders the save menu offers: the chosen one and the recent
+    /// ones that still exist.
+    pub(crate) fn save_folders(&self) -> Vec<PathBuf> {
+        let mut folders: Vec<PathBuf> = Vec::new();
+        for dir in self.output_dir.iter().chain(&self.recent_dirs) {
+            if !folders.contains(dir) && dir.is_dir() {
+                folders.push(dir.clone());
+            }
+        }
+        folders.truncate(RECENT_DIRS);
+        folders
     }
 
     /// What the chip for the steps after converting says.
@@ -540,6 +592,9 @@ impl Default for Settings {
             trash_originals: false,
             watch: false,
             watch_dir: watching::default_watch_dir(),
+            recent_dirs: Vec::new(),
+            hidden_tips: Vec::new(),
+            window: None,
         }
     }
 }
@@ -664,6 +719,8 @@ mod tests {
             path: PathBuf::new(),
             status: Status::Waiting,
             size,
+            info: String::new(),
+            saved: String::new(),
             thumb: Thumb::Failed,
         }
     }
@@ -690,6 +747,24 @@ mod tests {
         assert_eq!(output_size(&mixed, Some(1440)), OutputSize::Varies);
         assert_eq!(output_size(&[], Some(1080)), OutputSize::Unknown);
         assert_eq!(output_size(&[entry(None)], None), OutputSize::Unknown);
+    }
+
+    #[test]
+    fn recent_folders_come_newest_first() {
+        let mut s = Settings::default();
+        let base = std::env::temp_dir();
+        for name in ["a", "b", "c", "d", "b"] {
+            s.use_output_dir(base.join(name));
+        }
+        assert_eq!(
+            s.recent_dirs,
+            [base.join("b"), base.join("d"), base.join("c")]
+        );
+        assert_eq!(s.output_dir, Some(base.join("b")));
+        // Only folders that exist are offered.
+        s.recent_dirs.push(base.clone());
+        s.output_dir = Some(base.clone());
+        assert_eq!(s.save_folders(), [base]);
     }
 
     #[test]

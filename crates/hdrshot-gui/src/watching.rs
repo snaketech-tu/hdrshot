@@ -16,11 +16,12 @@ pub(crate) struct Watching {
 }
 
 impl App {
-    /// Starts or stops watching to match the settings.
+    /// Starts or stops watching to match the settings and the pause.
     pub(crate) fn sync_watch(&mut self, ctx: &egui::Context) {
-        let wanted = self
-            .settings
-            .watch
+        if !self.settings.watch {
+            self.watch_paused = false;
+        }
+        let wanted = (self.settings.watch && !self.watch_paused)
             .then(|| self.settings.watch_dir.clone())
             .flatten();
         if self.watching.as_ref().map(|w| &w.dir) == wanted.as_ref() {
@@ -74,6 +75,72 @@ impl App {
             .filter_map(|p| self.files.iter().position(|e| &e.path == p))
             .collect();
         self.start_some(indices, ctx);
+    }
+
+    /// The pill in the header while the watch folder is on: a green dot
+    /// and the folder's name. Clicking it pauses watching until clicked
+    /// again or hdrshot restarts.
+    pub(crate) fn watch_pill(&mut self, ui: &mut egui::Ui) {
+        let Some(dir) = self
+            .settings
+            .watch_dir
+            .as_ref()
+            .filter(|_| self.settings.watch)
+        else {
+            return;
+        };
+        let paused = self.watch_paused;
+        let mut name = folder_name(dir);
+        if name.chars().count() > 18 {
+            name = name.chars().take(17).collect::<String>() + "…";
+        }
+        let text = if paused {
+            "Watching paused".to_owned()
+        } else {
+            format!("Watching {name}")
+        };
+        let font = egui::FontId::proportional(12.5);
+        let galley = ui
+            .painter()
+            .layout_no_wrap(text, font, Color32::PLACEHOLDER);
+        let size = Vec2::new(galley.size().x + 34.0, theme::ROW_HEIGHT);
+        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+        let visuals = ui.visuals();
+        let ok = ok_color(ui);
+        let (fill, dot) = if paused {
+            (visuals.widgets.inactive.bg_fill, visuals.weak_text_color())
+        } else {
+            (ok.gamma_multiply(0.14), ok)
+        };
+        let fill = if response.hovered() {
+            visuals.widgets.hovered.bg_fill
+        } else {
+            fill
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, size.y / 2.0, fill);
+        painter.circle_filled(egui::pos2(rect.left() + 14.0, rect.center().y), 3.5, dot);
+        let text_pos = egui::pos2(rect.left() + 24.0, rect.center().y - galley.size().y / 2.0);
+        painter.galley_with_override_text_color(text_pos, galley, visuals.text_color());
+        theme::focus_ring(ui, &response, size.y / 2.0);
+        let hint = if paused {
+            format!(
+                "Not watching {} now. Click to watch it again.",
+                dir.display()
+            )
+        } else {
+            format!(
+                "Converting new images saved in {}. Click to pause.",
+                dir.display()
+            )
+        };
+        if response
+            .on_hover_text(hint)
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        {
+            self.watch_paused = !paused;
+        }
     }
 
     /// The watch folder setting, on the Settings page.

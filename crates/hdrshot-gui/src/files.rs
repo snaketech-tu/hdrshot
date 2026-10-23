@@ -1,43 +1,8 @@
-//! The drop area and the list of files, with their rows and menus.
+//! The list of files, with their rows and menus.
 
 use super::*;
 
 impl App {
-    pub(crate) fn add_paths(&mut self, paths: impl IntoIterator<Item = PathBuf>) {
-        let mut skipped = 0;
-        for path in paths {
-            if path.is_dir() {
-                for file in hdrshot_core::find_inputs(&path, true) {
-                    self.add_file(file);
-                }
-            } else if hdrshot_core::is_supported(&path) {
-                self.add_file(path);
-            } else {
-                skipped += 1;
-            }
-        }
-        self.notice = (skipped > 0).then(|| {
-            format!(
-                "Skipped {skipped} file{} that {} not a supported image.",
-                if skipped == 1 { "" } else { "s" },
-                if skipped == 1 { "is" } else { "are" }
-            )
-        });
-    }
-
-    pub(crate) fn add_file(&mut self, path: PathBuf) {
-        if !self.files.iter().any(|e| e.path == path) {
-            let size = hdrshot_core::input::dimensions(&path).ok();
-            self.previews.request(&path);
-            self.files.push(Entry {
-                path,
-                status: Status::Waiting,
-                size,
-                thumb: Thumb::Loading,
-            });
-        }
-    }
-
     pub(crate) fn failed(&self) -> Vec<usize> {
         (0..self.files.len())
             .filter(|&i| matches!(self.files[i].status, Status::Failed(_)))
@@ -55,12 +20,22 @@ impl App {
         let selected = self.selected.map(|i| self.files[i].path.clone());
         self.files.retain(|e| !matches!(e.status, Status::Done(_)));
         self.selected = selected.and_then(|p| self.files.iter().position(|e| e.path == p));
-        self.progress = (0, 0);
+        self.banner = false;
         self.notice = None;
     }
 
-    /// Delete removes the selected row, Enter converts, and the arrow keys
-    /// move the selection; not while a text field has focus or a batch runs.
+    /// Empties the list.
+    pub(crate) fn clear_all(&mut self) {
+        self.files.clear();
+        self.selected = None;
+        self.batch = Batch::default();
+        self.banner = false;
+        self.notice = None;
+    }
+
+    /// Delete removes the selected row, Enter converts the files not
+    /// converted yet, and the arrow keys move the selection; not while a
+    /// text field has focus or a batch runs.
     /// On the Settings page, Escape goes back to the files.
     pub(crate) fn shortcuts(&mut self, ctx: &egui::Context) {
         if self.asking.is_some() || ctx.memory(|m| m.focused().is_some()) {
@@ -82,7 +57,10 @@ impl App {
             self.remove(i);
         }
         if pressed(egui::Key::Enter) && self.can_convert() {
-            self.start(ctx);
+            let pending = self.pending();
+            if !pending.is_empty() {
+                self.start_some(pending, ctx);
+            }
         }
         let last = self.files.len().checked_sub(1);
         if pressed(egui::Key::ArrowDown) {
@@ -130,114 +108,37 @@ impl App {
             .map(Path::to_path_buf)
     }
 
-    pub(crate) fn drop_zone(&mut self, ui: &mut egui::Ui, height: f32) {
-        let hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
-        let (rect, response) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
-        // Files can be added during a batch too: they go at the end of the
-        // list, outside the batch.
-        let visuals = ui.visuals();
-        let accent = visuals.selection.bg_fill;
-        let highlight = hovering || response.hovered();
-        let fill = if highlight {
-            accent.gamma_multiply(0.15)
-        } else {
-            visuals.faint_bg_color
-        };
-        let stroke = if highlight {
-            Stroke::new(2.0, accent)
-        } else {
-            Stroke::new(1.5, visuals.weak_text_color().gamma_multiply(0.5))
-        };
-        let painter = ui.painter();
-        painter.rect_filled(rect, 12.0, fill);
-        if highlight {
-            painter.rect_stroke(rect, 12.0, stroke, StrokeKind::Inside);
-        } else {
-            dashed_outline(painter, rect.shrink(1.0), 12.0, stroke);
-        }
-
-        let text_color = visuals.text_color();
-        let weak = visuals.weak_text_color();
-        let center = rect.center();
-        let (title, hint) = if hovering {
-            ("Release to add", "")
-        } else {
-            (
-                "Drop HDR images or folders here",
-                "or click to choose files",
-            )
-        };
-        let big = height > 120.0;
-        if big {
-            // Drawn as shapes: egui's bundled fonts have no arrow glyphs.
-            painter.circle_filled(
-                center - Vec2::new(0.0, 38.0),
-                30.0,
-                accent.gamma_multiply(if highlight { 0.25 } else { 0.12 }),
-            );
-            let arrow = Stroke::new(3.0, accent);
-            let tip = center - Vec2::new(0.0, 24.0);
-            painter.line_segment([center - Vec2::new(0.0, 52.0), tip], arrow);
-            painter.line(
-                vec![
-                    tip + Vec2::new(-10.0, -10.0),
-                    tip,
-                    tip + Vec2::new(10.0, -10.0),
-                ],
-                arrow,
-            );
-        }
-        let title_y = if big { 14.0 } else { -9.0 };
-        painter.text(
-            center + Vec2::new(0.0, title_y),
-            egui::Align2::CENTER_CENTER,
-            title,
-            egui::FontId::proportional(17.0),
-            text_color,
-        );
-        painter.text(
-            center + Vec2::new(0.0, title_y + 22.0),
-            egui::Align2::CENTER_CENTER,
-            hint,
-            egui::FontId::proportional(13.0),
-            weak,
-        );
-
-        if response
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
-            && let Some(paths) = rfd::FileDialog::new()
-                .set_title("Choose HDR images")
-                .add_filter("HDR images", &INPUT_EXTENSIONS)
-                .pick_files()
-        {
-            self.add_paths(paths);
-        }
-    }
-
     pub(crate) fn file_list(&mut self, ui: &mut egui::Ui) {
         let running = self.running();
         let mut action = None;
         let mut hovered_thumb = None;
-        let card = ui.visuals().faint_bg_color;
-        let selection = ui.visuals().selection.bg_fill.gamma_multiply(0.3);
-        let hover = ui.visuals().widgets.inactive.weak_bg_fill;
+        let visuals = ui.visuals();
+        let card = visuals.faint_bg_color;
+        let selection = visuals.selection.bg_fill.gamma_multiply(0.25);
+        let hover = visuals.widgets.inactive.weak_bg_fill;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 4.0;
+                ui.spacing_mut().item_spacing.y = 6.0;
                 for (i, entry) in self.files.iter().enumerate() {
-                    let (rect, row) = ui
-                        .allocate_exact_size(Vec2::new(ui.available_width(), 44.0), Sense::click());
-                    let fill = if self.selected == Some(i) {
+                    let (rect, row) = ui.allocate_exact_size(
+                        Vec2::new(ui.available_width(), ROW_HEIGHT),
+                        Sense::click(),
+                    );
+                    if !ui.is_rect_visible(rect) {
+                        continue;
+                    }
+                    // The row's buttons take the hover from the row itself.
+                    let pointed = ui.rect_contains_pointer(rect);
+                    let selected = self.selected == Some(i);
+                    let fill = if selected {
                         selection
-                    } else if row.hovered() {
+                    } else if pointed {
                         hover
                     } else {
                         card
                     };
-                    ui.painter().rect_filled(rect, 8.0, fill);
+                    ui.painter().rect_filled(rect, 9.0, fill);
                     let outputs = match &entry.status {
                         Status::Done(outputs) if outputs.hdr.is_some() || outputs.sdr.is_some() => {
                             Some(outputs)
@@ -260,28 +161,69 @@ impl App {
                     });
 
                     let inner = egui::UiBuilder::new()
-                        .max_rect(rect.shrink2(Vec2::new(10.0, 0.0)))
+                        .max_rect(rect.shrink2(Vec2::new(8.0, 0.0)))
                         .layout(egui::Layout::right_to_left(egui::Align::Center));
                     ui.scope_builder(inner, |ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        if !running
-                            && ui
-                                .small_button("×")
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        ui.add_space(4.0);
+                        status_icon(ui, &entry.status);
+                        ui.add_space(4.0);
+                        let full = pointed || selected;
+                        if full
+                            && !running
+                            && theme::small_icon_button(ui, icons::cross)
                                 .on_hover_text("Remove from the list")
                                 .clicked()
                         {
                             action = Some(RowAction::Remove(i));
                         }
-                        status_ui(ui, &entry.status);
+                        // The output once there is one, else the original.
+                        let shown = primary.unwrap_or(&entry.path);
+                        if full
+                            && theme::small_icon_button(ui, icons::folder)
+                                .on_hover_text("Show in folder")
+                                .clicked()
+                        {
+                            action = Some(RowAction::ShowInFolder(shown.clone()));
+                        }
+                        if full
+                            && let Some(path) = primary
+                            && theme::small_icon_button(ui, icons::open)
+                                .on_hover_text(format!(
+                                    "Open {}",
+                                    path.file_name().unwrap_or_default().to_string_lossy()
+                                ))
+                                .clicked()
+                        {
+                            action = Some(RowAction::Open(path.clone()));
+                        }
+                        // The newest result keeps its button, ready to share.
+                        let latest = self.last_converted.as_ref() == Some(&entry.path);
                         if let Some(outputs) = outputs
-                            && ui
+                            && (full || latest)
+                        {
+                            ui.add_space(4.0);
+                            if ui
                                 .small_button("Copy for Discord")
                                 .on_hover_text(DISCORD_COPY_HINT)
                                 .clicked()
-                        {
-                            action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
+                            {
+                                action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
+                            }
                         }
+                        if matches!(entry.status, Status::Failed(_)) && !running {
+                            ui.add_space(4.0);
+                            if ui
+                                .small_button("Retry")
+                                .on_hover_text("Convert it again")
+                                .clicked()
+                            {
+                                action = Some(RowAction::Retry(i));
+                            }
+                        }
+                        ui.add_space(8.0);
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.add_space(2.0);
                             if thumb_ui(
                                 ui,
                                 &entry.thumb,
@@ -289,9 +231,39 @@ impl App {
                             ) {
                                 hovered_thumb = Some(i);
                             }
-                            let name = entry.path.file_name().unwrap_or_default().to_string_lossy();
-                            ui.add(egui::Label::new(name.as_ref()).truncate().selectable(false))
+                            ui.add_space(8.0);
+                            // Sized to the two lines, so the row centers them.
+                            let (name_font, detail_font) = (
+                                egui::FontId::proportional(13.5),
+                                egui::FontId::proportional(12.0),
+                            );
+                            let height = ui.ctx().fonts_mut(|f| {
+                                f.row_height(&name_font) + f.row_height(&detail_font)
+                            }) + 3.0;
+                            let size = Vec2::new(ui.available_width(), height);
+                            let layout = egui::Layout::top_down(egui::Align::Min);
+                            ui.allocate_ui_with_layout(size, layout, |ui| {
+                                ui.spacing_mut().item_spacing.y = 3.0;
+                                let name =
+                                    entry.path.file_name().unwrap_or_default().to_string_lossy();
+                                ui.add(
+                                    egui::Label::new(RichText::new(name.as_ref()).font(name_font))
+                                        .truncate()
+                                        .selectable(false),
+                                )
                                 .on_hover_text(entry.path.display().to_string());
+                                let (detail, color) = detail(ui, entry);
+                                let label = ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&detail).font(detail_font).color(color),
+                                    )
+                                    .truncate()
+                                    .selectable(false),
+                                );
+                                if matches!(entry.status, Status::Failed(_)) {
+                                    label.on_hover_text(detail);
+                                }
+                            });
                         });
                     });
                 }
@@ -359,7 +331,92 @@ pub(crate) struct Entry {
     pub(crate) status: Status,
     /// Source width and height, if the file's header could be read.
     pub(crate) size: Option<(u32, u32)>,
+    /// What the row says about the original, e.g. "3840 × 2160 · JXR ·
+    /// 24.1 MB".
+    pub(crate) info: String,
+    /// What the row says once converted, e.g. "HDR PNG 10.2 MB · SDR PNG
+    /// 2.1 MB".
+    pub(crate) saved: String,
     pub(crate) thumb: Thumb,
+}
+
+/// Height of a row in the list.
+const ROW_HEIGHT: f32 = 58.0;
+
+/// The second line of a row and its color.
+fn detail(ui: &egui::Ui, entry: &Entry) -> (String, Color32) {
+    let weak = ui.visuals().weak_text_color();
+    match &entry.status {
+        Status::Waiting => (entry.info.clone(), weak),
+        Status::Converting => ("Converting…".to_owned(), theme::accent(ui)),
+        Status::Done(_) => (entry.saved.clone(), weak),
+        Status::Failed(error) => (format!("Failed: {error}"), ui.visuals().error_fg_color),
+    }
+}
+
+/// What a row says about an original: its size in pixels, type and size
+/// on disk, as far as known.
+pub(crate) fn input_info(path: &Path, size: Option<(u32, u32)>, bytes: Option<u64>) -> String {
+    let mut parts = Vec::new();
+    if let Some((w, h)) = size {
+        parts.push(format!("{w} × {h}"));
+    }
+    if let Some(ext) = path.extension() {
+        parts.push(ext.to_string_lossy().to_uppercase());
+    }
+    if let Some(bytes) = bytes {
+        parts.push(hdrshot_core::share::megabytes(bytes));
+    }
+    parts.join(" · ")
+}
+
+/// What a row says once its original is converted, and the size of the
+/// files written.
+pub(crate) fn saved_summary(outputs: &Outputs) -> (String, u64) {
+    let mut parts = Vec::new();
+    let mut total = 0;
+    for (path, hdr) in [(&outputs.hdr, true), (&outputs.sdr, false)] {
+        let Some(path) = path else { continue };
+        let kind = output_kind(path, hdr);
+        match std::fs::metadata(path) {
+            Ok(meta) => {
+                total += meta.len();
+                parts.push(format!(
+                    "{kind} {}",
+                    hdrshot_core::share::megabytes(meta.len())
+                ));
+            }
+            Err(_) => parts.push(kind),
+        }
+    }
+    let kept = outputs.skipped.len();
+    if parts.is_empty() {
+        parts.push("Already there, left alone".to_owned());
+    } else if kept > 0 {
+        parts.push(format!(
+            "{kept} existing file{} kept",
+            if kept == 1 { "" } else { "s" }
+        ));
+    }
+    if outputs.sdr_input {
+        parts.push("the original is SDR".to_owned());
+    }
+    (parts.join(" · "), total)
+}
+
+/// "HDR PNG", "Ultra HDR JPEG", "SDR JPEG" and so on, from the file's
+/// extension.
+fn output_kind(path: &Path, hdr: bool) -> String {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    match (hdr, ext.as_str()) {
+        (true, "jpg" | "jpeg") => "Ultra HDR JPEG".to_owned(),
+        (false, "jpg" | "jpeg") => "SDR JPEG".to_owned(),
+        (true, ext) => format!("HDR {}", ext.to_uppercase()),
+        (false, ext) => format!("SDR {}", ext.to_uppercase()),
+    }
 }
 
 /// The large preview of the row under the mouse, tone-mapped automatically
@@ -397,25 +454,29 @@ pub(crate) fn after_removal(selected: Option<usize>, removed: usize) -> Option<u
     }
 }
 
-/// The thumbnail at the start of a row, with the large preview `shown` (if
-/// it is this row's) when hovered. Returns whether it is hovered.
+/// The thumbnail at the start of a row, filling its box and cropped to it,
+/// with the large preview `shown` (if it is this row's) when hovered.
+/// Returns whether it is hovered.
 pub(crate) fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) -> bool {
     let box_size = Vec2::new(THUMB_SIZE.0 as f32, THUMB_SIZE.1 as f32);
+    let radius = 5.0;
+    let (rect, response) = ui.allocate_exact_size(box_size, Sense::hover());
     let Thumb::Ready { texture, .. } = thumb else {
-        let (rect, _) = ui.allocate_exact_size(box_size, Sense::hover());
-        if matches!(thumb, Thumb::Loading) {
-            ui.painter()
-                .rect_filled(rect.shrink(2.0), 3.0, ui.visuals().faint_bg_color);
+        let visuals = ui.visuals();
+        ui.painter()
+            .rect_filled(rect, radius, visuals.widgets.inactive.bg_fill);
+        if matches!(thumb, Thumb::Failed) {
+            let icon = egui::Rect::from_center_size(rect.center(), Vec2::splat(18.0));
+            icons::image(ui.painter(), icon, visuals.weak_text_color());
         }
         return false;
     };
     let [w, h] = texture.size();
-    let (w, h) = hdrshot_core::resize::fit_box(w as u32, h as u32, THUMB_SIZE.0, THUMB_SIZE.1);
-    let (rect, response) = ui.allocate_exact_size(box_size, Sense::hover());
-    let image_rect = egui::Rect::from_center_size(rect.center(), Vec2::new(w as f32, h as f32));
-    egui::Image::new((texture.id(), image_rect.size()))
-        .corner_radius(2.0)
-        .paint_at(ui, image_rect);
+    let uv = cover_uv(w as f32 / h.max(1) as f32, box_size.x / box_size.y);
+    egui::Image::new((texture.id(), box_size))
+        .uv(uv)
+        .corner_radius(radius)
+        .paint_at(ui, rect);
     let hovered = response.hovered();
     if let Some(shown) = shown {
         response.on_hover_ui(|ui| {
@@ -436,6 +497,18 @@ pub(crate) fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) 
         });
     }
     hovered
+}
+
+/// The part of an image with aspect ratio `image` that fills a box with
+/// aspect ratio `fill`, centered, in texture coordinates.
+fn cover_uv(image: f32, fill: f32) -> egui::Rect {
+    if image > fill {
+        let crop = (1.0 - fill / image) / 2.0;
+        egui::Rect::from_min_max(egui::pos2(crop, 0.0), egui::pos2(1.0 - crop, 1.0))
+    } else {
+        let crop = (1.0 - image / fill) / 2.0;
+        egui::Rect::from_min_max(egui::pos2(0.0, crop), egui::pos2(1.0, 1.0 - crop))
+    }
 }
 
 /// The right-click menu of a row.
@@ -497,14 +570,28 @@ pub(crate) fn row_menu(
     action
 }
 
-pub(crate) fn status_ui(ui: &mut egui::Ui, status: &Status) {
+/// The drawn icon at the end of a row: a ring of dots while waiting, a
+/// spinner while converting, a check once done and a "!" if it failed.
+/// Hovering it lists the files saved, or the error.
+pub(crate) fn status_icon(ui: &mut egui::Ui, status: &Status) {
+    let size = Vec2::splat(20.0);
+    let radius = 9.0;
+    if let Status::Converting = status {
+        ui.add_sized(
+            size,
+            egui::Spinner::new().size(16.0).color(theme::accent(ui)),
+        );
+        return;
+    }
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let center = rect.center();
+    let painter = ui.painter();
+    let weak = ui.visuals().weak_text_color();
     match status {
+        Status::Converting => {}
         Status::Waiting => {
-            theme::pill(ui, "Waiting", ui.visuals().weak_text_color());
-        }
-        Status::Converting => {
-            ui.spinner();
-            theme::pill(ui, "Converting", theme::accent(ui));
+            icons::waiting(painter, center, radius * 0.8, weak);
+            response.on_hover_text("Waiting to be converted");
         }
         Status::Done(outputs) => {
             let list = |paths: &mut dyn Iterator<Item = &PathBuf>| {
@@ -527,13 +614,15 @@ pub(crate) fn status_ui(ui: &mut egui::Ui, status: &Status) {
                     format!("This is an SDR image, so only the SDR image was made.\n\n{tooltip}");
             }
             if saved.is_empty() {
-                theme::pill(ui, "Skipped", ui.visuals().weak_text_color()).on_hover_text(tooltip);
+                icons::skipped(painter, center, radius, weak);
             } else {
-                theme::pill(ui, "Done", ok_color(ui)).on_hover_text(tooltip);
+                icons::done(painter, center, radius, ok_color(ui));
             }
+            response.on_hover_text(tooltip);
         }
         Status::Failed(error) => {
-            theme::pill(ui, "Failed", ui.visuals().error_fg_color).on_hover_text(error);
+            icons::failed(painter, center, radius, ui.visuals().error_fg_color);
+            response.on_hover_text(error);
         }
     }
 }
@@ -648,5 +737,40 @@ mod tests {
         assert_eq!(after_removal(Some(3), 1), Some(2));
         assert_eq!(after_removal(Some(1), 3), Some(1));
         assert_eq!(after_removal(None, 0), None);
+    }
+
+    #[test]
+    fn thumbnails_are_cropped_to_fill() {
+        let wide = cover_uv(2.0, 1.0);
+        assert_eq!(wide.min, egui::pos2(0.25, 0.0));
+        assert_eq!(wide.max, egui::pos2(0.75, 1.0));
+        let tall = cover_uv(0.5, 1.0);
+        assert_eq!(tall.min, egui::pos2(0.0, 0.25));
+        let same = cover_uv(16.0 / 9.0, 16.0 / 9.0);
+        assert_eq!(
+            same,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0))
+        );
+    }
+
+    #[test]
+    fn rows_describe_their_files() {
+        let path = Path::new("shot.jxr");
+        assert_eq!(
+            input_info(path, Some((3840, 2160)), Some(24_100_000)),
+            "3840 × 2160 · JXR · 24.1 MB"
+        );
+        assert_eq!(input_info(path, None, None), "JXR");
+        assert_eq!(output_kind(Path::new("a.jpg"), true), "Ultra HDR JPEG");
+        assert_eq!(output_kind(Path::new("a.avif"), true), "HDR AVIF");
+        assert_eq!(output_kind(Path::new("a.jpg"), false), "SDR JPEG");
+        let skipped = Outputs {
+            skipped: vec![PathBuf::from("shot_hdr.png")],
+            ..Default::default()
+        };
+        assert_eq!(
+            saved_summary(&skipped),
+            ("Already there, left alone".into(), 0)
+        );
     }
 }
