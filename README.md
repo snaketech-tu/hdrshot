@@ -51,7 +51,8 @@ updates**.
 - **Drag and drop.** Drop files or whole folders, pick HDR, SDR or both,
   press Convert.
 - **Copy for Discord.** One click puts the image on the clipboard in a
-  form Discord shows with correct colors.
+  form Discord shows with correct colors. On Windows you can also drag it
+  straight from the list into Discord.
 - **Other HDR inputs.** Also reads OpenEXR (`.exr`), Radiance (`.hdr`),
   HDR PNG and JPEG XL (`.jxl`) files, for game photo modes, renders and re-tone-mapping.
 - **Watch folder.** Optionally converts each new screenshot saved to a
@@ -157,6 +158,11 @@ where it was last closed, at the same size.
   batch, which is copied automatically, the app makes it while converting;
   for the others, **Copy for Discord** makes it, which takes a second or
   two.
+- **Drag out** (Windows). Drag a converted image from the list into
+  Discord, a browser upload or a folder to drop the same file that **Copy
+  for Discord** gives; with several rows selected, all of them go. When an
+  AVIF or Ultra HDR image's PNG for Discord isn't made yet, the first drag
+  makes it and the app says when it is ready to drag.
 - **Discord-compatible PNG**, below the HDR format, saves HDR PNGs without
   the `cICP` and `mDCV` chunks, like the Discord copy, for uploading the
   saved files to Discord yourself. Windows Photos and most HDR viewers then
@@ -422,13 +428,14 @@ Windows, create the PowerShell completion script with
 ## Sharing on Discord
 
 Discord does not show every HDR file the way an HDR viewer does, so the
-**Copy for Discord** button and `--copy` do not always copy the saved file
-unchanged. The saved files are never modified.
+**Copy for Discord** button, dragging an image out of the desktop app's
+list and `--copy` do not always give the saved file unchanged. The saved
+files are never modified.
 
 | Saved HDR format | What Discord does with it | What gets copied |
 | --- | --- | --- |
 | PNG | Its image service converts PNGs that carry a `cICP` chunk to SDR with swapped colors, so warm scenes turn yellow. Without the chunk, it shows the image in HDR. | The same PNG without the `cICP` and `mDCV` chunks. The ICC profile, which also marks the image as BT.2020 PQ, stays and is kept under 32 KB, since Discord drops larger profiles. |
-| AVIF | Ignores the PQ transfer, so the image looks far too bright. | An HDR PNG made for Discord and kept in a temporary folder. The desktop app makes it while converting the last image of a batch, and for the others when Copy for Discord is clicked. |
+| AVIF | Ignores the PQ transfer, so the image looks far too bright. | An HDR PNG made for Discord and kept in a temporary folder. The desktop app makes it while converting the last image of a batch, and for the others when Copy for Discord is clicked or the image is first dragged out. |
 | Ultra HDR JPEG | Drops the gain map and shows only the SDR base image. | The same HDR PNG made for Discord. |
 
 The saved PNG keeps `cICP` because Windows Photos and most HDR image viewers

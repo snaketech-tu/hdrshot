@@ -162,13 +162,21 @@ fn discord_path(hdr: &Path) -> PathBuf {
         .join(hdr.with_extension("png").file_name().unwrap_or_default())
 }
 
+/// The Discord PNG of the HDR output `hdr`, if made since `hdr` was last
+/// written.
+fn ready_discord_png(hdr: &Path) -> Option<PathBuf> {
+    let modified = |path: &Path| std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    let ready = discord_path(hdr);
+    (modified(&ready)? >= modified(hdr)?).then_some(ready)
+}
+
 /// Whether copying `outputs` first has to make the Discord PNG of an AVIF or
 /// Ultra HDR result, which takes a second or two.
 pub fn copy_makes_png(outputs: &Outputs) -> bool {
     outputs.hdr.as_ref().is_some_and(|hdr| {
         !hdr.extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("png"))
-            && !discord_path(hdr).is_file()
+            && ready_discord_png(hdr).is_none()
     })
 }
 
@@ -197,59 +205,63 @@ pub struct TooBig {
     pub size: u64,
 }
 
-/// Put one of `outputs`, made from `input`, on the clipboard as a file,
-/// preferring the HDR one, so pasting it (into Discord, a browser or a
-/// folder) gives the full image, HDR included. An HDR PNG is copied without
-/// its `cICP` chunk so that it also shows right on Discord. AVIF and Ultra
-/// HDR outputs are copied as such a PNG too, because Discord shows AVIF too
-/// bright and Ultra HDR JPEGs in SDR only: the one made while converting,
-/// or one made from `input` now if there is none.
+/// The file of `outputs`, made from `input`, that Copy for Discord and
+/// dragging the row out give: the HDR one if made, so pasting or dropping
+/// it (into Discord, a browser or a folder) gives the full image, HDR
+/// included. An HDR PNG is given without its `cICP` chunk so that it also
+/// shows right on Discord. AVIF and Ultra HDR outputs are given as such a
+/// PNG too, because Discord shows AVIF too bright and Ultra HDR JPEGs in
+/// SDR only: the one made while converting, or one made from `input` now
+/// if there is none. Returns the file and whether it is HDR.
+pub fn discord_file(
+    input: &Path,
+    outputs: &Outputs,
+    options: &ConvertOptions,
+) -> Result<(PathBuf, bool), String> {
+    let path = match (&outputs.hdr, &outputs.sdr) {
+        (Some(hdr), _) => hdr.as_path(),
+        (None, Some(sdr)) => return Ok((sdr.clone(), false)),
+        (None, None) => return Err("Nothing to copy".to_owned()),
+    };
+    if let Some(ready) = ready_discord_png(path) {
+        return Ok((ready, true));
+    }
+    let png = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("png"));
+    let made = if png {
+        std::fs::read(path).map(|bytes| hdrshot_core::for_discord(&bytes))
+    } else {
+        share::discord_png(input, options).map_err(std::io::Error::other)
+    };
+    let ready = discord_path(path);
+    made.and_then(|png| {
+        std::fs::create_dir_all(ready.parent().unwrap_or(Path::new(".")))?;
+        std::fs::write(&ready, png)
+    })
+    .map(|()| (ready, true))
+    .map_err(|e| e.to_string())
+}
+
+/// Put [`discord_file`] of `outputs` on the clipboard as a file.
 pub fn copy(
     clipboard: &SharedClipboard,
     input: &Path,
     outputs: &Outputs,
     options: &ConvertOptions,
 ) -> Copied {
-    // The HDR PNG when there is one: it is the faithful copy.
-    let (path, hdr) = match (&outputs.hdr, &outputs.sdr) {
-        (Some(hdr), _) => (hdr.as_path(), true),
-        (None, Some(sdr)) => (sdr.as_path(), false),
-        (None, None) => return Copied::from("Nothing to copy".to_string()),
-    };
-    let png = path
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("png"));
-    let name = if png {
-        path.file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned()
-    } else {
-        path.with_extension("png")
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned()
-    };
-    let ready = discord_path(path);
-    let copy = if !hdr {
-        Ok(path.to_path_buf())
-    } else if png {
-        std::fs::read(path).and_then(|bytes| share::clipboard_file(&name, &bytes, true))
-    } else if ready.is_file() {
-        Ok(ready)
-    } else {
-        share::discord_png(input, options)
-            .map_err(std::io::Error::other)
-            .and_then(|bytes| share::clipboard_file(&name, &bytes, false))
-    };
-    let copy = match copy {
-        Ok(copy) => copy,
+    let (copy, hdr) = match discord_file(input, outputs, options) {
+        Ok(file) => file,
         Err(e) => return Copied::from(format!("Could not copy to the clipboard: {e}")),
     };
     if let Err(e) = set_file(clipboard, copy.clone()) {
         return Copied::from(e);
     }
+    let name = copy
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
     let size = std::fs::metadata(&copy).map_or(0, |m| m.len());
     if size > share::DISCORD_LIMIT {
         Copied {
