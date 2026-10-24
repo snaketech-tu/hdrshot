@@ -74,24 +74,28 @@ impl App {
         let tip_id = egui::Id::unique("empty window tip height");
         let tip_height = ui.data(|d| d.get_temp::<f32>(tip_id)).unwrap_or_default();
         let available = ui.available_height();
-        let tip_dir = watching::default_watch_dir()
+        let folder = watching::capture_folders()
+            .first()
             .filter(|_| self.shows_tip(WATCH_TIP) && available - tip_height >= MIN_DROP_HEIGHT);
-        let reserved = if tip_dir.is_some() { tip_height } else { 0.0 };
+        let reserved = if folder.is_some() { tip_height } else { 0.0 };
         self.drop_area(ui, (available - reserved).max(MIN_DROP_HEIGHT));
         let top = ui.cursor().top();
-        if let Some(dir) = tip_dir {
+        if let Some(folder) = folder {
             match tip(
                 ui,
                 icons::eye,
-                "Watch the Game Bar folder",
-                "Convert new HDR screenshots as soon as you take them, while \
-                 hdrshot is open.",
+                &format!("Watch the {} folder", folder.app),
+                &format!(
+                    "Convert new {} screenshots as soon as you take them, while \
+                     hdrshot is open.",
+                    folder.app
+                ),
                 "Turn on",
             ) {
                 Some(true) => {
                     let ctx = ui.ctx().clone();
-                    self.show_toast(format!("Watching {}", dir.display()), &ctx);
-                    self.settings.watch_dir = Some(dir);
+                    self.show_toast(format!("Watching {}", folder.dir.display()), &ctx);
+                    self.settings.watch_dir = Some(folder.dir.clone());
                     self.settings.watch = true;
                 }
                 Some(false) => self.settings.hidden_tips.push(WATCH_TIP.into()),
@@ -111,11 +115,16 @@ impl App {
             return false;
         }
         match name {
+            // Not once another folder is chosen to watch.
             WATCH_TIP => {
-                let default = watching::default_watch_dir();
+                let folders = watching::capture_folders();
                 !self.settings.watch
-                    && default.is_some()
-                    && (self.settings.watch_dir.is_none() || self.settings.watch_dir == default)
+                    && !folders.is_empty()
+                    && self
+                        .settings
+                        .watch_dir
+                        .as_ref()
+                        .is_none_or(|dir| folders.iter().any(|f| &f.dir == dir))
             }
             _ => false,
         }

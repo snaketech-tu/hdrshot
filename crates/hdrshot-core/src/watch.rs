@@ -1,5 +1,6 @@
-//! Watching a folder for new images, such as the Xbox Game Bar captures
-//! folder, to convert each one as it is saved.
+//! Watching a folder and its subfolders for new images, such as the Xbox
+//! Game Bar captures folder or the NVIDIA app's folder with one subfolder
+//! per game, to convert each one as it is saved.
 //!
 //! A new file is reported once, when it looks finished: its size hasn't
 //! changed for [`SETTLE`] and it can be opened. Only files that appear after
@@ -8,7 +9,6 @@
 //! input type and what hdrshot itself writes into the folder.
 
 use std::collections::{HashMap, HashSet};
-use std::ffi::OsString;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{RecvTimeoutError, channel};
@@ -31,7 +31,7 @@ pub struct FolderWatch {
     _watcher: RecommendedWatcher,
 }
 
-/// Starts watching `dir` (not its subfolders) and calls `found` from a
+/// Starts watching `dir` and its subfolders and calls `found` from a
 /// background thread with each new image once it is completely written.
 pub fn watch_folder(
     dir: &Path,
@@ -39,30 +39,33 @@ pub fn watch_folder(
 ) -> notify::Result<FolderWatch> {
     let (tx, rx) = channel();
     let mut watcher = notify::recommended_watcher(tx)?;
-    watcher.watch(dir, RecursiveMode::NonRecursive)?;
-    // The folder's files from before watching started. macOS can report a
-    // change to one of them as a creation, so they are told apart by name
-    // (event paths may spell the folder differently, e.g. /private/var)
-    // until they are deleted or renamed away.
-    let mut existing: HashSet<OsString> = std::fs::read_dir(dir)?
-        .filter_map(|entry| Some(entry.ok()?.file_name()))
-        .collect();
+    watcher.watch(dir, RecursiveMode::Recursive)?;
+    // The files from before watching started. macOS can report a change to
+    // one of them as a creation, so they are left out until deleted or
+    // renamed away.
+    let mut existing = Existing::new(dir);
     thread::spawn(move || {
         let mut pending: HashMap<PathBuf, Pending> = HashMap::new();
         let mut reported: HashSet<PathBuf> = HashSet::new();
         loop {
             match rx.recv_timeout(POLL) {
                 Ok(Ok(event)) => {
-                    let new = matches!(
-                        event.kind,
-                        EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))
-                    );
+                    let created = matches!(event.kind, EventKind::Create(_));
+                    let new =
+                        created || matches!(event.kind, EventKind::Modify(ModifyKind::Name(_)));
                     for path in event.paths {
-                        if let Some(name) = path.file_name()
-                            && existing.contains(name)
-                        {
-                            if !path.exists() {
-                                existing.remove(name);
+                        if existing.forget_if_gone(&path) {
+                            continue;
+                        }
+                        // A new subfolder, such as the folder of a game's
+                        // first screenshot: files saved in it before it was
+                        // watched too are found by looking inside. A folder
+                        // renamed or moved in keeps its files unreported.
+                        if created && path.is_dir() {
+                            for file in files_under(&path) {
+                                if is_watched(&file) && !reported.contains(&file) {
+                                    pending.entry(file).or_insert_with(Pending::new);
+                                }
                             }
                             continue;
                         }
@@ -95,6 +98,68 @@ pub fn watch_folder(
         }
     });
     Ok(FolderWatch { _watcher: watcher })
+}
+
+/// The files of the watched folder from before watching started, by path
+/// from the folder.
+struct Existing {
+    /// Spellings of the watched folder that event paths may start with,
+    /// e.g. both `/var/...` and `/private/var/...` on macOS.
+    roots: Vec<PathBuf>,
+    files: HashSet<PathBuf>,
+}
+
+impl Existing {
+    fn new(dir: &Path) -> Self {
+        let files = files_under(dir)
+            .iter()
+            .filter_map(|f| Some(f.strip_prefix(dir).ok()?.to_path_buf()))
+            .collect();
+        let mut roots = vec![dir.to_path_buf()];
+        roots.extend(std::path::absolute(dir).ok());
+        roots.extend(dir.canonicalize().ok());
+        Self { roots, files }
+    }
+
+    /// Whether `path` is one of the files, which it stops being once it is
+    /// gone.
+    fn forget_if_gone(&mut self, path: &Path) -> bool {
+        let relative = match self.roots.iter().find_map(|r| path.strip_prefix(r).ok()) {
+            Some(relative) => relative.to_path_buf(),
+            // A spelling not foreseen: matched by its end.
+            None => match self.files.iter().find(|f| path.ends_with(f)) {
+                Some(file) => file.clone(),
+                None => return false,
+            },
+        };
+        if !self.files.contains(&relative) {
+            return false;
+        }
+        if !path.exists() {
+            self.files.remove(&relative);
+        }
+        true
+    }
+}
+
+/// The files in `dir` and its subfolders, without following links to
+/// folders.
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut folders = vec![dir.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => folders.push(entry.path()),
+                Ok(_) => files.push(entry.path()),
+                Err(_) => {}
+            }
+        }
+    }
+    files
 }
 
 /// Whether a new file at `path` is one to report.
@@ -193,6 +258,63 @@ mod tests {
         thread::sleep(SETTLE);
         assert_eq!(*found.lock().unwrap(), [dir.join("new.jxr")]);
         drop(watch);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reports_new_images_in_subfolders() {
+        let dir = std::env::temp_dir().join(format!("hdrshot-watch-sub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Old Game")).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        std::fs::write(dir.join("Old Game").join("old.jxr"), b"existing").unwrap();
+        let found = Arc::new(Mutex::new(Vec::new()));
+        let sink = found.clone();
+        let watch = watch_folder(&dir, move |path| sink.lock().unwrap().push(path)).unwrap();
+
+        // As the NVIDIA app does for a game's first screenshot: a new
+        // folder, and the screenshot in it right away.
+        let new_game = dir.join("New Game");
+        std::fs::create_dir(&new_game).unwrap();
+        std::fs::write(new_game.join("first.jxr"), b"screenshot").unwrap();
+        std::fs::write(dir.join("Old Game").join("second.jxr"), b"screenshot").unwrap();
+        std::fs::write(dir.join("Old Game").join("old.jxr"), b"changed").unwrap();
+
+        let deadline = Instant::now() + SETTLE * 5;
+        while found.lock().unwrap().len() < 2 && Instant::now() < deadline {
+            thread::sleep(POLL);
+        }
+        thread::sleep(SETTLE);
+        let mut found = found.lock().unwrap().clone();
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                new_game.join("first.jxr"),
+                dir.join("Old Game").join("second.jxr")
+            ]
+        );
+        drop(watch);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn existing_files_by_any_spelling() {
+        let dir = std::env::temp_dir().join(format!("hdrshot-existing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Game")).unwrap();
+        std::fs::write(dir.join("Game").join("old.jxr"), b"existing").unwrap();
+        std::fs::write(dir.join("top.jxr"), b"existing").unwrap();
+        let mut existing = Existing::new(&dir);
+        assert!(existing.forget_if_gone(&dir.join("Game").join("old.jxr")));
+        assert!(existing.forget_if_gone(&dir.canonicalize().unwrap().join("top.jxr")));
+        // A folder spelled some other way, matched by the path's end.
+        assert!(existing.forget_if_gone(Path::new("/elsewhere/Game/old.jxr")));
+        assert!(!existing.forget_if_gone(&dir.join("Game").join("top.jxr")));
+        assert!(!existing.forget_if_gone(&dir.join("new.jxr")));
+        std::fs::remove_file(dir.join("top.jxr")).unwrap();
+        assert!(existing.forget_if_gone(&dir.join("top.jxr")));
+        assert!(!existing.forget_if_gone(&dir.join("top.jxr")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

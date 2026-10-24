@@ -23,8 +23,8 @@ Ultra HDR JPEG and SDR PNG.**
 
 </div>
 
-Windows Game Bar and Xbox save HDR screenshots as JPEG XR, a format few
-applications can open. hdrshot converts them, and other HDR images, to
+Windows Game Bar, the NVIDIA app and Xbox save HDR screenshots as JPEG XR,
+a format few applications can open. hdrshot converts them, and other HDR images, to
 formats that can be viewed and shared: HDR PNG, AVIF or Ultra HDR JPEG for
 screens and apps that support HDR, and SDR PNG for everything else, without
 changing how the picture looks.
@@ -55,7 +55,8 @@ updates**.
 - **Other HDR inputs.** Also reads OpenEXR (`.exr`), Radiance (`.hdr`),
   HDR PNG and JPEG XL (`.jxl`) files, for game photo modes, renders and re-tone-mapping.
 - **Watch folder.** Optionally converts each new screenshot saved to a
-  folder, such as the Game Bar captures folder, as soon as it is written.
+  folder, such as the Game Bar or NVIDIA app captures folder, as soon as it
+  is written.
 - **Double-click or right-click to convert.** Optionally opens `.jxr` files
   with hdrshot on Windows and Linux, is listed under **Open with** for the
   other formats it reads, and on Windows adds **Convert with hdrshot** to
@@ -167,16 +168,19 @@ where it was last closed, at the same size.
   saved. Images that fail, or whose files already existed, are kept, and so
   is everything when you stop a batch. It is off by default.
 - **Watch folder**, in Settings, converts each image saved to
-  the chosen folder from then on, with the current settings, as soon as it
-  is completely written. On Windows it suggests the Game Bar captures
-  folder (`Videos\Captures`). Images already in the folder are left alone,
-  and PNGs are ignored, since hdrshot writes its own there. It works while
+  the chosen folder or its subfolders from then on, with the current
+  settings, as soon as it is completely written. On Windows its menu offers
+  the Game Bar captures folder (`Videos\Captures`) and the NVIDIA app's
+  (`Videos\NVIDIA`, with a subfolder per game) when they exist. Images
+  already in the folder are left alone, and PNGs are ignored, since hdrshot
+  writes its own there. It works while
   the app is open, and resumes when the app starts again. While it is on, a
   pill at the top of the window names the folder; click it to pause
   watching until you click it again or restart the app. With **Copy the
   last converted image** on, each new screenshot is on the clipboard, ready
   to paste into Discord. While the list is empty, the app offers to turn it
-  on for the Game Bar folder.
+  on for the Game Bar or NVIDIA app folder, whichever holds the newest HDR
+  screenshot.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
   preview. When the fine-tuning settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.
@@ -358,7 +362,7 @@ values are in nits and must be above 0.
 
 | Option | Effect |
 | --- | --- |
-| `--watch <FOLDER>` | Watch this folder, such as the Game Bar captures folder, and convert each new image saved there until Ctrl+C. Images already in it are left alone; any inputs given are converted first. With `--copy`, each new result is copied |
+| `--watch <FOLDER>` | Watch this folder and its subfolders, such as the Game Bar captures folder or the NVIDIA app's (`Videos\NVIDIA`), and convert each new image saved there until Ctrl+C. Images already in it are left alone; any inputs given are converted first. With `--copy`, each new result is copied |
 | `--trash-originals` | Move each input to the Recycle Bin (Trash on macOS and Linux) once all of its outputs are written. Inputs that failed, or whose outputs already existed, are kept |
 
 ### Messages and scripting
