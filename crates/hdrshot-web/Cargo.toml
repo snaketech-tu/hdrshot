@@ -1,0 +1,17 @@
+[package]
+name = "hdrshot-web"
+description = "WebAssembly build of hdrshot-core for the browser version of hdrshot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hdrshot-core = { version = "2.2.0", path = "../hdrshot-core" }
+# Must match the wasm-bindgen CLI that release.yml installs.
+wasm-bindgen = "=0.2.129"

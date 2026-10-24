@@ -15,6 +15,7 @@ Ultra HDR JPEG and SDR PNG.**
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555?style=flat-square)
 
 [**Download**](https://github.com/snaketech-tu/hdrshot/releases/latest) ·
+[Try it in your browser](https://snaketech-tu.github.io/hdrshot/) ·
 [Desktop app](#desktop-app) ·
 [Command line](#command-line) ·
 [How it works](#how-it-works)
@@ -116,6 +117,24 @@ With [Rust](https://rustup.rs) 1.99 or newer installed, both tools can also be b
 cargo install hdrshot        # command-line tool
 cargo install hdrshot-gui    # desktop app
 ```
+
+### In the browser
+
+To convert a few images without installing anything, open
+[snaketech-tu.github.io/hdrshot](https://snaketech-tu.github.io/hdrshot/). It
+runs the same conversion as the desktop app, with the same defaults, on your
+computer: images are never uploaded. It works in current versions of Chrome,
+Edge, Firefox and Safari.
+
+The desktop app is faster and does more:
+
+| | Desktop app | Browser version |
+| --- | --- | --- |
+| Inputs and outputs | All formats | All formats |
+| Speed | All CPU cores for each image | One core per image; AVIF takes about four times as long |
+| Saving | Next to the originals or into a folder, keeping the capture date | Downloads (one file or a .zip that keeps the capture date), or into a folder in Chrome and Edge |
+| Copy for Discord | Clipboard, and drag out on Windows | Download, then drop the file into Discord; browsers can't copy HDR images |
+| Watch folder, tray, right-click convert, Recycle Bin | Yes | No |
 
 ## Desktop app
 
@@ -546,6 +565,16 @@ cargo run --release -p hdrshot -- --help
 | `crates/hdrshot-cli` | `hdrshot` command-line tool |
 | `crates/hdrshot-gui` | Desktop app with drag-and-drop (egui) |
 | `crates/egui-software-backend` | CPU renderer for the desktop app |
+| `crates/hdrshot-web`, `web/` | Browser version (WebAssembly) |
+
+To build and try the browser version, add the `wasm32-unknown-unknown` target
+and install the [wasm-bindgen CLI](https://github.com/wasm-bindgen/wasm-bindgen)
+of the version in `Cargo.lock`, then:
+
+```sh
+web/build.sh
+python3 -m http.server -d target/web
+```
 
 Captures are too large to keep in the repository. Point the sample test at
 a folder of them:
@@ -557,6 +586,8 @@ HDRSHOT_SAMPLES=/path/to/jxr/folder cargo test --release -p hdrshot-core --test 
 Releases are built by GitHub Actions: pushing a `v*` tag builds all three
 platforms and publishes the release with notes from
 [CHANGELOG.md](https://github.com/snaketech-tu/hdrshot/blob/main/CHANGELOG.md).
+After each release, the browser version is published to GitHub Pages from
+the same commit.
 
 ## License
 

@@ -4,6 +4,7 @@ members = [
     "crates/hdrshot-core",
     "crates/hdrshot-cli",
     "crates/hdrshot-gui",
+    "crates/hdrshot-web",
     "crates/egui-software-backend",
 ]
 

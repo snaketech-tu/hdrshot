@@ -1,0 +1,72 @@
+name: Web app
+
+# Builds the browser version (web/ and crates/hdrshot-web) and publishes it
+# on GitHub Pages, https://snaketech-tu.github.io/hdrshot/.
+#
+# It runs after each successful release, from the released commit, so the
+# page always matches the latest downloads. To publish a fix to the page
+# alone, run it by hand on the release tag or on main. Pull requests that
+# change how the page is built run the build without publishing.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+  pull_request:
+    paths: [".github/workflows/pages.yml", "web/build.sh"]
+
+permissions:
+  contents: read
+
+# One deployment at a time, and never cut one short.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARYEN: version_123
+
+jobs:
+  build:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event != 'pull_request')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-bindgen and wasm-opt
+        # The wasm-bindgen CLI must be the version of the crate in Cargo.lock.
+        run: |
+          version=$(awk '/^name = "wasm-bindgen"$/ { getline; gsub(/[^0-9.]/, ""); print }' Cargo.lock)
+          bindgen="wasm-bindgen-$version-x86_64-unknown-linux-musl"
+          curl -sSfL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$version/$bindgen.tar.gz" |
+            tar -xz -C "$RUNNER_TEMP"
+          curl -sSfL "https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN/binaryen-$BINARYEN-x86_64-linux.tar.gz" |
+            tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$bindgen" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/binaryen-$BINARYEN/bin" >> "$GITHUB_PATH"
+      - run: web/build.sh
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/web
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
