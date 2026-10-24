@@ -9,6 +9,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
+use crate::startup::TRAY_FLAG;
 use interprocess::local_socket::{
     GenericNamespaced, ListenerOptions, Name, Stream, ToNsName, prelude::*,
 };
@@ -28,12 +29,23 @@ pub struct Listener(interprocess::local_socket::Listener);
 /// instance as the first line.
 pub const CONVERT_FLAG: &str = "--convert";
 
+/// How hdrshot was started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Launch {
+    /// To open the files on the command line, if any.
+    Open,
+    /// With [`CONVERT_FLAG`], to convert them right away.
+    Convert,
+    /// With [`TRAY_FLAG`], at sign-in, to run in the tray.
+    Tray,
+}
+
 /// Hands `files` to a running instance if there is one, or else becomes the
 /// instance that later ones hand theirs to. `None` when the socket can't be
 /// used at all, in which case every launch simply opens its own window.
-pub fn claim(files: &[PathBuf], convert: bool) -> Option<Claim> {
+pub fn claim(files: &[PathBuf], launch: Launch) -> Option<Claim> {
     let name = name()?;
-    if send(&name, files, convert) {
+    if send(&name, files, launch) {
         return Some(Claim::HandedOff);
     }
     match ListenerOptions::new()
@@ -44,7 +56,7 @@ pub fn claim(files: &[PathBuf], convert: bool) -> Option<Claim> {
     {
         Ok(listener) => Some(Claim::First(Listener(listener))),
         // Another instance started at the same moment and won.
-        Err(_) if send(&name, files, convert) => Some(Claim::HandedOff),
+        Err(_) if send(&name, files, launch) => Some(Claim::HandedOff),
         Err(_) => None,
     }
 }
@@ -53,25 +65,20 @@ impl Listener {
     /// Sends the file lists of later instances to `opened`, or each file
     /// to `convert` when they came with [`CONVERT_FLAG`], from a background
     /// thread. An empty list means the app was started again without
-    /// files; either way the window should come to the front.
+    /// files; either way the window should come to the front. A start in
+    /// the tray, with [`TRAY_FLAG`], changes nothing.
     pub fn serve(self, opened: Sender<Vec<PathBuf>>, convert: Sender<PathBuf>, ctx: egui::Context) {
         std::thread::spawn(move || {
             for stream in self.0.incoming().flatten() {
-                let mut lines: Vec<String> = BufReader::new(stream)
-                    .lines()
-                    .map_while(Result::ok)
-                    .filter(|line| !line.is_empty())
-                    .collect();
-                let to_convert = lines.first().is_some_and(|l| l == CONVERT_FLAG);
-                if to_convert {
-                    lines.remove(0);
-                }
-                let files: Vec<PathBuf> = lines.into_iter().map(PathBuf::from).collect();
-                let sent = if to_convert {
-                    let all = files.into_iter().all(|f| convert.send(f).is_ok());
-                    all && opened.send(Vec::new()).is_ok()
-                } else {
-                    opened.send(files).is_ok()
+                let lines = BufReader::new(stream).lines().map_while(Result::ok);
+                let (launch, files) = parse(lines);
+                let sent = match launch {
+                    Launch::Tray => continue,
+                    Launch::Convert => {
+                        let all = files.into_iter().all(|f| convert.send(f).is_ok());
+                        all && opened.send(Vec::new()).is_ok()
+                    }
+                    Launch::Open => opened.send(files).is_ok(),
                 };
                 if !sent {
                     break;
@@ -92,15 +99,25 @@ pub fn wait_for_exit(timeout: std::time::Duration) {
     }
 }
 
-/// Sends `files` to a running instance, to convert right away with
-/// `convert`; false if none answers.
-fn send(name: &Name<'_>, files: &[PathBuf], convert: bool) -> bool {
+/// Sends `files` to a running instance, with how this one was started;
+/// false if none answers.
+fn send(name: &Name<'_>, files: &[PathBuf], launch: Launch) -> bool {
     let Ok(mut stream) = Stream::connect(name.borrow()) else {
         return false;
     };
+    stream.write_all(message(files, launch).as_bytes()).is_ok()
+}
+
+/// What a later instance sends: how it was started, if not plainly, then
+/// one file per line.
+fn message(files: &[PathBuf], launch: Launch) -> String {
     let mut message = String::new();
-    if convert {
-        message.push_str(CONVERT_FLAG);
+    match launch {
+        Launch::Open => {}
+        Launch::Convert => message.push_str(CONVERT_FLAG),
+        Launch::Tray => message.push_str(TRAY_FLAG),
+    }
+    if launch != Launch::Open {
         message.push('\n');
     }
     for file in files {
@@ -109,7 +126,22 @@ fn send(name: &Name<'_>, files: &[PathBuf], convert: bool) -> bool {
         message.push_str(&file.to_string_lossy());
         message.push('\n');
     }
-    stream.write_all(message.as_bytes()).is_ok()
+    message
+}
+
+/// How a later instance was started and the files it sent, from the lines
+/// of its [`message`].
+fn parse(lines: impl Iterator<Item = String>) -> (Launch, Vec<PathBuf>) {
+    let mut lines = lines.filter(|line| !line.is_empty()).peekable();
+    let launch = match lines.peek().map(String::as_str) {
+        Some(CONVERT_FLAG) => Launch::Convert,
+        Some(TRAY_FLAG) => Launch::Tray,
+        _ => Launch::Open,
+    };
+    if launch != Launch::Open {
+        lines.next();
+    }
+    (launch, lines.map(PathBuf::from).collect())
 }
 
 /// One name per user, since named pipes and Linux's abstract sockets are
@@ -126,4 +158,29 @@ fn name() -> Option<Name<'static>> {
         .to_ns_name::<GenericNamespaced>()
         .ok()
         .map(Name::into_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn messages_say_how_hdrshot_was_started() {
+        let file = std::path::absolute("shot.jxr").unwrap();
+        let round_trip =
+            |files: &[PathBuf], launch| parse(message(files, launch).lines().map(str::to_owned));
+        let files = vec![file.clone()];
+        assert_eq!(
+            round_trip(&files, Launch::Open),
+            (Launch::Open, files.clone())
+        );
+        assert_eq!(
+            round_trip(&files, Launch::Convert),
+            (Launch::Convert, files)
+        );
+        assert_eq!(round_trip(&[], Launch::Tray), (Launch::Tray, vec![]));
+        // Started again without files: the window comes to the front.
+        assert_eq!(message(&[], Launch::Open), "");
+        assert_eq!(round_trip(&[], Launch::Open), (Launch::Open, vec![]));
+    }
 }

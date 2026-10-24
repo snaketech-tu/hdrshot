@@ -56,7 +56,8 @@ updates**.
   HDR PNG and JPEG XL (`.jxl`) files, for game photo modes, renders and re-tone-mapping.
 - **Watch folder.** Optionally converts each new screenshot saved to a
   folder, such as the Game Bar or NVIDIA app captures folder, as soon as it
-  is written.
+  is written. On Windows it can keep doing so from the tray, starting with
+  Windows if you like.
 - **Double-click or right-click to convert.** Optionally opens `.jxr` files
   with hdrshot on Windows and Linux, is listed under **Open with** for the
   other formats it reads, and on Windows adds **Convert with hdrshot** to
@@ -184,6 +185,16 @@ where it was last closed, at the same size.
   to paste into Discord. While the list is empty, the app offers to turn it
   on for the Game Bar or NVIDIA app folder, whichever holds the newest HDR
   screenshot.
+- **Background** (Windows), in Settings: with **Keep running in the tray
+  when the window is closed** on, closing the window leaves hdrshot in the
+  notification area, where it keeps watching. Click its icon to open the
+  window again; right-click it to pause or resume watching, or to quit.
+  **Start with Windows, in the tray** starts it there when you sign in
+  (it is listed in Task Manager's Startup apps), and **Notify when images
+  are converted in the background** shows a Windows notification when
+  images were converted while the window was closed or behind other
+  windows; click it to open hdrshot. All of these are off by default,
+  except the notifications once the tray is on.
 - **Previews.** Each file gets a thumbnail; hover it for a larger SDR
   preview. When the fine-tuning settings are changed, the preview shows the
   automatic result and the result with your settings, so you can compare.

@@ -30,6 +30,11 @@
 - The desktop app checks for a newer version by itself once a week; when
   there is one, the button at the bottom right becomes **Update to** and the
   version. **Check for updates once a week** in Settings turns this off.
+- On Windows, the desktop app can keep running in the tray when its window
+  is closed, so the watch folder keeps working; its icon opens the window,
+  pauses or resumes watching and quits. It can also start in the tray when
+  you sign in, and shows a notification when images were converted in the
+  background. All in Settings, under Background, off by default.
 
 ### Changed
 
