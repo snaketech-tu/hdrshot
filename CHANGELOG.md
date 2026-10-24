@@ -35,6 +35,9 @@
   pauses or resumes watching and quits. It can also start in the tray when
   you sign in, and shows a notification when images were converted in the
   background. All in Settings, under Background, off by default.
+- On Windows, converted images can be dragged from the desktop app's list
+  into Discord, a browser upload or a folder, giving the same file as
+  **Copy for Discord**. Dragging a selected row takes all selected images.
 
 ### Changed
 
@@ -58,6 +61,12 @@
   contrast, and keyboard focus is outlined.
 - **Convert** converts only the files not converted yet; once all are
   converted, **Convert again** converts them all again.
+
+### Fixed
+
+- **Copy for Discord** on an AVIF or Ultra HDR image that was converted
+  again, other than the last of its batch, copied the PNG made for the
+  earlier conversion.
 
 ## [2.1.0] - 2026-10-21
 

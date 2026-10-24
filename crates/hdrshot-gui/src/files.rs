@@ -96,6 +96,55 @@ impl App {
         });
     }
 
+    /// Drags the images of row `i`, or of the selection it is in, out of
+    /// the window, as the files Copy for Discord gives. An AVIF or Ultra
+    /// HDR image may need its PNG for Discord made first, which takes a
+    /// moment, so then that is made in the background and the drag is left
+    /// for the next try.
+    pub(crate) fn drag_out(&mut self, i: usize, ctx: &egui::Context) {
+        let options = self.convert_options(Existing::Skip);
+        let picked: Vec<(PathBuf, Outputs)> = self
+            .picked(i)
+            .into_iter()
+            .filter_map(|row| match &self.files[row].status {
+                Status::Done(outputs) if outputs.hdr.is_some() || outputs.sdr.is_some() => {
+                    Some((self.files[row].path.clone(), outputs.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let (slow, quick): (Vec<_>, Vec<_>) = picked
+            .into_iter()
+            .partition(|(_, outputs)| convert::copy_makes_png(outputs));
+        if !slow.is_empty() {
+            self.show_toast("Making the PNG for Discord…".into(), ctx);
+            convert::in_background(self.copied.0.clone(), ctx.clone(), move || {
+                let made = slow.iter().all(|(input, outputs)| {
+                    convert::discord_file(input, outputs, &options).is_ok()
+                });
+                Copied::from(if made {
+                    "Ready to drag into Discord".to_owned()
+                } else {
+                    "Could not make the PNG for Discord".to_owned()
+                })
+            });
+            return;
+        }
+        let mut files = Vec::new();
+        for (input, outputs) in &quick {
+            match convert::discord_file(input, outputs, &options) {
+                Ok((file, _)) => files.push(file),
+                Err(e) => {
+                    self.show_toast(format!("Could not drag {}: {e}", input.display()), ctx);
+                    return;
+                }
+            }
+        }
+        if !files.is_empty() {
+            dragout::start(files);
+        }
+    }
+
     /// The keyboard shortcuts of the list, not while a text field has
     /// focus or a menu or dialog is open:
     /// - Delete removes the selected rows and Ctrl+Z (Cmd+Z on macOS)
@@ -223,10 +272,14 @@ impl App {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 6.0;
                 for (i, entry) in self.files.iter().enumerate() {
-                    let (rect, row) = ui.allocate_exact_size(
-                        Vec2::new(ui.available_width(), ROW_HEIGHT),
-                        Sense::click(),
-                    );
+                    let converted = matches!(entry.status, Status::Done(_));
+                    let sense = if converted && dragout::SUPPORTED {
+                        Sense::click_and_drag()
+                    } else {
+                        Sense::click()
+                    };
+                    let (rect, row) =
+                        ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_HEIGHT), sense);
                     if !ui.is_rect_visible(rect) {
                         continue;
                     }
@@ -259,6 +312,9 @@ impl App {
                         && let Some(path) = primary
                     {
                         action = Some(RowAction::Open(path.clone()));
+                    }
+                    if row.drag_started_by(egui::PointerButton::Primary) {
+                        action = Some(RowAction::DragOut(i));
                     }
                     row.context_menu(|ui| {
                         let picked = self.picked(i);
@@ -311,7 +367,7 @@ impl App {
                             ui.add_space(4.0);
                             if ui
                                 .small_button("Copy for Discord")
-                                .on_hover_text(DISCORD_COPY_HINT)
+                                .on_hover_text(discord_copy_hint())
                                 .clicked()
                             {
                                 action = Some(RowAction::Copy(i));
@@ -395,6 +451,7 @@ impl App {
             Some(RowAction::Open(path)) => open(&path),
             Some(RowAction::ShowInFolder(path)) => show_in_folder(&path),
             Some(RowAction::Copy(i)) => self.copy_for_discord(i, &ctx),
+            Some(RowAction::DragOut(i)) => self.drag_out(i, &ctx),
             Some(RowAction::Convert(rows)) => self.start_some(rows, &ctx),
             Some(RowAction::Remove(rows)) => self.remove(rows, &ctx),
         }
@@ -548,6 +605,9 @@ pub(crate) enum RowAction {
     ShowInFolder(PathBuf),
     /// Copy the row's image for Discord.
     Copy(usize),
+    /// Drag the row's image out of the window, with the other selected
+    /// ones if it is selected.
+    DragOut(usize),
     Convert(Vec<usize>),
     Remove(Vec<usize>),
 }
@@ -678,7 +738,7 @@ pub(crate) fn row_menu(
     if outputs.is_some()
         && ui
             .button("Copy for Discord")
-            .on_hover_text(DISCORD_COPY_HINT)
+            .on_hover_text(discord_copy_hint())
             .clicked()
     {
         action = Some(RowAction::Copy(i));

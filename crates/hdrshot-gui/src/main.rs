@@ -5,6 +5,7 @@ mod adding;
 mod assoc;
 mod background;
 mod convert;
+mod dragout;
 mod files;
 mod icons;
 mod jobs;
@@ -200,10 +201,19 @@ struct App {
 
 /// Tooltip for the Copy for Discord buttons; the README's "Sharing on
 /// Discord" section has the details.
-const DISCORD_COPY_HINT: &str = "Copy the image (the HDR one if made) as a PNG that Discord shows \
-     correctly.\nDiscord turns HDR PNGs with a cICP chunk yellow, shows AVIF too bright and \
-     Ultra HDR JPEGs in SDR, so the copy is an HDR PNG without that chunk.\nYour saved files \
-     are unchanged.";
+fn discord_copy_hint() -> String {
+    let mut hint = "Copy the image (the HDR one if made) as a PNG that Discord shows \
+         correctly.\nDiscord turns HDR PNGs with a cICP chunk yellow, shows AVIF too bright and \
+         Ultra HDR JPEGs in SDR, so the copy is an HDR PNG without that chunk.\nYour saved files \
+         are unchanged."
+        .to_owned();
+    if dragout::SUPPORTED {
+        hint.push_str(
+            "\nDragging the row into Discord, a browser or a folder gives the same file.",
+        );
+    }
+    hint
+}
 
 const SETTINGS_KEY: &str = "settings";
 
@@ -397,11 +407,13 @@ impl window::App for App {
             }
         }
         self.was_focused = focused;
+        // Not the files being dragged out, dropped back onto the window.
         let dropped: Vec<PathBuf> = ui.input(|i| {
             i.raw
                 .dropped_files
                 .iter()
                 .map(|f| f.path().to_path_buf())
+                .filter(|path| !dragout::is_dragged(path))
                 .collect()
         });
         if !dropped.is_empty() {
