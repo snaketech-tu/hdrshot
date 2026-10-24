@@ -40,64 +40,90 @@ pub fn watch_folder(
     let (tx, rx) = channel();
     let mut watcher = notify::recommended_watcher(tx)?;
     watcher.watch(dir, RecursiveMode::Recursive)?;
-    // The files from before watching started. macOS can report a change to
-    // one of them as a creation, so they are left out until deleted or
-    // renamed away.
-    let mut existing = Existing::new(dir);
+    let mut tracker = Tracker::new(dir);
     thread::spawn(move || {
-        let mut pending: HashMap<PathBuf, Pending> = HashMap::new();
-        let mut reported: HashSet<PathBuf> = HashSet::new();
         loop {
             match rx.recv_timeout(POLL) {
-                Ok(Ok(event)) => {
-                    let created = matches!(event.kind, EventKind::Create(_));
-                    let new =
-                        created || matches!(event.kind, EventKind::Modify(ModifyKind::Name(_)));
-                    for path in event.paths {
-                        if existing.forget_if_gone(&path) {
-                            continue;
-                        }
-                        // A new subfolder, such as the folder of a game's
-                        // first screenshot: files saved in it before it was
-                        // watched too are found by looking inside. A folder
-                        // renamed or moved in keeps its files unreported.
-                        if created && path.is_dir() {
-                            for file in files_under(&path) {
-                                if is_watched(&file) && !reported.contains(&file) {
-                                    pending.entry(file).or_insert_with(Pending::new);
-                                }
-                            }
-                            continue;
-                        }
-                        if !is_watched(&path) || reported.contains(&path) {
-                            continue;
-                        }
-                        if let Some(p) = pending.get_mut(&path) {
-                            p.changed = Instant::now();
-                        } else if new {
-                            pending.insert(path, Pending::new());
-                        }
-                    }
-                }
+                Ok(Ok(event)) => tracker.note(event),
                 Ok(Err(_)) | Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
-            let now = Instant::now();
-            pending.retain(|path, p| {
-                let Ok(size) = std::fs::metadata(path).map(|m| m.len()) else {
-                    // Gone again, e.g. a temporary file that was renamed.
-                    return false;
-                };
-                if !p.settled(size, now) || File::open(path).is_err() {
-                    return true;
-                }
-                reported.insert(path.clone());
-                found(path.clone());
-                false
-            });
+            tracker.report_settled(Instant::now(), &mut found);
         }
     });
     Ok(FolderWatch { _watcher: watcher })
+}
+
+/// What the watch knows of the folder's files.
+struct Tracker {
+    /// The files from before watching started. macOS can report a change
+    /// to one of them as a creation, so they are left out until deleted or
+    /// renamed away.
+    existing: Existing,
+    /// New files that may still be being written.
+    pending: HashMap<PathBuf, Pending>,
+    reported: HashSet<PathBuf>,
+}
+
+impl Tracker {
+    fn new(dir: &Path) -> Self {
+        Self {
+            existing: Existing::new(dir),
+            pending: HashMap::new(),
+            reported: HashSet::new(),
+        }
+    }
+
+    /// Takes note of a file event.
+    fn note(&mut self, event: notify::Event) {
+        let created = matches!(event.kind, EventKind::Create(_));
+        let new = created || matches!(event.kind, EventKind::Modify(ModifyKind::Name(_)));
+        for path in event.paths {
+            // A new subfolder, such as the folder of a game's first
+            // screenshot: files saved in it before it was watched too are
+            // found by looking inside. A folder renamed or moved in keeps
+            // its files unreported. macOS can also report the watched
+            // folder itself as created, so its old files are skipped.
+            if created && path.is_dir() {
+                for file in files_under(&path) {
+                    self.add_new(file);
+                }
+                continue;
+            }
+            if let Some(p) = self.pending.get_mut(&path) {
+                p.changed = Instant::now();
+            } else if new {
+                self.add_new(path);
+            }
+        }
+    }
+
+    /// Starts following `path` as a new file, if it is one to report.
+    fn add_new(&mut self, path: PathBuf) {
+        if self.existing.forget_if_gone(&path)
+            || !is_watched(&path)
+            || self.reported.contains(&path)
+        {
+            return;
+        }
+        self.pending.entry(path).or_insert_with(Pending::new);
+    }
+
+    /// Reports the new files that are completely written, through `found`.
+    fn report_settled(&mut self, now: Instant, found: &mut impl FnMut(PathBuf)) {
+        self.pending.retain(|path, p| {
+            let Ok(size) = std::fs::metadata(path).map(|m| m.len()) else {
+                // Gone again, e.g. a temporary file that was renamed.
+                return false;
+            };
+            if !p.settled(size, now) || File::open(path).is_err() {
+                return true;
+            }
+            self.reported.insert(path.clone());
+            found(path.clone());
+            false
+        });
+    }
 }
 
 /// The files of the watched folder from before watching started, by path
@@ -295,6 +321,34 @@ mod tests {
             ]
         );
         drop(watch);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_files_stay_unreported_when_their_folder_shows_up_as_new() {
+        use notify::event::{CreateKind, Event};
+        let dir = std::env::temp_dir().join(format!("hdrshot-tracker-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Old Game")).unwrap();
+        std::fs::write(dir.join("old.jxr"), b"existing").unwrap();
+        std::fs::write(dir.join("Old Game").join("old.jxr"), b"existing").unwrap();
+        let mut tracker = Tracker::new(&dir);
+        let created =
+            |path: PathBuf| Event::new(EventKind::Create(CreateKind::Folder)).add_path(path);
+
+        // As macOS can report for the watched folder, from just before
+        // watching started.
+        tracker.note(created(dir.clone()));
+        tracker.note(created(dir.join("Old Game")));
+        assert!(tracker.pending.is_empty());
+
+        let new_game = dir.join("New Game");
+        std::fs::create_dir(&new_game).unwrap();
+        std::fs::write(new_game.join("first.jxr"), b"screenshot").unwrap();
+        std::fs::write(new_game.join("first_hdr.png"), b"output").unwrap();
+        tracker.note(created(new_game.clone()));
+        let pending: Vec<_> = tracker.pending.keys().cloned().collect();
+        assert_eq!(pending, [new_game.join("first.jxr")]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
