@@ -22,9 +22,10 @@ struct Args {
     #[arg(required_unless_present = "watch")]
     inputs: Vec<PathBuf>,
 
-    /// Watch this folder, such as the Game Bar captures folder, and convert
-    /// each new image saved there until Ctrl+C. Images already in it are
-    /// left alone; any inputs given are converted first.
+    /// Watch this folder and its subfolders, such as the Game Bar captures
+    /// folder or the NVIDIA app's, and convert each new image saved there
+    /// until Ctrl+C. Images already in it are left alone; any inputs given
+    /// are converted first.
     #[arg(long, value_name = "FOLDER")]
     watch: Option<PathBuf>,
 

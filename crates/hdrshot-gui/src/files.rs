@@ -9,74 +9,176 @@ impl App {
             .collect()
     }
 
-    pub(crate) fn remove(&mut self, i: usize) {
-        self.files.remove(i);
-        self.selected = after_removal(self.selected, i);
+    /// Takes `rows` out of the list, keeping them for a few seconds so
+    /// Undo can bring them back.
+    pub(crate) fn remove(&mut self, mut rows: Vec<usize>, ctx: &egui::Context) {
+        rows.sort_unstable();
+        rows.dedup();
+        if rows.is_empty() {
+            return;
+        }
+        let mut removed: Vec<(usize, Entry)> = rows
+            .iter()
+            .rev()
+            .map(|&i| (i, self.files.remove(i)))
+            .collect();
+        removed.reverse();
+        self.selection.after_removal(&rows);
+        self.removed = Some(Removed {
+            rows: removed,
+            until: ctx.input(|i| i.time) + UNDO_SECONDS,
+        });
         self.notice = None;
+    }
+
+    /// Puts the rows removed last back where they were.
+    pub(crate) fn undo_remove(&mut self) {
+        let Some(removed) = self.removed.take() else {
+            return;
+        };
+        let mut restored = Vec::new();
+        // In order, so each goes back to its old place.
+        for (i, entry) in removed.rows {
+            if self.files.iter().any(|e| e.path == entry.path) {
+                continue;
+            }
+            let at = i.min(self.files.len());
+            self.files.insert(at, entry);
+            restored.push(at);
+        }
+        self.selection.set_all(restored);
     }
 
     /// Removes the files that converted, keeping the rest to retry or add to.
-    pub(crate) fn clear_finished(&mut self) {
-        let selected = self.selected.map(|i| self.files[i].path.clone());
-        self.files.retain(|e| !matches!(e.status, Status::Done(_)));
-        self.selected = selected.and_then(|p| self.files.iter().position(|e| e.path == p));
+    pub(crate) fn clear_finished(&mut self, ctx: &egui::Context) {
+        let done = (0..self.files.len())
+            .filter(|&i| matches!(self.files[i].status, Status::Done(_)))
+            .collect();
+        self.remove(done, ctx);
         self.banner = false;
-        self.notice = None;
     }
 
     /// Empties the list.
-    pub(crate) fn clear_all(&mut self) {
-        self.files.clear();
-        self.selected = None;
+    pub(crate) fn clear_all(&mut self, ctx: &egui::Context) {
+        self.remove((0..self.files.len()).collect(), ctx);
         self.batch = Batch::default();
         self.banner = false;
-        self.notice = None;
     }
 
-    /// Delete removes the selected row, Enter converts the files not
-    /// converted yet, and the arrow keys move the selection; not while a
-    /// text field has focus or a batch runs.
+    /// Rows the selected row's actions apply to: all selected ones if `row`
+    /// is one of them, else `row` alone.
+    fn picked(&self, row: usize) -> Vec<usize> {
+        if self.selection.contains(row) {
+            self.selection.rows().to_vec()
+        } else {
+            vec![row]
+        }
+    }
+
+    /// Copies row `i`'s image for Discord, in the background.
+    pub(crate) fn copy_for_discord(&mut self, i: usize, ctx: &egui::Context) {
+        let entry = &self.files[i];
+        let Status::Done(outputs) = &entry.status else {
+            self.show_toast("Convert it first to copy it".into(), ctx);
+            return;
+        };
+        if outputs.hdr.is_none() && outputs.sdr.is_none() {
+            return;
+        }
+        let (input, outputs) = (entry.path.clone(), outputs.clone());
+        if convert::copy_makes_png(&outputs) {
+            self.show_toast("Making the PNG for Discord…".into(), ctx);
+        }
+        let clipboard = self.clipboard.clone();
+        let options = self.convert_options(Existing::Skip);
+        convert::in_background(self.copied.0.clone(), ctx.clone(), move || {
+            convert::copy(&clipboard, &input, &outputs, &options)
+        });
+    }
+
+    /// The keyboard shortcuts of the list, not while a text field has
+    /// focus or a menu or dialog is open:
+    /// - Delete removes the selected rows and Ctrl+Z (Cmd+Z on macOS)
+    ///   brings them back; neither while a batch runs.
+    /// - Enter converts the files not converted yet.
+    /// - The arrow keys move the selection, Ctrl+A selects every row and
+    ///   Escape none.
+    /// - Space shows the large preview of the selected row.
+    /// - Ctrl+C copies the selected row's image for Discord, Ctrl+O adds
+    ///   files.
+    ///
     /// On the Settings page, Escape goes back to the files.
     pub(crate) fn shortcuts(&mut self, ctx: &egui::Context) {
-        if self.asking.is_some() || ctx.memory(|m| m.focused().is_some()) {
+        // A menu or dialog gets the keys, so Escape closes it.
+        let dialog = matches!(
+            self.update,
+            Update::Available { .. } | Update::Installing(_) | Update::Opened
+        );
+        if self.asking.is_some()
+            || dialog
+            || egui::Popup::is_any_open(ctx)
+            || ctx.memory(|m| m.focused().is_some())
+        {
             return;
         }
         let pressed = |key| ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
+        let command = |key| ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key));
         if self.settings_open {
             if pressed(egui::Key::Escape) {
                 self.settings_open = false;
             }
             return;
         }
+        if self.viewer.is_some() {
+            self.viewer_shortcuts(ctx);
+            return;
+        }
+        if command(egui::Key::O) {
+            self.choose_files();
+        }
+        if command(egui::Key::A) {
+            self.selection.all(self.files.len());
+        }
+        // egui turns Ctrl+C into a copy event rather than a key press.
+        let copy = ctx.input_mut(|i| {
+            let before = i.events.len();
+            i.events.retain(|e| !matches!(e, egui::Event::Copy));
+            i.events.len() < before
+        });
+        if (copy || command(egui::Key::C))
+            && let Some(row) = self.selection.anchor()
+        {
+            self.copy_for_discord(row, ctx);
+        }
+        if pressed(egui::Key::Space)
+            && let Some(row) = self.selection.anchor()
+        {
+            self.open_viewer(row, ctx);
+        }
+        if pressed(egui::Key::ArrowDown) {
+            self.selection.step(true, self.files.len());
+        }
+        if pressed(egui::Key::ArrowUp) {
+            self.selection.step(false, self.files.len());
+        }
+        if pressed(egui::Key::Escape) {
+            self.selection.clear();
+        }
         if self.running() {
             return;
         }
-        if let Some(i) = self.selected
-            && (pressed(egui::Key::Delete) || pressed(egui::Key::Backspace))
-        {
-            self.remove(i);
+        if command(egui::Key::Z) {
+            self.undo_remove();
+        }
+        if pressed(egui::Key::Delete) || pressed(egui::Key::Backspace) {
+            let rows = self.selection.rows().to_vec();
+            self.remove(rows, ctx);
         }
         if pressed(egui::Key::Enter) && self.can_convert() {
             let pending = self.pending();
             if !pending.is_empty() {
                 self.start_some(pending, ctx);
             }
-        }
-        let last = self.files.len().checked_sub(1);
-        if pressed(egui::Key::ArrowDown) {
-            self.selected = match self.selected {
-                Some(i) => last.map(|l| (i + 1).min(l)),
-                None => last.map(|_| 0),
-            };
-        }
-        if pressed(egui::Key::ArrowUp) {
-            self.selected = match self.selected {
-                Some(i) => Some(i.saturating_sub(1)),
-                None => last,
-            };
-        }
-        if pressed(egui::Key::Escape) {
-            self.selected = None;
         }
     }
 
@@ -130,7 +232,7 @@ impl App {
                     }
                     // The row's buttons take the hover from the row itself.
                     let pointed = ui.rect_contains_pointer(rect);
-                    let selected = self.selected == Some(i);
+                    let selected = self.selection.contains(i);
                     let fill = if selected {
                         selection
                     } else if pointed {
@@ -146,8 +248,12 @@ impl App {
                         _ => None,
                     };
                     let primary = outputs.and_then(|o| o.hdr.as_ref().or(o.sdr.as_ref()));
-                    if row.clicked() || row.secondary_clicked() {
-                        action = Some(RowAction::Select(i));
+                    if row.clicked() {
+                        let modifiers = ui.input(|i| i.modifiers);
+                        action = Some(RowAction::Click(i, modifiers));
+                    }
+                    if row.secondary_clicked() && !selected {
+                        action = Some(RowAction::Click(i, egui::Modifiers::NONE));
                     }
                     if row.double_clicked()
                         && let Some(path) = primary
@@ -155,7 +261,8 @@ impl App {
                         action = Some(RowAction::Open(path.clone()));
                     }
                     row.context_menu(|ui| {
-                        if let Some(menu) = row_menu(ui, i, entry, running) {
+                        let picked = self.picked(i);
+                        if let Some(menu) = row_menu(ui, i, entry, &picked, running) {
                             action = Some(menu);
                         }
                     });
@@ -168,14 +275,15 @@ impl App {
                         ui.add_space(4.0);
                         status_icon(ui, &entry.status);
                         ui.add_space(4.0);
-                        let full = pointed || selected;
+                        // Buttons for the row pointed at, or picked alone.
+                        let full = pointed || (selected && self.selection.len() == 1);
                         if full
                             && !running
                             && theme::small_icon_button(ui, icons::cross)
                                 .on_hover_text("Remove from the list")
                                 .clicked()
                         {
-                            action = Some(RowAction::Remove(i));
+                            action = Some(RowAction::Remove(vec![i]));
                         }
                         // The output once there is one, else the original.
                         let shown = primary.unwrap_or(&entry.path);
@@ -199,16 +307,14 @@ impl App {
                         }
                         // The newest result keeps its button, ready to share.
                         let latest = self.last_converted.as_ref() == Some(&entry.path);
-                        if let Some(outputs) = outputs
-                            && (full || latest)
-                        {
+                        if outputs.is_some() && (full || latest) {
                             ui.add_space(4.0);
                             if ui
                                 .small_button("Copy for Discord")
                                 .on_hover_text(DISCORD_COPY_HINT)
                                 .clicked()
                             {
-                                action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
+                                action = Some(RowAction::Copy(i));
                             }
                         }
                         if matches!(entry.status, Status::Failed(_)) && !running {
@@ -218,18 +324,22 @@ impl App {
                                 .on_hover_text("Convert it again")
                                 .clicked()
                             {
-                                action = Some(RowAction::Retry(i));
+                                action = Some(RowAction::Convert(vec![i]));
                             }
                         }
                         ui.add_space(8.0);
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                             ui.add_space(2.0);
-                            if thumb_ui(
+                            let thumb = thumb_ui(
                                 ui,
                                 &entry.thumb,
                                 self.shown.as_ref().filter(|s| s.path == entry.path),
-                            ) {
+                            );
+                            if thumb.hovered() {
                                 hovered_thumb = Some(i);
+                            }
+                            if thumb.clicked() {
+                                action = Some(RowAction::View(i));
                             }
                             ui.add_space(8.0);
                             // Sized to the two lines, so the row centers them.
@@ -272,21 +382,21 @@ impl App {
         self.update_shown(hovered_thumb, &ctx);
         match action {
             None => {}
-            Some(RowAction::Select(i)) => self.selected = Some(i),
+            Some(RowAction::Click(i, modifiers)) => {
+                if modifiers.shift {
+                    self.selection.extend_to(i);
+                } else if modifiers.command {
+                    self.selection.toggle(i);
+                } else {
+                    self.selection.set(i);
+                }
+            }
+            Some(RowAction::View(i)) => self.open_viewer(i, &ctx),
             Some(RowAction::Open(path)) => open(&path),
             Some(RowAction::ShowInFolder(path)) => show_in_folder(&path),
-            Some(RowAction::Copy(input, outputs)) => {
-                if convert::copy_makes_png(&outputs) {
-                    self.show_toast("Making the PNG for Discord…".into(), &ctx);
-                }
-                let clipboard = self.clipboard.clone();
-                let options = self.convert_options(Existing::Skip);
-                convert::in_background(self.copied.0.clone(), ctx, move || {
-                    convert::copy(&clipboard, &input, &outputs, &options)
-                });
-            }
-            Some(RowAction::Retry(i)) => self.start_some(vec![i], &ctx),
-            Some(RowAction::Remove(i)) => self.remove(i),
+            Some(RowAction::Copy(i)) => self.copy_for_discord(i, &ctx),
+            Some(RowAction::Convert(rows)) => self.start_some(rows, &ctx),
+            Some(RowAction::Remove(rows)) => self.remove(rows, &ctx),
         }
     }
 
@@ -428,16 +538,30 @@ pub(crate) struct Shown {
     pub(crate) tuned: Option<egui::TextureHandle>,
 }
 
-/// Something done to one row of the file list.
+/// Something done to rows of the file list.
 pub(crate) enum RowAction {
-    Select(usize),
+    /// A click on a row, with the keys held down.
+    Click(usize, egui::Modifiers),
+    /// Show the row's large preview.
+    View(usize),
     Open(PathBuf),
     ShowInFolder(PathBuf),
-    /// Copy the PNGs made from a file.
-    Copy(PathBuf, Outputs),
-    Retry(usize),
-    Remove(usize),
+    /// Copy the row's image for Discord.
+    Copy(usize),
+    Convert(Vec<usize>),
+    Remove(Vec<usize>),
 }
+
+/// Rows just removed, kept for a few seconds so Undo can bring them back.
+pub(crate) struct Removed {
+    /// Each with the place it had, in order.
+    pub(crate) rows: Vec<(usize, Entry)>,
+    /// `egui` time at which Undo disappears.
+    pub(crate) until: f64,
+}
+
+/// How long Undo shows after removing files.
+pub(crate) const UNDO_SECONDS: f64 = 6.0;
 
 /// The folder all of `dirs` are, if they are the same one.
 pub(crate) fn common_folder<'a>(dirs: &[&'a Path]) -> Option<&'a Path> {
@@ -445,22 +569,13 @@ pub(crate) fn common_folder<'a>(dirs: &[&'a Path]) -> Option<&'a Path> {
     dirs.iter().all(|&d| d == first).then_some(first)
 }
 
-/// The selected row once row `removed` is gone.
-pub(crate) fn after_removal(selected: Option<usize>, removed: usize) -> Option<usize> {
-    match selected {
-        Some(s) if s == removed => None,
-        Some(s) if s > removed => Some(s - 1),
-        s => s,
-    }
-}
-
 /// The thumbnail at the start of a row, filling its box and cropped to it,
-/// with the large preview `shown` (if it is this row's) when hovered.
-/// Returns whether it is hovered.
-pub(crate) fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) -> bool {
+/// with the preview `shown` (if it is this row's) when hovered. Clicking
+/// it opens the large preview.
+pub(crate) fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) -> egui::Response {
     let box_size = Vec2::new(THUMB_SIZE.0 as f32, THUMB_SIZE.1 as f32);
     let radius = 5.0;
-    let (rect, response) = ui.allocate_exact_size(box_size, Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(box_size, Sense::click());
     let Thumb::Ready { texture, .. } = thumb else {
         let visuals = ui.visuals();
         ui.painter()
@@ -469,7 +584,7 @@ pub(crate) fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) 
             let icon = egui::Rect::from_center_size(rect.center(), Vec2::splat(18.0));
             icons::image(ui.painter(), icon, visuals.weak_text_color());
         }
-        return false;
+        return response;
     };
     let [w, h] = texture.size();
     let uv = cover_uv(w as f32 / h.max(1) as f32, box_size.x / box_size.y);
@@ -477,9 +592,9 @@ pub(crate) fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) 
         .uv(uv)
         .corner_radius(radius)
         .paint_at(ui, rect);
-    let hovered = response.hovered();
+    let response = response.on_hover_cursor(egui::CursorIcon::ZoomIn);
     if let Some(shown) = shown {
-        response.on_hover_ui(|ui| {
+        response.clone().on_hover_ui(|ui| {
             let show = |ui: &mut egui::Ui, texture: &egui::TextureHandle| {
                 let [w, h] = texture.size();
                 ui.image((texture.id(), Vec2::new(w as f32, h as f32)));
@@ -494,9 +609,10 @@ pub(crate) fn thumb_ui(ui: &mut egui::Ui, thumb: &Thumb, shown: Option<&Shown>) 
                 None => show(ui, &shown.auto),
             }
             ui.weak("SDR preview; the HDR image keeps the full brightness.");
+            ui.weak("Click for a larger one.");
         });
     }
-    hovered
+    response
 }
 
 /// The part of an image with aspect ratio `image` that fills a box with
@@ -511,14 +627,36 @@ fn cover_uv(image: f32, fill: f32) -> egui::Rect {
     }
 }
 
-/// The right-click menu of a row.
+/// The right-click menu of row `i`, acting on the `picked` rows when
+/// several are selected.
 pub(crate) fn row_menu(
     ui: &mut egui::Ui,
     i: usize,
     entry: &Entry,
+    picked: &[usize],
     running: bool,
 ) -> Option<RowAction> {
     let mut action = None;
+    if picked.len() > 1 {
+        if !running
+            && ui
+                .button(format!("Convert {}", images(picked.len())))
+                .clicked()
+        {
+            action = Some(RowAction::Convert(picked.to_vec()));
+        }
+        if !running
+            && ui
+                .button(format!("Remove {} from list", images(picked.len())))
+                .clicked()
+        {
+            action = Some(RowAction::Remove(picked.to_vec()));
+        }
+        if action.is_some() {
+            ui.close();
+        }
+        return action;
+    }
     let outputs = match &entry.status {
         Status::Done(outputs) if outputs.hdr.is_some() || outputs.sdr.is_some() => Some(outputs),
         _ => None,
@@ -537,13 +675,16 @@ pub(crate) fn row_menu(
     {
         action = sdr.clone().map(RowAction::Open);
     }
-    if let Some(outputs) = outputs
+    if outputs.is_some()
         && ui
             .button("Copy for Discord")
             .on_hover_text(DISCORD_COPY_HINT)
             .clicked()
     {
-        action = Some(RowAction::Copy(entry.path.clone(), outputs.clone()));
+        action = Some(RowAction::Copy(i));
+    }
+    if matches!(entry.thumb, Thumb::Ready { .. }) && ui.button("Preview").clicked() {
+        action = Some(RowAction::View(i));
     }
     ui.separator();
     if ui.button("Show in folder").clicked() {
@@ -558,10 +699,10 @@ pub(crate) fn row_menu(
             "Convert"
         };
         if ui.button(again).clicked() {
-            action = Some(RowAction::Retry(i));
+            action = Some(RowAction::Convert(vec![i]));
         }
         if ui.button("Remove from list").clicked() {
-            action = Some(RowAction::Remove(i));
+            action = Some(RowAction::Remove(vec![i]));
         }
     }
     if action.is_some() {
@@ -730,14 +871,6 @@ pub(crate) fn show_in_folder(file: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn selection_follows_removal() {
-        assert_eq!(after_removal(Some(2), 2), None);
-        assert_eq!(after_removal(Some(3), 1), Some(2));
-        assert_eq!(after_removal(Some(1), 3), Some(1));
-        assert_eq!(after_removal(None, 0), None);
-    }
 
     #[test]
     fn thumbnails_are_cropped_to_fill() {

@@ -15,11 +15,30 @@
 - The save menu offers the last three folders used.
 - A pill at the top of the window shows the watch folder while it is on;
   clicking it pauses watching.
-- While the list is empty, the app offers to watch the Game Bar folder and
-  to open `.jxr` files with hdrshot.
+- While the list is empty, the app offers to watch the Game Bar or NVIDIA
+  app screenshot folder, whichever holds the newest HDR screenshot. The
+  watch folder menu in Settings lists both when they exist.
+- Several rows can be selected with Ctrl-click, Shift-click and Ctrl+A, then
+  converted or removed together from the right-click menu or with Delete.
+  Ctrl+C copies the selected image for Discord and Ctrl+O adds files.
+- **Undo** after removing files or clearing the list, for a few seconds, or
+  Ctrl+Z.
+- Clicking a thumbnail, or pressing Space, shows the image as large as the
+  window, with the previous and next image a click or arrow key away.
+- Settings shows the exact names an image gets with the current settings.
+- A **Theme** setting: System, Light or Dark.
+- The desktop app checks for a newer version by itself once a week; when
+  there is one, the button at the bottom right becomes **Update to** and the
+  version. **Check for updates once a week** in Settings turns this off.
 
 ### Changed
 
+- The desktop app's option to move originals to the Recycle Bin is now
+  called **Replace the original**, and the button for the steps after
+  converting shows whether originals are kept or replaced.
+- The watch folder, in the desktop app and with `--watch`, includes its
+  subfolders, so the NVIDIA app's folder (`Videos\NVIDIA`, with a subfolder
+  per game) can be watched as a whole, new game folders included.
 - The desktop app's settings moved off the main window: a row of buttons
   under the file list sums them up (what to create, where to save, the
   largest size, what happens after converting) and opens a small menu for

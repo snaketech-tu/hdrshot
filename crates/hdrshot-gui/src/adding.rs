@@ -1,4 +1,4 @@
-//! Adding files: the drop area of the empty window with its tips, the
+//! Adding files: the drop area of the empty window with its tip, the
 //! toolbar above the list, and the overlay shown while files are dragged
 //! over the window.
 
@@ -7,10 +7,12 @@ use super::*;
 /// The input formats, named on the empty window's drop area.
 const FORMATS: [&str; 5] = ["JPEG XR", "OpenEXR", "Radiance HDR", "JPEG XL", "HDR PNG"];
 
-/// Names of the tips under the empty drop area, kept in the settings once
+/// Name of the tip under the empty drop area, kept in the settings once
 /// hidden.
 const WATCH_TIP: &str = "watch-folder";
-const OPEN_TIP: &str = "open-jxr";
+
+/// Smallest height of the empty window's drop area, which fits its text.
+const MIN_DROP_HEIGHT: f32 = 180.0;
 
 impl App {
     pub(crate) fn add_paths(&mut self, paths: impl IntoIterator<Item = PathBuf>) {
@@ -62,60 +64,49 @@ impl App {
         }
     }
 
-    /// The empty window: a large drop area, with tips under it until they
-    /// are followed or hidden.
+    /// The empty window: a large drop area, with a tip under it until it
+    /// is followed or hidden.
     pub(crate) fn empty_ui(&mut self, ui: &mut egui::Ui) {
-        // Laid out from the bottom, so the drop area takes what's left.
-        let layout = egui::Layout::bottom_up(egui::Align::Min).with_cross_justify(true);
-        ui.with_layout(layout, |ui| {
-            if self.shows_tip(OPEN_TIP) {
-                let text = if cfg!(windows) {
-                    "Double-click a screenshot to open it here, or right-click it to \
-                     convert it."
-                } else {
-                    "Double-click a screenshot to open it here."
-                };
-                match tip(
-                    ui,
-                    icons::image,
-                    "Open .jxr files with hdrshot",
-                    text,
-                    "Set up",
-                ) {
-                    Some(true) => {
-                        let ctx = ui.ctx().clone();
-                        self.make_default_app(&ctx);
-                    }
-                    Some(false) => self.settings.hidden_tips.push(OPEN_TIP.into()),
-                    None => {}
-                }
-            }
-            if self.shows_tip(WATCH_TIP)
-                && let Some(dir) = watching::default_watch_dir()
-            {
-                match tip(
-                    ui,
-                    icons::eye,
-                    "Watch the Game Bar folder",
-                    "Convert new HDR screenshots as soon as you take them, while \
+        // The drop area takes what the tip leaves. The tip's text can wrap,
+        // so its height is only known once laid out: it is remembered, and
+        // when it changes, the pass is redone. In a window too short for
+        // both, only the drop area shows.
+        let tip_id = egui::Id::unique("empty window tip height");
+        let tip_height = ui.data(|d| d.get_temp::<f32>(tip_id)).unwrap_or_default();
+        let available = ui.available_height();
+        let folder = watching::capture_folders()
+            .first()
+            .filter(|_| self.shows_tip(WATCH_TIP) && available - tip_height >= MIN_DROP_HEIGHT);
+        let reserved = if folder.is_some() { tip_height } else { 0.0 };
+        self.drop_area(ui, (available - reserved).max(MIN_DROP_HEIGHT));
+        let top = ui.cursor().top();
+        if let Some(folder) = folder {
+            match tip(
+                ui,
+                icons::eye,
+                &format!("Watch the {} folder", folder.app),
+                &format!(
+                    "Convert new {} screenshots as soon as you take them, while \
                      hdrshot is open.",
-                    "Turn on",
-                ) {
-                    Some(true) => {
-                        let ctx = ui.ctx().clone();
-                        self.show_toast(format!("Watching {}", dir.display()), &ctx);
-                        self.settings.watch_dir = Some(dir);
-                        self.settings.watch = true;
-                    }
-                    Some(false) => self.settings.hidden_tips.push(WATCH_TIP.into()),
-                    None => {}
+                    folder.app
+                ),
+                "Turn on",
+            ) {
+                Some(true) => {
+                    let ctx = ui.ctx().clone();
+                    self.show_toast(format!("Watching {}", folder.dir.display()), &ctx);
+                    self.settings.watch_dir = Some(folder.dir.clone());
+                    self.settings.watch = true;
                 }
+                Some(false) => self.settings.hidden_tips.push(WATCH_TIP.into()),
+                None => {}
             }
-            let height = ui.available_height().max(180.0);
-            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                self.drop_area(ui, height);
-            });
-        });
+            let used = ui.cursor().top() - top;
+            if (used - tip_height).abs() > 0.5 {
+                ui.data_mut(|d| d.insert_temp(tip_id, used));
+                ui.ctx().request_discard("the tip's height changed");
+            }
+        }
     }
 
     /// Whether the tip `name` applies and isn't hidden.
@@ -124,13 +115,17 @@ impl App {
             return false;
         }
         match name {
+            // Not once another folder is chosen to watch.
             WATCH_TIP => {
-                let default = watching::default_watch_dir();
+                let folders = watching::capture_folders();
                 !self.settings.watch
-                    && default.is_some()
-                    && (self.settings.watch_dir.is_none() || self.settings.watch_dir == default)
+                    && !folders.is_empty()
+                    && self
+                        .settings
+                        .watch_dir
+                        .as_ref()
+                        .is_none_or(|dir| folders.iter().any(|f| &f.dir == dir))
             }
-            OPEN_TIP => assoc::SUPPORTED && !self.is_default_app,
             _ => false,
         }
     }
@@ -223,15 +218,16 @@ impl App {
                 }
                 ui.add_enabled_ui(!self.running(), |ui| {
                     ui.menu_button("Clear", |ui| {
+                        let ctx = ui.ctx().clone();
                         if ui.button("All files").clicked() {
-                            self.clear_all();
+                            self.clear_all(&ctx);
                         }
                         if ui
                             .add_enabled(converted > 0, egui::Button::new("Converted files"))
                             .on_hover_text("Keep the files still waiting or failed")
                             .clicked()
                         {
-                            self.clear_finished();
+                            self.clear_finished(&ctx);
                         }
                     })
                     .response
@@ -356,7 +352,5 @@ fn tip(
             });
         });
     });
-    // Above the card, as the tips are laid out from the bottom.
-    ui.add_space(8.0);
     clicked
 }

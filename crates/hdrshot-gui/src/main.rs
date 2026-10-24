@@ -10,6 +10,7 @@ mod jobs;
 #[cfg(target_os = "macos")]
 mod macos;
 mod previews;
+mod selection;
 mod settings;
 mod single;
 mod storage;
@@ -18,6 +19,7 @@ mod theme;
 mod toasts;
 mod update;
 mod update_ui;
+mod viewer;
 mod watching;
 mod window;
 
@@ -37,9 +39,11 @@ use convert::{Copied, Event, Job, SharedClipboard, TooBig};
 use files::*;
 use jobs::*;
 use previews::{Previews, THUMB_SIZE, Thumb};
+use selection::Selection;
 use settings::*;
 use toasts::*;
 use update_ui::*;
+use viewer::Viewer;
 use watching::Watching;
 
 /// The app icon, 256 px. Windows also gets `assets/icon.ico` embedded in
@@ -146,8 +150,13 @@ struct App {
     /// regains focus, since the choice is made in the system's settings.
     is_default_app: bool,
     was_focused: bool,
-    /// Row picked by clicking it, for the keyboard shortcuts.
-    selected: Option<usize>,
+    /// Rows picked by clicking them, for the keyboard shortcuts and the
+    /// right-click menu.
+    selection: Selection,
+    /// Rows just removed, until their Undo expires.
+    removed: Option<Removed>,
+    /// The large preview, while open.
+    viewer: Option<Viewer>,
     previews: Previews,
     shown: Option<Shown>,
     /// Files opened while the app was already running, and on macOS all
@@ -230,7 +239,9 @@ impl App {
             settings_open: false,
             is_default_app: assoc::SUPPORTED && assoc::is_default(),
             was_focused: true,
-            selected: None,
+            selection: Selection::default(),
+            removed: None,
+            viewer: None,
             opened,
             previews: Previews::new(ctx.clone()),
             shown: None,
@@ -255,6 +266,10 @@ impl App {
         if updated {
             app.show_toast(format!("Updated to hdrshot {}", update::CURRENT), ctx);
         }
+        if app.settings.theme != ThemeChoice::System {
+            app.settings.theme.apply(ctx);
+        }
+        app.weekly_update_check(ctx);
         app
     }
 
@@ -346,8 +361,15 @@ impl window::App for App {
         let ctx = ui.ctx().clone();
         self.poll_job(&ctx);
         let focused = ui.input(|i| i.focused);
-        if focused && !self.was_focused && assoc::SUPPORTED {
-            self.is_default_app = assoc::is_default();
+        if focused && !self.was_focused {
+            if assoc::SUPPORTED {
+                self.is_default_app = assoc::is_default();
+            }
+            // Windows puts the title bar back to the system's theme when
+            // any system setting changes.
+            if self.settings.theme != ThemeChoice::System {
+                self.settings.theme.apply(&ctx);
+            }
         }
         self.was_focused = focused;
         let dropped: Vec<PathBuf> = ui.input(|i| {
@@ -360,6 +382,7 @@ impl window::App for App {
         if !dropped.is_empty() {
             self.add_paths(dropped);
             self.settings_open = false;
+            self.viewer = None;
         }
         self.shortcuts(&ctx);
         self.receive_opened(&ctx);
@@ -395,6 +418,7 @@ impl window::App for App {
                 }
             });
         }
+        self.viewer_ui(&ctx);
         drop_overlay(&ctx);
         self.existing_dialog(&ctx);
         self.update_dialog(&ctx);
@@ -433,7 +457,7 @@ const KOFI_URL: &str = "https://ko-fi.com/snake_tech";
 /// "Made with ♥ by snake.tech", centered, opening the Ko-fi page when
 /// clicked. The bundled fonts have no heart glyph, so it's drawn. Returns
 /// the line's rectangle.
-fn credit(ui: &mut egui::Ui) -> egui::Rect {
+fn credit(ui: &mut egui::Ui, button_width: f32) -> egui::Rect {
     let font = egui::FontId::proportional(11.5);
     let heart_size = 9.0;
     let gap = 4.0;
@@ -448,30 +472,35 @@ fn credit(ui: &mut egui::Ui) -> egui::Rect {
         before.size().x + after.size().x + heart_size + 2.0 * gap,
         before.size().y,
     );
-    ui.vertical_centered(|ui| {
-        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-        let response = response
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(KOFI_URL);
-        let ink = if response.hovered() {
-            ui.visuals().text_color()
-        } else {
-            color
-        };
-        let painter = ui.painter();
-        let mut x = rect.left();
-        painter.galley_with_override_text_color(rect.left_top(), before.clone(), ink);
-        x += before.size().x + gap;
-        let center = egui::pos2(x + heart_size / 2.0, rect.center().y);
-        paint_heart(painter, center, heart_size, Color32::from_rgb(220, 70, 90));
-        x += heart_size + gap;
-        painter.galley_with_override_text_color(egui::pos2(x, rect.top()), after.clone(), ink);
-        if response.clicked() {
-            ui.ctx().open_url(egui::OpenUrl::new_tab(KOFI_URL));
-        }
-        rect
-    })
-    .inner
+    // Centered, or on the left in a window too narrow for it to clear the
+    // update button on the right.
+    let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), size.y), Sense::hover());
+    let mut left = row.center().x - size.x / 2.0;
+    if left + size.x > row.right() - button_width - 8.0 {
+        left = row.left();
+    }
+    let rect = egui::Rect::from_min_size(egui::pos2(left, row.top()), size);
+    let response = ui
+        .interact(rect, ui.scope_id().with("credit"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(KOFI_URL);
+    let ink = if response.hovered() {
+        ui.visuals().text_color()
+    } else {
+        color
+    };
+    let painter = ui.painter();
+    let mut x = rect.left();
+    painter.galley_with_override_text_color(rect.left_top(), before.clone(), ink);
+    x += before.size().x + gap;
+    let center = egui::pos2(x + heart_size / 2.0, rect.center().y);
+    paint_heart(painter, center, heart_size, Color32::from_rgb(220, 70, 90));
+    x += heart_size + gap;
+    painter.galley_with_override_text_color(egui::pos2(x, rect.top()), after.clone(), ink);
+    if response.clicked() {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(KOFI_URL));
+    }
+    rect
 }
 
 /// A filled heart `size` points wide, centered on `center`.
