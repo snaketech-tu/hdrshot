@@ -231,11 +231,13 @@ fn thumbnail(
     let rgb = sdr_rgb8(&preview.image, &preview.levels, &options.sdr);
     let alpha = preview.image.alpha.as_deref();
     let rgba = rgb
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .enumerate()
-        .flat_map(|(i, p)| {
+        .flat_map(|(i, &[r, g, b])| {
             let a = alpha.map_or(255, |a| (a[i].clamp(0.0, 1.0) * 255.0).round() as u8);
-            [p[0], p[1], p[2], a]
+            [r, g, b, a]
         })
         .collect();
     (preview.image.width, preview.image.height, rgba)
