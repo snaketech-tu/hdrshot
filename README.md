@@ -163,10 +163,13 @@ where it was last closed, at the same size.
 - **SDR format** **JPEG** saves the SDR image as a JPEG at quality 90,
   a fraction of the PNG's size, for chats and forums that don't show HDR.
   JPEG has no transparency, so transparent areas are shown over black.
-- **Originals: Move to the Recycle Bin after converting** (the Trash on
-  macOS and Linux) clears out the originals once all of their files are
-  saved. Images that fail, or whose files already existed, are kept, and so
-  is everything when you stop a batch. It is off by default.
+- **Originals: Replace the original** moves each original to the Recycle
+  Bin (the Trash on macOS and Linux) once all of its files are saved, so
+  only the converted files are left in the folder and the original can
+  still be restored. Images that fail, or whose files already existed, are
+  kept, and so is everything when you stop a batch. It is off by default;
+  the button for the steps after converting, under the file list, shows
+  whether originals are kept or replaced.
 - **Watch folder**, in Settings, converts each image saved to
   the chosen folder or its subfolders from then on, with the current
   settings, as soon as it is completely written. On Windows its menu offers

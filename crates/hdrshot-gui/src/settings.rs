@@ -406,13 +406,13 @@ impl App {
         theme::row_label(ui, "Originals");
         ui.checkbox(
             &mut self.settings.trash_originals,
-            format!("Move to the {RECYCLE_BIN} after converting"),
+            format!("Replace the original (it goes to the {RECYCLE_BIN})"),
         )
         .on_hover_text(format!(
             "Once all of an image's files are saved, move the original to the \
-             {RECYCLE_BIN}, where it can be restored. Images that fail, or whose \
-             files already existed, are kept, and so is everything when you stop \
-             the batch."
+             {RECYCLE_BIN}, so only the converted files are left. It can \
+             be restored from there. Images that fail, or whose files already \
+             existed, are kept, and so is everything when you stop the batch."
         ));
         ui.end_row();
     }
@@ -661,14 +661,17 @@ impl Settings {
         folders
     }
 
-    /// What the chip for the steps after converting says.
+    /// What the chip for the steps after converting says: what happens to
+    /// the originals, and the clipboard copy only when it is off, so the
+    /// chips fit one row in the default window.
     pub(crate) fn after_summary(&self) -> String {
-        match (self.copy_to_clipboard, self.trash_originals) {
-            (true, false) => "Copy to clipboard".to_owned(),
-            (true, true) => format!("Clipboard, {RECYCLE_BIN}"),
-            (false, true) => format!("Originals to {RECYCLE_BIN}"),
-            (false, false) => "No clipboard copy".to_owned(),
+        match (self.trash_originals, self.copy_to_clipboard) {
+            (false, true) => "Keep originals",
+            (true, true) => "Replace originals",
+            (false, false) => "Keep originals, no clipboard",
+            (true, false) => "Replace originals, no clipboard",
         }
+        .to_owned()
     }
 }
 
@@ -925,7 +928,7 @@ mod tests {
         let mut s = Settings::default();
         assert_eq!(s.output_summary(), "HDR PNG + SDR PNG");
         assert_eq!(s.save_summary(), "Next to originals");
-        assert_eq!(s.after_summary(), "Copy to clipboard");
+        assert_eq!(s.after_summary(), "Keep originals");
         assert_eq!(size_summary(None), "Source size");
         assert_eq!(size_summary(Some(1440)), "Up to 1440p");
 
@@ -942,9 +945,11 @@ mod tests {
         s.output_dir = Some(PathBuf::from("shots").join("HDR"));
         assert_eq!(s.save_summary(), "In HDR");
 
-        s.copy_to_clipboard = false;
-        assert_eq!(s.after_summary(), "No clipboard copy");
         s.trash_originals = true;
-        assert_eq!(s.after_summary(), format!("Originals to {RECYCLE_BIN}"));
+        assert_eq!(s.after_summary(), "Replace originals");
+        s.copy_to_clipboard = false;
+        assert_eq!(s.after_summary(), "Replace originals, no clipboard");
+        s.trash_originals = false;
+        assert_eq!(s.after_summary(), "Keep originals, no clipboard");
     }
 }

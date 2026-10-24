@@ -33,6 +33,9 @@
 
 ### Changed
 
+- The desktop app's option to move originals to the Recycle Bin is now
+  called **Replace the original**, and the button for the steps after
+  converting shows whether originals are kept or replaced.
 - The watch folder, in the desktop app and with `--watch`, includes its
   subfolders, so the NVIDIA app's folder (`Videos\NVIDIA`, with a subfolder
   per game) can be watched as a whole, new game folders included.
