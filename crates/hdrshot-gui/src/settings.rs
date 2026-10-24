@@ -109,6 +109,12 @@ impl App {
                     });
                     theme::section(ui, "Watch folder");
                     theme::card(ui, |ui| self.watch_ui(ui));
+                    if tray::SUPPORTED {
+                        theme::section(ui, "Background");
+                        theme::card(ui, |ui| {
+                            settings_grid(ui, "background", |ui| self.background_rows(ui))
+                        });
+                    }
                     theme::section(ui, "Fine-tuning");
                     theme::card(ui, |ui| self.tuning_ui(ui));
                 });
@@ -218,7 +224,8 @@ impl App {
                 egui::Checkbox::new(&mut self.settings.discord_png, "Discord-compatible PNG"),
             );
             // Explains the option even while it doesn't apply.
-            theme::info_icon(ui).on_hover_text(
+            theme::info_icon(
+                ui,
                 "Saves HDR PNGs without their cICP and mDCV chunks. Discord turns \
                  PNGs with cICP yellow; without it, Discord shows them in HDR with \
                  the right colors.\n\n\
@@ -590,6 +597,15 @@ pub(crate) struct Settings {
     pub(crate) last_update_check: u64,
     /// Where the window was when hdrshot last closed.
     pub(crate) window: Option<window::Place>,
+    /// Keep running in the tray when the window is closed (Windows).
+    pub(crate) tray: bool,
+    /// Start in the tray when the user signs in.
+    pub(crate) start_with_windows: bool,
+    /// Say with a notification when images were converted while the
+    /// window was hidden or in the background.
+    pub(crate) notify: bool,
+    /// Whether the note that hdrshot keeps running in the tray showed.
+    pub(crate) tray_note_shown: bool,
 }
 
 impl Settings {
@@ -697,6 +713,10 @@ impl Default for Settings {
             update_check: true,
             last_update_check: 0,
             window: None,
+            tray: false,
+            start_with_windows: false,
+            notify: true,
+            tray_note_shown: false,
         }
     }
 }

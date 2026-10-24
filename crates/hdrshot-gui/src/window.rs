@@ -9,7 +9,7 @@
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use egui_software_backend::{BufferMutRef, ColorFieldOrder, EguiSoftwareRender};
 use serde::{Deserialize, Serialize};
@@ -45,6 +45,26 @@ pub trait App {
     /// Called once before the window closes, with its place unless it is
     /// minimized, maximized or full screen.
     fn on_exit(&mut self, _place: Option<Place>) {}
+
+    /// Whether the window opens hidden, as when hdrshot starts in the tray.
+    fn starts_hidden(&self) -> bool {
+        false
+    }
+
+    /// Whether closing the window only hides it, as hdrshot then keeps
+    /// running in the tray.
+    fn hides_on_close(&self) -> bool {
+        false
+    }
+
+    /// Called when closing the window hid it, with its place as for
+    /// [`App::on_exit`].
+    fn on_hide(&mut self, _place: Option<Place>) {}
+
+    /// Whether the app asks to quit, e.g. from the tray icon's menu.
+    fn wants_quit(&self) -> bool {
+        false
+    }
 
     /// Files pasted with Ctrl+V (Cmd+V on macOS), e.g. copied in Explorer.
     /// egui only passes on pasted text, so the window reads files itself.
@@ -83,6 +103,7 @@ pub fn run<A: App>(
         app,
         running: None,
         next_repaint: None,
+        last_background_frame: None,
     };
     event_loop.run_app(&mut runner)
 }
@@ -98,7 +119,13 @@ struct Runner<A> {
     running: Option<Running>,
     /// Earliest pending repaint request that lies in the future.
     next_repaint: Option<Instant>,
+    /// When a frame last ran while the window was hidden or minimized.
+    last_background_frame: Option<Instant>,
 }
+
+/// Least time between frames while the window is hidden or minimized, so
+/// something animating, like a spinner, doesn't keep the CPU busy.
+const BACKGROUND_FRAME: Duration = Duration::from_millis(100);
 
 /// The window and everything tied to it.
 ///
@@ -123,6 +150,9 @@ impl<A: App> Runner<A> {
     fn open(&mut self, event_loop: &ActiveEventLoop) {
         let monitors: Vec<MonitorHandle> = event_loop.available_monitors().collect();
         let mut viewport = self.viewport.clone();
+        if self.app.starts_hidden() {
+            viewport = viewport.with_visible(false);
+        }
         let mut position = None;
         let mut monitor = None;
         if let Some(place) = self.app.place() {
@@ -172,7 +202,6 @@ impl<A: App> Runner<A> {
         );
         let mut info = egui::ViewportInfo::default();
         egui_winit::update_viewport_info(&mut info, &self.ctx, &window, true);
-        window.request_redraw();
         self.running = Some(Running {
             surface,
             egui_winit,
@@ -184,21 +213,43 @@ impl<A: App> Runner<A> {
             progress: None,
             window,
         });
+        self.wake();
     }
 
     fn schedule(&mut self, when: Instant) {
         if when <= Instant::now() {
-            if let Some(running) = &self.running {
-                running.window.request_redraw();
-            }
+            self.wake();
         } else if self.next_repaint.is_none_or(|next| when < next) {
             self.next_repaint = Some(when);
         }
     }
 
-    /// Runs the app for one frame and draws it. While minimized the app
-    /// still runs, so a batch keeps reporting progress on the taskbar, but
-    /// nothing is drawn.
+    /// Runs a frame soon. A hidden or minimized window may get no redraw
+    /// events, but the app must keep running, e.g. to convert new images
+    /// from the watch folder or follow a batch on the taskbar, so then the
+    /// frame runs right away, or once [`BACKGROUND_FRAME`] has passed.
+    fn wake(&mut self) {
+        let Some(running) = &self.running else {
+            return;
+        };
+        let window = &running.window;
+        if window.is_visible() != Some(false) && window.is_minimized() != Some(true) {
+            window.request_redraw();
+            return;
+        }
+        let now = Instant::now();
+        if let Some(next) = self.last_background_frame.map(|t| t + BACKGROUND_FRAME)
+            && next > now
+        {
+            self.schedule(next);
+            return;
+        }
+        self.last_background_frame = Some(now);
+        self.redraw();
+    }
+
+    /// Runs the app for one frame and draws it. While hidden or minimized
+    /// the app still runs, but nothing is drawn.
     fn redraw(&mut self) {
         let Some(running) = &mut self.running else {
             return;
@@ -246,8 +297,9 @@ impl<A: App> Runner<A> {
         }
 
         let size = running.window.inner_size();
-        if let (Some(width), Some(height)) =
-            (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+        if running.window.is_visible() != Some(false)
+            && let (Some(width), Some(height)) =
+                (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
         {
             let primitives = self.ctx.tessellate(output.shapes, output.pixels_per_point);
             running.draw(width, height, &primitives, output.pixels_per_point);
@@ -258,6 +310,18 @@ impl<A: App> Runner<A> {
         {
             self.schedule(when);
         }
+    }
+}
+
+impl<A: App> Runner<A> {
+    fn quit(&mut self, event_loop: &ActiveEventLoop) {
+        let place = self.running.as_ref().and_then(|r| place(&r.window));
+        // Hidden first, since the app may still finish writing a file.
+        if let Some(running) = &self.running {
+            running.window.set_visible(false);
+        }
+        self.app.on_exit(place);
+        event_loop.exit();
     }
 }
 
@@ -299,11 +363,9 @@ impl Running {
 
 impl<A: App> ApplicationHandler<Repaint> for Runner<A> {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
-        if let StartCause::ResumeTimeReached { .. } = cause
-            && let Some(running) = &self.running
-        {
-            running.window.request_redraw();
+        if let StartCause::ResumeTimeReached { .. } = cause {
             self.next_repaint = None;
+            self.wake();
         }
     }
 
@@ -314,15 +376,6 @@ impl<A: App> ApplicationHandler<Repaint> for Runner<A> {
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, Repaint(when): Repaint) {
-        // A minimized window may get no redraw events, but a running batch
-        // still has to be followed for the taskbar progress.
-        if when <= Instant::now()
-            && let Some(running) = &self.running
-            && running.window.is_minimized() == Some(true)
-        {
-            self.redraw();
-            return;
-        }
         self.schedule(when);
     }
 
@@ -332,13 +385,12 @@ impl<A: App> ApplicationHandler<Repaint> for Runner<A> {
         };
         match event {
             WindowEvent::RedrawRequested => self.redraw(),
-            WindowEvent::CloseRequested => {
+            WindowEvent::CloseRequested if self.app.hides_on_close() => {
                 let place = place(&running.window);
-                // Hidden first, since the app may still finish writing a file.
                 running.window.set_visible(false);
-                self.app.on_exit(place);
-                event_loop.exit();
+                self.app.on_hide(place);
             }
+            WindowEvent::CloseRequested => self.quit(event_loop),
             event => {
                 if let WindowEvent::ModifiersChanged(modifiers) = &event {
                     running.modifiers = modifiers.state();
@@ -363,6 +415,9 @@ impl<A: App> ApplicationHandler<Repaint> for Runner<A> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.app.wants_quit() && !event_loop.exiting() {
+            self.quit(event_loop);
+        }
         event_loop.set_control_flow(match self.next_repaint {
             Some(when) => ControlFlow::WaitUntil(when),
             None => ControlFlow::Wait,

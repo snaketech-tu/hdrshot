@@ -241,7 +241,8 @@ impl App {
 /// While files are dragged over the window, covers it with a large target
 /// saying they will be added. Dropping anywhere adds them.
 pub(crate) fn drop_overlay(ctx: &egui::Context) {
-    if ctx.input(|i| i.raw.hovered_files.is_empty()) {
+    // Not for the window's own files being dragged out over it.
+    if ctx.input(|i| i.raw.hovered_files.is_empty()) || dragout::active() {
         return;
     }
     let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("drop overlay"));

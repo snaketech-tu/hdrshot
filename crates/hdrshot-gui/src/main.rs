@@ -3,7 +3,9 @@
 mod actions;
 mod adding;
 mod assoc;
+mod background;
 mod convert;
+mod dragout;
 mod files;
 mod icons;
 mod jobs;
@@ -13,10 +15,12 @@ mod previews;
 mod selection;
 mod settings;
 mod single;
+mod startup;
 mod storage;
 mod taskbar;
 mod theme;
 mod toasts;
+mod tray;
 mod update;
 mod update_ui;
 mod viewer;
@@ -69,14 +73,17 @@ fn main() {
         single::wait_for_exit(std::time::Duration::from_secs(10));
     }
     update::clean_up();
-    // From Explorer's "Convert with hdrshot": convert the files right away.
-    let convert = files
-        .first()
-        .is_some_and(|f| f.as_os_str() == single::CONVERT_FLAG);
-    if convert {
+    // From Explorer's "Convert with hdrshot", to convert the files right
+    // away, or the start at sign-in.
+    let launch = match files.first().and_then(|f| f.to_str()) {
+        Some(single::CONVERT_FLAG) => single::Launch::Convert,
+        Some(startup::TRAY_FLAG) => single::Launch::Tray,
+        _ => single::Launch::Open,
+    };
+    if launch != single::Launch::Open {
         files.remove(0);
     }
-    let listener = match single::claim(&files, convert) {
+    let listener = match single::claim(&files, launch) {
         Some(single::Claim::HandedOff) => return,
         Some(single::Claim::First(listener)) => Some(listener),
         None => None,
@@ -92,7 +99,7 @@ fn main() {
         .with_drag_and_drop(true)
         .with_icon(icon());
     if let Err(e) = window::run(viewport, |ctx| {
-        App::new(ctx, files, convert, listener, updated)
+        App::new(ctx, files, launch, listener, updated)
     }) {
         eprintln!("hdrshot: {e}");
         std::process::exit(1);
@@ -180,28 +187,49 @@ struct App {
     waiting: Vec<PathBuf>,
     /// `egui` time when the last of them arrived.
     last_arrival: f64,
+    /// The icon in the tray, while hdrshot keeps running with its window
+    /// closed.
+    tray: Option<tray::Tray>,
+    /// Whether the icon couldn't be added; not tried again until restart.
+    tray_failed: bool,
+    tray_events: (Sender<tray::TrayEvent>, Receiver<tray::TrayEvent>),
+    /// Whether the window is hidden, with hdrshot in the tray.
+    hidden: bool,
+    /// Quit chosen from the tray icon's menu.
+    quit: bool,
 }
 
 /// Tooltip for the Copy for Discord buttons; the README's "Sharing on
 /// Discord" section has the details.
-const DISCORD_COPY_HINT: &str = "Copy the image (the HDR one if made) as a PNG that Discord shows \
-     correctly.\nDiscord turns HDR PNGs with a cICP chunk yellow, shows AVIF too bright and \
-     Ultra HDR JPEGs in SDR, so the copy is an HDR PNG without that chunk.\nYour saved files \
-     are unchanged.";
+fn discord_copy_hint() -> String {
+    let mut hint = "Copy the image (the HDR one if made) as a PNG that Discord shows \
+         correctly.\nDiscord turns HDR PNGs with a cICP chunk yellow, shows AVIF too bright and \
+         Ultra HDR JPEGs in SDR, so the copy is an HDR PNG without that chunk.\nYour saved files \
+         are unchanged."
+        .to_owned();
+    if dragout::SUPPORTED {
+        hint.push_str(
+            "\nDragging the row into Discord, a browser or a folder gives the same file.",
+        );
+    }
+    hint
+}
 
 const SETTINGS_KEY: &str = "settings";
 
 impl App {
-    /// Opens with `files` in the list, converting them right away with
-    /// `convert`.
+    /// Opens with `files` in the list, converting them right away if
+    /// started from "Convert with hdrshot", or hidden in the tray if
+    /// started at sign-in.
     fn new(
         ctx: &egui::Context,
         files: Vec<PathBuf>,
-        convert: bool,
+        launch: single::Launch,
         listener: Option<single::Listener>,
         updated: bool,
     ) -> Self {
-        let settings = storage::load(SETTINGS_KEY).unwrap_or_default();
+        let settings: Settings = storage::load(SETTINGS_KEY).unwrap_or_default();
+        let hidden = launch == single::Launch::Tray && settings.tray && tray::SUPPORTED;
         let (open, opened) = channel();
         let watched = channel();
         if let Some(listener) = listener {
@@ -254,11 +282,19 @@ impl App {
             watched,
             waiting: Vec::new(),
             last_arrival: 0.0,
+            tray: None,
+            tray_failed: false,
+            tray_events: channel(),
+            hidden,
+            quit: false,
         };
         if assoc::SUPPORTED {
             assoc::refresh();
         }
-        if convert {
+        if app.settings.start_with_windows {
+            startup::refresh();
+        }
+        if launch == single::Launch::Convert {
             app.waiting = files;
         } else {
             app.add_paths(files);
@@ -285,8 +321,7 @@ impl App {
             self.add_paths(files);
         }
         self.settings_open = false;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        self.show_window(ctx);
     }
 
     fn running(&self) -> bool {
@@ -372,11 +407,13 @@ impl window::App for App {
             }
         }
         self.was_focused = focused;
+        // Not the files being dragged out, dropped back onto the window.
         let dropped: Vec<PathBuf> = ui.input(|i| {
             i.raw
                 .dropped_files
                 .iter()
                 .map(|f| f.path().to_path_buf())
+                .filter(|path| !dragout::is_dragged(path))
                 .collect()
         });
         if !dropped.is_empty() {
@@ -388,6 +425,7 @@ impl window::App for App {
         self.receive_opened(&ctx);
         self.sync_watch(&ctx);
         self.receive_watched(&ctx);
+        self.sync_tray(&ctx);
         for (path, thumb) in self.previews.finished(&ctx) {
             if let Some(entry) = self.files.iter_mut().find(|e| e.path == path) {
                 entry.thumb = thumb;
@@ -439,6 +477,27 @@ impl window::App for App {
         if let Some(job) = self.job.take() {
             job.finish();
         }
+    }
+
+    fn starts_hidden(&self) -> bool {
+        self.hidden
+    }
+
+    fn hides_on_close(&self) -> bool {
+        self.tray.is_some()
+    }
+
+    fn on_hide(&mut self, place: Option<window::Place>) {
+        if place.is_some() {
+            self.settings.window = place;
+        }
+        self.hidden_in_tray();
+        // hdrshot may now run until Windows shuts down.
+        storage::save(SETTINGS_KEY, &self.settings);
+    }
+
+    fn wants_quit(&self) -> bool {
+        self.quit
     }
 
     fn taskbar_progress(&self) -> Option<f32> {

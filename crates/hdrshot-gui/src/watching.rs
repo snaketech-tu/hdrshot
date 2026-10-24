@@ -156,12 +156,17 @@ impl App {
                 s.watch_dir.is_some(),
                 egui::Checkbox::new(&mut s.watch, "Convert new images saved in"),
             )
-            .on_hover_text(
+            .on_hover_text(format!(
                 "Convert each image saved to this folder or its subfolders from now \
                  on, such as a new Game Bar or NVIDIA app screenshot, with these \
                  settings. Images already in it are left alone. Works while hdrshot \
-                 is open.",
-            )
+                 is open{}.",
+                if tray::SUPPORTED {
+                    ", or running in the tray (see Background)"
+                } else {
+                    ""
+                }
+            ))
             .on_disabled_hover_text("Choose a folder to watch first");
             let label = match &s.watch_dir {
                 Some(dir) => dir.display().to_string(),

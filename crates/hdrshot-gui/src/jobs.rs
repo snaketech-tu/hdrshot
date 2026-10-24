@@ -118,6 +118,7 @@ impl App {
             .collect();
         let place = match (&self.settings.output_dir, self.settings.save_to_folder) {
             (Some(dir), true) => format!("in {}", folder_name(dir)),
+            _ if files.len() == 1 => "next to the original".to_owned(),
             _ => "next to the originals".to_owned(),
         };
         self.batch = Batch {
@@ -190,13 +191,14 @@ impl App {
         if done {
             // Flash the taskbar button (bounce the Dock icon on macOS) if
             // the user switched to something else meanwhile.
-            if !ctx.input(|i| i.focused) {
+            if !self.hidden && !ctx.input(|i| i.focused) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
                     egui::UserAttentionType::Informational,
                 ));
             }
             self.batch.stopped = job.is_cancelled();
             self.banner = true;
+            self.notify_batch(ctx);
         } else {
             // For the time left and the progress between files.
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
