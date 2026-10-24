@@ -461,11 +461,13 @@ fn write_file(
         let mut writer = BufWriter::new(file);
         write(&mut writer)?;
         writer.flush()?;
-        let file = writer.into_inner().map_err(|e| e.into_error())?;
-        if let Some(time) = modified {
-            file.set_modified(time)?;
+        // Closed before the rename, which Windows needs.
+        {
+            let file = writer.into_inner().map_err(|e| e.into_error())?;
+            if let Some(time) = modified {
+                file.set_modified(time)?;
+            }
         }
-        drop(file);
         std::fs::rename(&temp, path)?;
         Ok(())
     })();
@@ -498,10 +500,96 @@ pub fn preview(
     max_height: u32,
 ) -> Result<Preview> {
     let image = input::decode_file(input, options)?;
-    let levels = light_levels(&image);
+    Ok(preview_image(&image, max_width, max_height))
+}
+
+/// Like [`preview`], for an image already decoded.
+pub fn preview_image(image: &ScRgbImage, max_width: u32, max_height: u32) -> Preview {
+    let levels = light_levels(image);
     let (width, height) = resize::fit_box(image.width, image.height, max_width, max_height);
-    let image = resize::resize(&image, width, height);
-    Ok(Preview { image, levels })
+    let image = resize::resize(image, width, height);
+    Preview { image, levels }
+}
+
+/// The files made from one image by [`convert_bytes`], in memory.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Converted {
+    pub hdr: Option<Vec<u8>>,
+    pub sdr: Option<Vec<u8>>,
+    /// The input is 8-bit SDR, so the SDR image was made in place of the
+    /// HDR one, as [`Outputs::sdr_input`].
+    pub sdr_input: bool,
+}
+
+/// Converts the image file in `bytes` as [`convert_file`] does, returning
+/// the files instead of writing them. Used where there is no file system,
+/// as in the browser version. The options about files (`output_dir`,
+/// `naming`, `existing`, `keep_date`) don't apply.
+pub fn convert_bytes(bytes: &[u8], options: &ConvertOptions) -> Result<Converted> {
+    convert_image(input::decode(bytes, &options.input)?, options)
+}
+
+/// Like [`convert_bytes`], for an image already decoded with
+/// `options.input`.
+pub fn convert_image(image: ScRgbImage, options: &ConvertOptions) -> Result<Converted> {
+    let sdr_input = !image.hdr;
+    let make_hdr = options.mode.hdr() && !sdr_input;
+    let make_sdr = options.mode.sdr() || (options.mode.hdr() && sdr_input);
+    let image = scale_down(image, options);
+    let levels = light_levels(&image);
+    let mut converted = Converted {
+        sdr_input,
+        ..Converted::default()
+    };
+    if make_hdr {
+        let mut out = Vec::new();
+        write_hdr(&image, &levels, options, &mut out)?;
+        converted.hdr = Some(out);
+    }
+    if make_sdr {
+        let mut out = Vec::new();
+        write_sdr(&image, &levels, options, &mut out)?;
+        converted.sdr = Some(out);
+    }
+    Ok(converted)
+}
+
+/// `image` scaled down to [`ConvertOptions::max_height`], if it is taller.
+fn scale_down(image: ScRgbImage, options: &ConvertOptions) -> ScRgbImage {
+    match options.max_height {
+        Some(max_height) => {
+            let (width, height) = resize::fit_height(image.width, image.height, max_height);
+            resize::resize(&image, width, height)
+        }
+        None => image,
+    }
+}
+
+/// Encodes the HDR output of `image` in the format `options` ask for.
+fn write_hdr(
+    image: &ScRgbImage,
+    levels: &LightLevels,
+    options: &ConvertOptions,
+    w: impl Write,
+) -> Result<()> {
+    match options.hdr.format {
+        HdrFormat::Png => write_hdr_png(image, levels, &options.hdr, &options.sdr, w),
+        HdrFormat::Avif => write_hdr_avif(image, &options.hdr, &options.hdr.avif, w),
+        HdrFormat::UltraHdr => write_ultra_hdr(image, levels, &options.hdr, &options.sdr, w),
+    }
+}
+
+/// Encodes the SDR output of `image` in the format `options` ask for.
+fn write_sdr(
+    image: &ScRgbImage,
+    levels: &LightLevels,
+    options: &ConvertOptions,
+    w: impl Write,
+) -> Result<()> {
+    match options.sdr_format {
+        SdrFormat::Png => write_sdr_png(image, levels, &options.sdr, w),
+        SdrFormat::Jpeg { quality } => write_sdr_jpeg(image, levels, &options.sdr, quality, w),
+    }
 }
 
 /// Convert one image file according to `options`.
@@ -553,7 +641,7 @@ fn convert(
     } else {
         None
     };
-    let mut image = input::decode(&bytes, &options.input)?;
+    let image = input::decode(&bytes, &options.input)?;
     drop(bytes);
     if !image.hdr {
         outputs.sdr_input = true;
@@ -579,10 +667,7 @@ fn convert(
             return Ok((outputs, None));
         }
     }
-    if let Some(max_height) = options.max_height {
-        let (width, height) = resize::fit_height(image.width, image.height, max_height);
-        image = resize::resize(&image, width, height);
-    }
+    let image = scale_down(image, options);
     let levels = light_levels(&image);
     for path in [&outputs.hdr, &outputs.sdr].into_iter().flatten() {
         if let Some(dir) = path.parent() {
@@ -590,19 +675,10 @@ fn convert(
         }
     }
     if let Some(path) = &outputs.hdr {
-        write_file(path, modified, |w| match options.hdr.format {
-            HdrFormat::Png => write_hdr_png(&image, &levels, &options.hdr, &options.sdr, w),
-            HdrFormat::Avif => write_hdr_avif(&image, &options.hdr, &options.hdr.avif, w),
-            HdrFormat::UltraHdr => write_ultra_hdr(&image, &levels, &options.hdr, &options.sdr, w),
-        })?;
+        write_file(path, modified, |w| write_hdr(&image, &levels, options, w))?;
     }
     if let Some(path) = &outputs.sdr {
-        write_file(path, modified, |w| match options.sdr_format {
-            SdrFormat::Png => write_sdr_png(&image, &levels, &options.sdr, w),
-            SdrFormat::Jpeg { quality } => {
-                write_sdr_jpeg(&image, &levels, &options.sdr, quality, w)
-            }
-        })?;
+        write_file(path, modified, |w| write_sdr(&image, &levels, options, w))?;
     }
     let discord = if discord_png && outputs.hdr.is_some() {
         let mut png = Vec::new();

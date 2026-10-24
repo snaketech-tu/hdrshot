@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- A browser version at https://snaketech-tu.github.io/hdrshot/ converts
+  images without installing anything. It runs the same conversion as the
+  desktop app, with the same defaults and formats, on your computer: images
+  are never uploaded. Converted files download one by one or as a .zip, or
+  go straight into a folder in Chrome and Edge. The desktop app stays faster
+  and keeps the features a browser can't offer, such as the watch folder
+  and Copy for Discord.
+- `hdrshot-core` has `convert_bytes` and `convert_image`, which convert an
+  image in memory and return the files instead of writing them.
+
 ## [2.2.0] - 2026-10-24
 
 ### Added
