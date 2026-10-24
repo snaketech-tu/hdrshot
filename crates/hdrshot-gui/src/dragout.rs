@@ -61,7 +61,8 @@ mod imp {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetCapture;
     use windows_sys::Win32::UI::Shell::Common::ITEMIDLIST;
     use windows_sys::Win32::UI::Shell::{
-        CIDLData_CreateFromIDArray, ILCreateFromPathW, ILFree, SHCreateDataObject, SHDoDragDrop,
+        BHID_DataObject, CIDLData_CreateFromIDArray, ILCreateFromPathW, ILFree,
+        SHCreateShellItemArrayFromIDLists, SHDoDragDrop,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, GetCursorPos, HWND_MESSAGE, PostMessageW, RegisterClassW,
@@ -161,30 +162,33 @@ mod imp {
                 (!item.is_null()).then_some(item)
             })
             .collect();
-        if let Some(data) = data_object(&items) {
-            let source = &DROP_SOURCE as *const DropSource as *mut c_void;
-            let mut effect = 0;
-            // SAFETY: `data` is a live data object, released once the
-            // files are dropped, and the drop source is never freed.
-            unsafe {
-                SHDoDragDrop(
-                    std::ptr::null_mut(),
-                    data,
-                    source,
-                    DROPEFFECT_COPY,
-                    &mut effect,
-                );
-                release(data);
-            }
-        }
+        // The data object keeps copies of the items.
+        let data = data_object(&items);
         for item in items {
             // SAFETY: made by ILCreateFromPathW above.
             unsafe { ILFree(item) };
         }
+        let Some(data) = data else { return };
+        let source = &DROP_SOURCE as *const DropSource as *mut c_void;
+        let mut effect = 0;
+        // SAFETY: `data` is a live data object, released once the files
+        // are dropped, and the drop source is never freed.
+        unsafe {
+            SHDoDragDrop(
+                std::ptr::null_mut(),
+                data,
+                source,
+                DROPEFFECT_COPY,
+                &mut effect,
+            );
+            release(data);
+        }
     }
 
-    /// The shell's data object for `items`, which offers them as files,
-    /// with their thumbnails as the drag image.
+    /// The shell's data object for the absolute `items`, which may be in
+    /// different folders: it offers them as files, with their thumbnails as
+    /// the drag image. Made through a shell item array, as
+    /// `SHCreateDataObject` only takes items of one folder.
     fn data_object(items: &[*mut ITEMIDLIST]) -> Option<*mut c_void> {
         if items.is_empty() {
             return None;
@@ -192,27 +196,47 @@ mod imp {
         let count = items.len() as u32;
         let items = items.as_ptr() as *const *const ITEMIDLIST;
         let mut data: *mut c_void = std::ptr::null_mut();
-        // SAFETY: the items are absolute, which the desktop (a null folder,
-        // or the empty list) takes as relative to itself.
+        // SAFETY: plain shell calls; the array is released once it made
+        // the data object.
         unsafe {
-            let made = SHCreateDataObject(
-                std::ptr::null(),
-                count,
-                items,
-                std::ptr::null_mut(),
-                &IID_IDATAOBJECT,
-                &mut data,
-            );
-            if made < 0 || data.is_null() {
-                // Wine has only the older call, which makes the same.
-                let desktop = ITEMIDLIST::default();
-                data = std::ptr::null_mut();
-                if CIDLData_CreateFromIDArray(&desktop, count, items, &mut data) < 0 {
-                    return None;
+            let mut array: *mut c_void = std::ptr::null_mut();
+            if SHCreateShellItemArrayFromIDLists(count, items, &mut array) >= 0 && !array.is_null()
+            {
+                let vtbl = &**(array as *const *const ShellItemArrayVtbl);
+                let made = (vtbl.bind_to_handler)(
+                    array,
+                    std::ptr::null_mut(),
+                    &BHID_DataObject,
+                    &IID_IDATAOBJECT,
+                    &mut data,
+                );
+                release(array);
+                if made >= 0 && !data.is_null() {
+                    return Some(data);
                 }
+            }
+            // Wine can't make that one; its older call takes the items as
+            // relative to the desktop.
+            data = std::ptr::null_mut();
+            let desktop = ITEMIDLIST::default();
+            if CIDLData_CreateFromIDArray(&desktop, count, items, &mut data) < 0 {
+                return None;
             }
         }
         (!data.is_null()).then_some(data)
+    }
+
+    /// The start of `IShellItemArray`'s vtable.
+    #[repr(C)]
+    struct ShellItemArrayVtbl {
+        unknown: [usize; 3],
+        bind_to_handler: unsafe extern "system" fn(
+            *mut c_void,
+            *mut c_void,
+            *const GUID,
+            *const GUID,
+            *mut *mut c_void,
+        ) -> HRESULT,
     }
 
     /// Ends the press that started the drag in the app's `window`: the
