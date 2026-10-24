@@ -457,7 +457,7 @@ const KOFI_URL: &str = "https://ko-fi.com/snake_tech";
 /// "Made with ♥ by snake.tech", centered, opening the Ko-fi page when
 /// clicked. The bundled fonts have no heart glyph, so it's drawn. Returns
 /// the line's rectangle.
-fn credit(ui: &mut egui::Ui) -> egui::Rect {
+fn credit(ui: &mut egui::Ui, button_width: f32) -> egui::Rect {
     let font = egui::FontId::proportional(11.5);
     let heart_size = 9.0;
     let gap = 4.0;
@@ -472,30 +472,35 @@ fn credit(ui: &mut egui::Ui) -> egui::Rect {
         before.size().x + after.size().x + heart_size + 2.0 * gap,
         before.size().y,
     );
-    ui.vertical_centered(|ui| {
-        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-        let response = response
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(KOFI_URL);
-        let ink = if response.hovered() {
-            ui.visuals().text_color()
-        } else {
-            color
-        };
-        let painter = ui.painter();
-        let mut x = rect.left();
-        painter.galley_with_override_text_color(rect.left_top(), before.clone(), ink);
-        x += before.size().x + gap;
-        let center = egui::pos2(x + heart_size / 2.0, rect.center().y);
-        paint_heart(painter, center, heart_size, Color32::from_rgb(220, 70, 90));
-        x += heart_size + gap;
-        painter.galley_with_override_text_color(egui::pos2(x, rect.top()), after.clone(), ink);
-        if response.clicked() {
-            ui.ctx().open_url(egui::OpenUrl::new_tab(KOFI_URL));
-        }
-        rect
-    })
-    .inner
+    // Centered, or on the left in a window too narrow for it to clear the
+    // update button on the right.
+    let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), size.y), Sense::hover());
+    let mut left = row.center().x - size.x / 2.0;
+    if left + size.x > row.right() - button_width - 8.0 {
+        left = row.left();
+    }
+    let rect = egui::Rect::from_min_size(egui::pos2(left, row.top()), size);
+    let response = ui
+        .interact(rect, ui.scope_id().with("credit"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(KOFI_URL);
+    let ink = if response.hovered() {
+        ui.visuals().text_color()
+    } else {
+        color
+    };
+    let painter = ui.painter();
+    let mut x = rect.left();
+    painter.galley_with_override_text_color(rect.left_top(), before.clone(), ink);
+    x += before.size().x + gap;
+    let center = egui::pos2(x + heart_size / 2.0, rect.center().y);
+    paint_heart(painter, center, heart_size, Color32::from_rgb(220, 70, 90));
+    x += heart_size + gap;
+    painter.galley_with_override_text_color(egui::pos2(x, rect.top()), after.clone(), ink);
+    if response.clicked() {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(KOFI_URL));
+    }
+    rect
 }
 
 /// A filled heart `size` points wide, centered on `center`.

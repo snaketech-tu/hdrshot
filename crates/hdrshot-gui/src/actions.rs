@@ -16,7 +16,7 @@ impl App {
         // Room for the update button, which is taller than the credit line
         // it sits on.
         ui.add_space(10.0);
-        let row = credit(ui);
+        let row = credit(ui, self.update_button_width(ui));
         self.update_button(ui, row);
     }
 

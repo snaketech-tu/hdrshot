@@ -15,8 +15,7 @@
 - The save menu offers the last three folders used.
 - A pill at the top of the window shows the watch folder while it is on;
   clicking it pauses watching.
-- While the list is empty, the app offers to watch the Game Bar folder and
-  to open `.jxr` files with hdrshot.
+- While the list is empty, the app offers to watch the Game Bar folder.
 - Several rows can be selected with Ctrl-click, Shift-click and Ctrl+A, then
   converted or removed together from the right-click menu or with Delete.
   Ctrl+C copies the selected image for Discord and Ctrl+O adds files.

@@ -271,24 +271,11 @@ impl App {
     /// credit line `row`, or "Update to" and the version once one is found.
     pub(crate) fn update_button(&mut self, ui: &mut egui::Ui, row: egui::Rect) {
         let checking = matches!(self.update, Update::Checking);
-        let found = match &self.update {
-            Update::Found(releases) => Some(releases[0].version.clone()),
-            _ => None,
-        };
-        let text = match &found {
-            Some(version) => format!("Update to {version}"),
-            None if checking => "Checking…".to_owned(),
-            None => "Check for updates".to_owned(),
-        };
-        let label = RichText::new(&text)
+        let found = self.found_version();
+        let label = RichText::new(self.update_text())
             .font(egui::FontId::proportional(12.0))
             .color(theme::accent(ui));
-        let width = ui
-            .painter()
-            .layout_no_wrap(text, egui::FontId::proportional(12.0), Color32::PLACEHOLDER)
-            .size()
-            .x
-            + 24.0;
+        let width = self.update_button_width(ui);
         let right = ui.max_rect().right();
         let rect = egui::Rect::from_center_size(
             egui::pos2(right - width / 2.0, row.center().y),
@@ -327,6 +314,33 @@ impl App {
                 self.check_for_updates(&ctx);
             }
         }
+    }
+}
+
+impl App {
+    /// The newest version found by the weekly check, if any.
+    fn found_version(&self) -> Option<String> {
+        match &self.update {
+            Update::Found(releases) => Some(releases[0].version.clone()),
+            _ => None,
+        }
+    }
+
+    fn update_text(&self) -> String {
+        match self.found_version() {
+            Some(version) => format!("Update to {version}"),
+            None if matches!(self.update, Update::Checking) => "Checking…".to_owned(),
+            None => "Check for updates".to_owned(),
+        }
+    }
+
+    /// How wide the update button is, for the credit line to make room.
+    pub(crate) fn update_button_width(&self, ui: &egui::Ui) -> f32 {
+        let font = egui::FontId::proportional(12.0);
+        let text = ui
+            .painter()
+            .layout_no_wrap(self.update_text(), font, Color32::PLACEHOLDER);
+        text.size().x + 24.0
     }
 }
 

@@ -217,11 +217,11 @@ where it was last closed, at the same size.
 - **Resolution** scales the output down to 2160p, 1440p, 1080p or 720p,
   keeping the aspect ratio and never scaling up. It starts at Source every
   time.
-- **Open .jxr files with hdrshot** (Windows and Linux), in Settings and
-  offered while the list is empty, makes a double-click on a screenshot
-  open it in the app. Windows asks you to confirm the choice
-  in Settings. It also lists hdrshot under **Open with** for `.wdp`, `.exr`,
-  `.jxl` and `.hdr` files, without making it their default.
+- **Open .jxr files with hdrshot** (Windows and Linux), in Settings, makes
+  a double-click on a screenshot open it in the app. Windows asks you to
+  confirm the choice in Settings. It also lists hdrshot under **Open with**
+  for `.wdp`, `.exr`, `.jxl` and `.hdr` files, without making it their
+  default.
   On Windows it also adds **Convert with hdrshot** to the right-click menu
   of these files (on Windows 11 under **Show more options**), which opens
   the app and converts them right away with your saved settings. Selecting
