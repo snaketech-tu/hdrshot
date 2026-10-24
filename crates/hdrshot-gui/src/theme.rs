@@ -195,12 +195,19 @@ pub fn row_label(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// A small "i" in a circle, drawn rather than taken from a font, to hover
-/// for an explanation.
-pub fn info_icon(ui: &mut egui::Ui) -> egui::Response {
+/// A small "i" in a circle, drawn rather than taken from a font, that
+/// explains something: hovering it shows `text` as a tooltip, and clicking
+/// it shows `text` in a box that stays until the next click elsewhere.
+pub fn info_icon(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let size = ui.spacing().interact_size.y.min(16.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
-    let color = if response.hovered() {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click());
+    let popup = egui::Popup::from_toggle_button_response(&response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .width(320.0);
+    let open = popup.is_open();
+    popup.show(|ui| ui.label(text));
+    focus_ring(ui, &response, size / 2.0);
+    let color = if response.hovered() || open {
         ui.visuals().strong_text_color()
     } else {
         ui.visuals().weak_text_color()
@@ -224,7 +231,12 @@ pub fn info_icon(ui: &mut egui::Ui) -> egui::Response {
         ],
         egui::Stroke::new(1.5, color),
     );
-    response
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if open {
+        response
+    } else {
+        response.on_hover_text(text)
+    }
 }
 
 /// The main action: filled with the accent color, white text.

@@ -61,6 +61,8 @@
   contrast, and keyboard focus is outlined.
 - **Convert** converts only the files not converted yet; once all are
   converted, **Convert again** converts them all again.
+- Clicking the info icon next to **Discord-compatible PNG** shows its
+  explanation too, not only hovering it.
 
 ### Fixed
 

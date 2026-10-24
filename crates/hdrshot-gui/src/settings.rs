@@ -224,7 +224,8 @@ impl App {
                 egui::Checkbox::new(&mut self.settings.discord_png, "Discord-compatible PNG"),
             );
             // Explains the option even while it doesn't apply.
-            theme::info_icon(ui).on_hover_text(
+            theme::info_icon(
+                ui,
                 "Saves HDR PNGs without their cICP and mDCV chunks. Discord turns \
                  PNGs with cICP yellow; without it, Discord shows them in HDR with \
                  the right colors.\n\n\
