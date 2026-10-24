@@ -41,6 +41,11 @@
 
 ### Changed
 
+- The Windows downloads are renamed: `hdrshot.exe` is now the desktop app
+  and `hdrshot-cli.exe` the command-line tool (before, `hdrshot-gui.exe`
+  and `hdrshot.exe`). Releases still include `hdrshot-gui.exe`, so the
+  **Update** button of earlier versions keeps working. Installed with
+  Scoop, the commands stay `hdrshot` and `hdrshot-gui`.
 - The desktop app's option to move originals to the Recycle Bin is now
   called **Replace the original**, and the button for the steps after
   converting shows whether originals are kept or replaced.

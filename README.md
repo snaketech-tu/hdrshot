@@ -74,14 +74,16 @@ These links always point to the
 
 | Platform | Desktop app | Command line |
 | --- | --- | --- |
-| Windows 10/11 (x64) | [`hdrshot-gui.exe`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-gui.exe) | [`hdrshot.exe`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot.exe) |
+| Windows 10/11 (x64) | [`hdrshot.exe`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot.exe) | [`hdrshot-cli.exe`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-cli.exe) |
 | macOS 11+ (Apple silicon and Intel) | [`hdrshot-gui-macos.dmg`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-gui-macos.dmg) | [`hdrshot-cli-macos.tar.gz`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-cli-macos.tar.gz) |
 | Linux (x64) | [`hdrshot-gui-linux-x64.tar.gz`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-gui-linux-x64.tar.gz) | [`hdrshot-cli-linux-x64.tar.gz`](https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot-cli-linux-x64.tar.gz) |
 
 `SHA256SUMS.txt` in each release lists the checksums of all downloads. The
 app's **Update** button checks its download against this list.
 
-No installer is needed. On Windows, run the `.exe` directly. On macOS, open
+No installer is needed. On Windows, run the `.exe` directly. The
+command-line examples below call the tool `hdrshot`; with the Windows
+download, type `hdrshot-cli` instead, or rename the file. On macOS, open
 the disk image and drag hdrshot to Applications. On Linux and for the macOS
 command line, unpack the archive. The builds aren't signed
 with a paid certificate, so the first launch needs one extra step:
