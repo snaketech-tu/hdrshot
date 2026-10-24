@@ -15,7 +15,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: ScoopInstaller/GithubActions@v1
+      - uses: ScoopInstaller/GithubActions@v3.0.0
         env:
           GITH_EMAIL: 9079973+snaketech-tu@users.noreply.github.com
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

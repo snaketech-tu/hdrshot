@@ -8,7 +8,9 @@ name: Release
 # Each platform gets a separate download for the desktop app and for the CLI.
 # File names carry no version, so releases/latest/download/<name> always
 # points at the newest build:
-#   hdrshot-gui.exe, hdrshot.exe          Windows, ready to run
+#   hdrshot.exe, hdrshot-cli.exe          Windows app and CLI, ready to run
+#   hdrshot-gui.exe                       the Windows app again, for the
+#                                         Update button of 2.1.0 and older
 #   hdrshot-gui-macos.dmg                 macOS app, drag to Applications
 #   hdrshot-cli-macos.tar.gz              macOS CLI, completions, man page
 #   hdrshot-gui-linux-x64.tar.gz          Linux app, .desktop file, icon
@@ -66,7 +68,11 @@ jobs:
         run: |
           cargo build --release --locked --workspace
           mkdir out
-          cp target/release/hdrshot.exe target/release/hdrshot-gui.exe out/
+          # Windows users expect hdrshot.exe to be the app. Versions up to
+          # 2.1.0 update themselves from hdrshot-gui.exe, so it is there too.
+          cp target/release/hdrshot-gui.exe out/hdrshot.exe
+          cp target/release/hdrshot.exe out/hdrshot-cli.exe
+          cp target/release/hdrshot-gui.exe out/
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
@@ -250,7 +256,7 @@ jobs:
         run: |
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          test "$(wc -l < SHA256SUMS.txt)" -eq 6
+          test "$(wc -l < SHA256SUMS.txt)" -eq 7
       - name: Release notes from CHANGELOG.md
         if: github.event_name != 'pull_request'
         run: |
@@ -312,9 +318,9 @@ jobs:
       matrix:
         include:
           - identifier: SnakeTech.hdrshot
-            installer: hdrshot-gui\.exe$
+            installer: (^|/)hdrshot\.exe$
           - identifier: SnakeTech.hdrshot.CLI
-            installer: hdrshot\.exe$
+            installer: hdrshot-cli\.exe$
     steps:
       - uses: vedantmgoyal9/winget-releaser@v2
         if: env.WINGET_TOKEN != ''

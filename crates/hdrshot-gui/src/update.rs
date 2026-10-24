@@ -21,16 +21,15 @@ pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 /// one to quit before it claims the single-instance socket.
 pub const UPDATED_FLAG: &str = "--updated";
 
-/// How the release download of the desktop app for this platform ends, as
-/// named by `release.yml`. Only the end is matched, so the update still
-/// finds it if the app is renamed; GitHub redirects the API of a renamed
-/// repository too.
-const ASSET_SUFFIX: Option<&str> = if cfg!(windows) {
-    Some("-gui.exe")
+/// The release download of the desktop app for this platform, as named by
+/// `release.yml`. Releases also carry the Windows app as `hdrshot-gui.exe`
+/// for versions up to 2.1.0, which look for a name ending in `-gui.exe`.
+const ASSET: Option<&str> = if cfg!(windows) {
+    Some("hdrshot.exe")
 } else if cfg!(target_os = "macos") {
-    Some("-gui-macos.dmg")
+    Some("hdrshot-gui-macos.dmg")
 } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-    Some("-gui-linux-x64.tar.gz")
+    Some("hdrshot-gui-linux-x64.tar.gz")
 } else {
     None
 };
@@ -152,7 +151,7 @@ fn check_since(current: &str) -> Result<Checked, String> {
                 version: r.tag_name.trim_start_matches('v').to_owned(),
                 notes: r.body.unwrap_or_default(),
                 page: r.html_url,
-                download: ASSET_SUFFIX.and_then(|suffix| {
+                download: ASSET.and_then(|asset| {
                     let checksums = r
                         .assets
                         .iter()
@@ -160,7 +159,7 @@ fn check_since(current: &str) -> Result<Checked, String> {
                         .map(|a| a.browser_download_url.clone());
                     r.assets
                         .into_iter()
-                        .find(|a| a.name.ends_with(suffix))
+                        .find(|a| a.name == asset)
                         .map(|a| Download {
                             name: a.name,
                             url: a.browser_download_url,
@@ -439,7 +438,7 @@ mod tests {
 
     #[test]
     fn package_managers() {
-        let winget = r"C:\Users\A\AppData\Local\Microsoft\WinGet\Packages\SnakeTech.hdrshot_Microsoft.Winget.Source_8wekyb3d8bbwe\hdrshot-gui.exe";
+        let winget = r"C:\Users\A\AppData\Local\Microsoft\WinGet\Packages\SnakeTech.hdrshot_Microsoft.Winget.Source_8wekyb3d8bbwe\hdrshot.exe";
         assert_eq!(
             managed_by(Path::new(winget)),
             Some("winget upgrade SnakeTech.hdrshot")
@@ -451,7 +450,7 @@ mod tests {
         );
         let scoop = r"C:\Users\A\scoop\apps\hdrshot\current\hdrshot-gui.exe";
         assert_eq!(managed_by(Path::new(scoop)), Some("scoop update hdrshot"));
-        let download = r"C:\Users\A\Downloads\hdrshot-gui.exe";
+        let download = r"C:\Users\A\Downloads\hdrshot.exe";
         assert_eq!(managed_by(Path::new(download)), None);
     }
 
@@ -486,16 +485,16 @@ mod tests {
     fn checksums() {
         let sum = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
         let list = format!(
-            "{}  hdrshot-cli.exe\n{}  hdrshot-gui.exe\n",
+            "{}  hdrshot-cli.exe\n{}  hdrshot.exe\n",
             "0".repeat(64),
             sum.to_uppercase()
         );
-        assert_eq!(listed_sum(&list, "hdrshot-gui.exe").as_deref(), Some(sum));
+        assert_eq!(listed_sum(&list, "hdrshot.exe").as_deref(), Some(sum));
         assert_eq!(
             listed_sum(&format!("{sum} *a.dmg"), "a.dmg").as_deref(),
             Some(sum)
         );
-        assert_eq!(listed_sum(&list, "hdrshot-gui"), None);
+        assert_eq!(listed_sum(&list, "hdrshot"), None);
         assert_eq!(listed_sum("abc  a.dmg", "a.dmg"), None);
 
         let file = std::env::temp_dir().join(format!("hdrshot-sum-{}", std::process::id()));
