@@ -460,7 +460,8 @@ impl App {
 
                 ui.label("SDR white").on_hover_text(
                     "HDR brightness that becomes white in the SDR image. \
-                     Lower makes the SDR picture brighter.",
+                     Lower makes the SDR picture brighter. At the default, 80, \
+                     phone photos keep their own SDR white.",
                 );
                 ui.horizontal(|ui| {
                     ui.add(nits(&mut t.sdr_white, 10.0));
@@ -482,7 +483,8 @@ impl App {
                 ui.checkbox(&mut t.fixed_input_white, "Render white")
                     .on_hover_text(
                         "For OpenEXR, Radiance and float JPEG XL files: the \
-                     brightness of a value of 1.0. Off uses the file's own value, or 80 nits.",
+                     brightness of a value of 1.0. Off uses the file's own value, or 80 nits. \
+                     For phone photos: the brightness of SDR white. Off uses 203 nits.",
                     );
                 ui.add_enabled(t.fixed_input_white, nits(&mut t.input_white, 1.0));
                 ui.end_row();

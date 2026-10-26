@@ -102,6 +102,7 @@ pub struct Stored {
     pixels: Vec<[f16; 3]>,
     alpha: Option<Vec<u8>>,
     hdr: bool,
+    sdr_white: Option<f32>,
     levels: LightLevels,
 }
 
@@ -121,6 +122,7 @@ impl Stored {
                 .as_ref()
                 .map(|alpha| alpha.iter().map(|&a| (a * 255.0).round() as u8).collect()),
             hdr: image.hdr,
+            sdr_white: image.sdr_white,
             levels: preview.levels,
         }
     }
@@ -137,6 +139,7 @@ impl Stored {
                     .as_ref()
                     .map(|alpha| alpha.iter().map(|&a| f32::from(a) / 255.0).collect()),
                 hdr: self.hdr,
+                sdr_white: self.sdr_white,
             },
             levels: self.levels,
         }
@@ -200,6 +203,7 @@ mod tests {
             pixels,
             alpha: None,
             hdr: true,
+            sdr_white: None,
         };
         let preview = Preview {
             levels: hdrshot_core::light_levels(&image),

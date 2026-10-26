@@ -4,8 +4,8 @@
 
 # hdrshot
 
-**HDR image tool. Converts HDR screenshots and images to HDR PNG, AVIF,
-Ultra HDR JPEG and SDR PNG.**
+**HDR image tool. Converts HDR screenshots, phone HDR photos and other HDR
+images to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG.**
 
 [![Release](https://img.shields.io/github/v/release/snaketech-tu/hdrshot?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/hdrshot/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/snaketech-tu/hdrshot/total?style=flat-square&color=0e7fc0&cacheSeconds=3600)](https://github.com/snaketech-tu/hdrshot/releases)
@@ -54,6 +54,10 @@ updates**.
 - **Copy for Discord.** One click puts the image on the clipboard in a
   form Discord shows with correct colors. On Windows you can also drag it
   straight from the list into Discord.
+- **Phone HDR photos.** Reads the HDR photos phones take: Ultra HDR JPEGs
+  from Android phones (Pixel, Samsung, OnePlus and others), iPhone HEIC
+  photos and iPhone JPEGs. They come out as bright as the phone shows them
+  on an HDR screen.
 - **Other HDR inputs.** Also reads OpenEXR (`.exr`), Radiance (`.hdr`),
   HDR PNG and JPEG XL (`.jxl`) files, for game photo modes, renders and re-tone-mapping.
 - **Watch folder.** Optionally converts each new screenshot saved to a
@@ -265,8 +269,8 @@ where it was last closed, at the same size.
 - **Open .jxr files with hdrshot** (Windows and Linux), in Settings, makes
   a double-click on a screenshot open it in the app. Windows asks you to
   confirm the choice in Settings. It also lists hdrshot under **Open with**
-  for `.wdp`, `.exr`, `.jxl` and `.hdr` files, without making it their
-  default.
+  for `.wdp`, `.exr`, `.jxl`, `.hdr` and `.heic` files, without making it
+  their default.
   On Windows it also adds **Convert with hdrshot** to the right-click menu
   of these files (on Windows 11 under **Show more options**), which opens
   the app and converts them right away with your saved settings. Selecting
@@ -313,9 +317,11 @@ hdrshot [OPTIONS] --watch <FOLDER> [INPUTS]...
 ```
 
 Inputs are image files or folders. Wildcards such as `*.jxr` work in cmd
-and PowerShell too. Folders are searched for `.jxr`, `.exr`, `.hdr` and
-`.jxl` files; HDR PNGs have to be given by name, since a folder of
-converted images also holds the PNGs made from them.
+and PowerShell too. Folders are searched for `.jxr`, `.exr`, `.hdr`,
+`.jxl` and `.heic` files, and for JPEGs that carry a gain map (phone HDR
+photos). HDR PNGs have to be given by name, since a folder of converted
+images also holds the PNGs made from them; for the same reason, folder
+scans skip the JPEGs hdrshot writes.
 
 ### Examples
 
@@ -357,7 +363,7 @@ values are in nits and must be above 0.
 | --- | --- |
 | `<INPUTS>...` | Image files or folders to convert. Required unless `--watch` is given |
 | `-r, --recursive` | Also convert images in subfolders of the given folders |
-| `--input-white <NITS>` | Brightness of 1.0 in OpenEXR, Radiance and float JPEG XL files (default: the file's own value, or 80) |
+| `--input-white <NITS>` | Brightness of 1.0 in OpenEXR, Radiance and float JPEG XL files (default: the file's own value, or 80), and of SDR white in phone photos (default: 203) |
 
 ### Outputs
 
@@ -543,6 +549,22 @@ Rust JPEG XR decoder, so no C toolchain is needed.
     Discord copies both work). HLG uses a 1000-nit display, as BT.2100
     specifies. Folder scans leave PNGs out, so converted folders aren't
     converted again; give HDR PNGs by name. SDR PNGs are refused.
+  - **Phone HDR photos** are an SDR picture plus a gain map that says how
+    much brighter each pixel is in HDR. hdrshot applies the whole gain map,
+    giving the picture a phone shows on a display with enough headroom.
+    SDR white is 203 nits, the reference white of ITU-R BT.2408, and the
+    SDR output keeps it unless `--sdr-white` is changed, so it looks like
+    the photo's own SDR version. `--input-white` sets another white.
+    - **JPEG** (`.jpg`): Ultra HDR, with Adobe `hdrgm` XMP or ISO 21496-1
+      metadata, and iPhone JPEGs with Apple's gain map, whose headroom is
+      read from XMP or the EXIF maker note by Apple's published formula.
+      Decoded with [`zune-jpeg`](https://crates.io/crates/zune-jpeg). The
+      EXIF orientation is applied. JPEGs without a gain map are refused.
+    - **HEIC** (`.heic`, `.heif`, `.hif`): iPhone photos, with Apple's gain
+      map or the ISO 21496-1 one of iOS 18 and later, decoded with
+      [`heic-decoder`](https://crates.io/crates/heic-decoder) (pure Rust).
+      PQ and HLG HEIFs, as some cameras save them, keep their absolute
+      brightness like HDR PNGs.
 - **SDR JXR files** (8 bits per channel) have no HDR to keep, so only the
   SDR PNG is made, a faithful copy of the picture. The app and the command
   line say so.

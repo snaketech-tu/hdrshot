@@ -1,6 +1,7 @@
 //! Making hdrshot the app that opens `.jxr` files, and listing it under
-//! "Open with" for the other formats it reads (`.wdp`, `.exr`, `.jxl` and
-//! `.hdr`), without becoming their default. On Windows this also adds
+//! "Open with" for the other formats it reads (`.wdp`, `.exr`, `.jxl`,
+//! `.hdr`, `.heic` and `.heif`), without becoming their default. JPEGs are
+//! left out: most are SDR photos, which hdrshot doesn't convert. On Windows this also adds
 //! "Convert with hdrshot" to these files' right-click menu.
 //!
 //! Windows doesn't let programs take over a file type on their own: the app
@@ -42,11 +43,13 @@ mod imp {
     /// The right-click menu entry's key.
     const CONVERT_VERB: &str = "hdrshot.convert";
     /// The other types hdrshot reads, with their file type and its name.
-    const OPEN_WITH: [(&str, &str, &str); 4] = [
+    const OPEN_WITH: [(&str, &str, &str); 6] = [
         (".wdp", PROG_ID, "JPEG XR image"),
         (".exr", "hdrshot.exr", "OpenEXR image"),
         (".jxl", "hdrshot.jxl", "JPEG XL image"),
         (".hdr", "hdrshot.hdr", "Radiance HDR image"),
+        (".heic", "hdrshot.heic", "HEIC image"),
+        (".heif", "hdrshot.heic", "HEIC image"),
     ];
 
     pub fn is_default() -> bool {
@@ -189,8 +192,7 @@ mod imp {
     const MIME_TYPE: &str = "image/vnd.ms-photo";
     /// Listed in the desktop file, so hdrshot is under "Open with" for
     /// them; only `MIME_TYPE` is made the default.
-    const MIME_TYPES: &str =
-        "image/vnd.ms-photo;image/jxr;image/x-exr;image/jxl;image/vnd.radiance;";
+    const MIME_TYPES: &str = "image/vnd.ms-photo;image/jxr;image/x-exr;image/jxl;image/vnd.radiance;image/heic;image/heif;";
 
     fn default_app() -> Option<String> {
         Command::new("xdg-mime")

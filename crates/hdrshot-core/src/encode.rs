@@ -67,6 +67,7 @@ pub fn write_hdr_png<W: Write>(
     sdr: &SdrOptions,
     out: W,
 ) -> Result<()> {
+    let sdr = &sdr.for_image(image);
     let transform = HdrTransform::new(image, hdr);
     let channels = if image.alpha.is_some() { 4 } else { 3 };
     let mut data = vec![0u8; image.pixels.len() * 2 * channels];
@@ -305,6 +306,7 @@ pub fn for_discord(png: &[u8]) -> Vec<u8> {
 /// `levels` are those of the full image, so that a preview made from a
 /// downscaled copy is tone-mapped like the PNG.
 pub fn sdr_rgb8(image: &ScRgbImage, levels: &LightLevels, options: &SdrOptions) -> Vec<u8> {
+    let options = &options.for_image(image);
     let white = options.white_nits / SCRGB_WHITE_NITS;
     let curve = ToneCurve::new(sdr_peak_nits(levels, options) / options.white_nits);
     let mut data = vec![0u8; image.pixels.len() * 3];

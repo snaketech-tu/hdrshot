@@ -54,6 +54,7 @@ pub fn write_ultra_hdr<W: Write>(
     sdr: &SdrOptions,
     mut out: W,
 ) -> Result<()> {
+    let sdr = &sdr.for_image(image);
     let (width, height) = (
         u16::try_from(image.width).map_err(|_| too_large())?,
         u16::try_from(image.height).map_err(|_| too_large())?,
