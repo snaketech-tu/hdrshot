@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.3.0] - 2026-10-26
 
 ### Added
 
@@ -11,8 +11,6 @@
   go straight into a folder in Chrome and Edge. The desktop app stays faster
   and keeps the features a browser can't offer, such as the watch folder
   and Copy for Discord.
-- `hdrshot-core` has `convert_bytes` and `convert_image`, which convert an
-  image in memory and return the files instead of writing them.
 - Phone HDR photos as input: Ultra HDR JPEGs from Android phones, iPhone
   HEIC photos and iPhone JPEGs, read in pure Rust. The whole gain map is
   applied, so the result is as bright as the phone shows the photo on an
@@ -22,8 +20,6 @@
   gain map, but not the JPEGs hdrshot writes. Where Open .jxr files with
   hdrshot is set up, hdrshot is also listed under Open with for `.heic`
   files, and on Windows Convert with hdrshot is in their right-click menu.
-- `ScRgbImage` has `sdr_white`, the source's own SDR white, and
-  `SdrOptions::for_image` applies it.
 - HDR AVIF as input, in the desktop app and on the command line: PQ and HLG
   AVIFs (such as hdrshot's own, and HDR exports from Photoshop and
   Lightroom) keep their brightness, and AVIFs with an ISO 21496-1 gain map
@@ -32,6 +28,10 @@
   the watch folder pick up AVIFs with a gain map, but not hdrshot's own
   AVIFs. The browser version doesn't read AVIFs, since `rav1d` doesn't
   build for it.
+- `hdrshot-core` has `convert_bytes` and `convert_image`, which convert an
+  image in memory and return the files instead of writing them.
+- `ScRgbImage` has `sdr_white`, the source's own SDR white, and
+  `SdrOptions::for_image` applies it.
 
 ### Fixed
 

@@ -1359,7 +1359,7 @@ dependencies = [
 
 [[package]]
 name = "hdrshot"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "arboard",
  "clap",
@@ -1374,7 +1374,7 @@ dependencies = [
 
 [[package]]
 name = "hdrshot-core"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "avif-serialize",
  "exr",
@@ -1406,7 +1406,7 @@ dependencies = [
 
 [[package]]
 name = "hdrshot-gui"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "arboard",
  "bytemuck",
@@ -1436,7 +1436,7 @@ dependencies = [
 
 [[package]]
 name = "hdrshot-web"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "hdrshot-core",
  "wasm-bindgen",

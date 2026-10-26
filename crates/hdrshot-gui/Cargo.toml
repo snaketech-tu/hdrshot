@@ -19,7 +19,7 @@ hdrshot-egui-backend = { version = "0.2.0", path = "../egui-software-backend" }
 egui_system_font_provider = "0.37.0"
 half = "2.7.1"
 interprocess = "2.4.6"
-hdrshot-core = { version = "2.2.0", path = "../hdrshot-core" }
+hdrshot-core = { version = "2.3.0", path = "../hdrshot-core" }
 png = "0.18.1"
 rfd = "0.17.2"
 ring = "0.17.14"
