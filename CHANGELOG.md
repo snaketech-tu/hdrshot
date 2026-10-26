@@ -24,6 +24,14 @@
   files, and on Windows Convert with hdrshot is in their right-click menu.
 - `ScRgbImage` has `sdr_white`, the source's own SDR white, and
   `SdrOptions::for_image` applies it.
+- HDR AVIF as input, in the desktop app and on the command line: PQ and HLG
+  AVIFs (such as hdrshot's own, and HDR exports from Photoshop and
+  Lightroom) keep their brightness, and AVIFs with an ISO 21496-1 gain map
+  are read like phone photos. Grids, alpha, rotation and mirroring are
+  supported. Decoded with `rav1d`, the Rust port of dav1d. Folder scans and
+  the watch folder pick up AVIFs with a gain map, but not hdrshot's own
+  AVIFs. The browser version doesn't read AVIFs, since `rav1d` doesn't
+  build for it.
 
 ### Fixed
 

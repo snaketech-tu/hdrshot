@@ -56,9 +56,9 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 /// Extensions offered in the open dialog, in both cases for platforms whose
 /// dialogs match them exactly.
-const INPUT_EXTENSIONS: [&str; 22] = [
-    "jxr", "wdp", "exr", "hdr", "png", "jxl", "jpg", "jpeg", "heic", "heif", "hif", "JXR", "WDP",
-    "EXR", "HDR", "PNG", "JXL", "JPG", "JPEG", "HEIC", "HEIF", "HIF",
+const INPUT_EXTENSIONS: [&str; 24] = [
+    "jxr", "wdp", "exr", "hdr", "png", "jxl", "jpg", "jpeg", "heic", "heif", "hif", "avif", "JXR",
+    "WDP", "EXR", "HDR", "PNG", "JXL", "JPG", "JPEG", "HEIC", "HEIF", "HIF", "AVIF",
 ];
 
 fn main() {
