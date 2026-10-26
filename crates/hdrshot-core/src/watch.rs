@@ -120,8 +120,8 @@ impl Tracker {
                 return true;
             }
             self.reported.insert(path.clone());
-            // A JPEG, now complete, may turn out to be one hdrshot wrote or
-            // one without a gain map.
+            // A JPEG or AVIF, now complete, may turn out to be one hdrshot
+            // wrote or one without a gain map.
             if !crate::input::is_scan_input(path) {
                 return false;
             }
@@ -193,8 +193,8 @@ fn files_under(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Whether a new file at `path` may be one to report: JPEGs are checked
-/// once written ([`crate::input::is_scan_input`]).
+/// Whether a new file at `path` may be one to report: JPEGs and AVIFs are
+/// checked once written ([`crate::input::is_scan_input`]).
 fn is_watched(path: &Path) -> bool {
     let hidden = path
         .file_name()

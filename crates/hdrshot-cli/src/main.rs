@@ -11,15 +11,16 @@ use hdrshot_core::{
 };
 use rayon::prelude::*;
 
-/// Convert HDR images (JPEG XR, OpenEXR, Radiance HDR, HDR PNG, JPEG XL,
-/// and phone HDR photos: gain map JPEG and HEIC) to HDR and/or SDR PNG files.
+/// Convert HDR images (JPEG XR, OpenEXR, Radiance HDR, HDR PNG, JPEG XL, HDR
+/// AVIF, and phone HDR photos: gain map JPEG, HEIC and AVIF) to HDR and/or
+/// SDR PNG files.
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
     /// Input images or folders. Wildcards such as *.jxr also work in cmd and
     /// PowerShell. Folders are searched for .jxr, .exr, .hdr, .jxl and .heic
-    /// files and for JPEGs with a gain map (phone HDR photos); give HDR PNGs
-    /// by name.
+    /// files and for JPEGs and AVIFs with a gain map (phone HDR photos); give
+    /// HDR PNGs and other AVIFs by name.
     #[arg(required_unless_present = "watch")]
     inputs: Vec<PathBuf>,
 
@@ -111,8 +112,8 @@ struct Args {
 
     /// Brightness, in nits, of 1.0 in OpenEXR, Radiance and float JPEG XL
     /// files. By default the file's own value is used, or 80 nits if it has
-    /// none. For phone photos (gain map JPEG and HEIC), the brightness of
-    /// SDR white, 203 nits by default.
+    /// none. For phone photos (gain map JPEG, HEIC and AVIF), the brightness
+    /// of SDR white, 203 nits by default.
     #[arg(long, value_name = "NITS", value_parser = nits)]
     input_white: Option<f32>,
 

@@ -198,14 +198,32 @@ pub fn row_label(ui: &mut egui::Ui, text: &str) {
 /// A small "i" in a circle, drawn rather than taken from a font, that
 /// explains something: hovering it shows `text` as a tooltip, and clicking
 /// it shows `text` in a box that stays until the next click elsewhere.
+///
+/// The box keeps its open state itself rather than in egui's memory, which
+/// holds one open popup at a time: opening it there closed the settings
+/// menu the icon sits in. It also counts as that menu's open submenu, so
+/// the click that closes the box leaves the menu open.
 pub fn info_icon(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let size = ui.spacing().interact_size.y.min(16.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click());
-    let popup = egui::Popup::from_toggle_button_response(&response)
+    let popup_id = response.id.with("info");
+    let mut open = ui.data(|d| d.get_temp::<bool>(popup_id).unwrap_or(false));
+    if response.clicked() {
+        open = !open;
+    }
+    let shown = egui::Popup::from_response(&response)
+        .id(popup_id)
+        .open_bool(&mut open)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .width(320.0);
-    let open = popup.is_open();
-    popup.show(|ui| ui.label(text));
+        .width(320.0)
+        .show(|ui| ui.label(text))
+        .is_some();
+    if shown {
+        egui::containers::menu::MenuState::from_id(ui.ctx(), ui.layer_id().id, |menu| {
+            menu.open_item = Some(popup_id);
+        });
+    }
+    ui.data_mut(|d| d.insert_temp(popup_id, open));
     focus_ring(ui, &response, size / 2.0);
     let color = if response.hovered() || open {
         ui.visuals().strong_text_color()

@@ -59,7 +59,8 @@ updates**.
   photos and iPhone JPEGs. They come out as bright as the phone shows them
   on an HDR screen.
 - **Other HDR inputs.** Also reads OpenEXR (`.exr`), Radiance (`.hdr`),
-  HDR PNG and JPEG XL (`.jxl`) files, for game photo modes, renders and re-tone-mapping.
+  HDR PNG, HDR AVIF (including AVIFs with a gain map) and JPEG XL (`.jxl`)
+  files, for game photo modes, renders, photo exports and re-tone-mapping.
 - **Watch folder.** Optionally converts each new screenshot saved to a
   folder, such as the Game Bar or NVIDIA app captures folder, as soon as it
   is written. On Windows it can keep doing so from the tray, starting with
@@ -134,7 +135,7 @@ The desktop app is faster and does more:
 
 | | Desktop app | Browser version |
 | --- | --- | --- |
-| Inputs and outputs | All formats | All formats |
+| Inputs and outputs | All formats | All formats, except AVIF input |
 | Speed | All CPU cores for each image | One core per image; AVIF takes about four times as long |
 | Saving | Next to the originals or into a folder, keeping the capture date | Downloads (one file or a .zip that keeps the capture date), or into a folder in Chrome and Edge |
 | Copy for Discord | Clipboard, and drag out on Windows | Download, then drop the file into Discord; browsers can't copy HDR images |
@@ -318,10 +319,10 @@ hdrshot [OPTIONS] --watch <FOLDER> [INPUTS]...
 
 Inputs are image files or folders. Wildcards such as `*.jxr` work in cmd
 and PowerShell too. Folders are searched for `.jxr`, `.exr`, `.hdr`,
-`.jxl` and `.heic` files, and for JPEGs that carry a gain map (phone HDR
-photos). HDR PNGs have to be given by name, since a folder of converted
-images also holds the PNGs made from them; for the same reason, folder
-scans skip the JPEGs hdrshot writes.
+`.jxl` and `.heic` files, and for JPEGs and AVIFs that carry a gain map
+(phone HDR photos). HDR PNGs and other HDR AVIFs have to be given by name,
+since a folder of converted images also holds the PNGs and AVIFs made from
+them; for the same reason, folder scans skip the JPEGs hdrshot writes.
 
 ### Examples
 
@@ -549,6 +550,16 @@ Rust JPEG XR decoder, so no C toolchain is needed.
     Discord copies both work). HLG uses a 1000-nit display, as BT.2100
     specifies. Folder scans leave PNGs out, so converted folders aren't
     converted again; give HDR PNGs by name. SDR PNGs are refused.
+  - **HDR AVIF** (`.avif`): PQ or HLG AVIFs, such as hdrshot's own and
+    HDR exports from Photoshop and Lightroom, keep their absolute
+    brightness like HDR PNGs. AVIFs with an ISO 21496-1 gain map (marked by
+    the `tmap` brand) whose main picture is SDR are read like phone photos,
+    below. Grids, alpha, rotation and mirroring are supported. Decoded with
+    [`rav1d`](https://crates.io/crates/rav1d), the Rust port of dav1d,
+    built without its assembly. Folder scans take only AVIFs with a gain
+    map, since hdrshot's own AVIFs have none; give other AVIFs by name.
+    SDR AVIFs are refused. Not available in the browser version, where
+    `rav1d` doesn't build.
   - **Phone HDR photos** are an SDR picture plus a gain map that says how
     much brighter each pixel is in HDR. hdrshot applies the whole gain map,
     giving the picture a phone shows on a display with enough headroom.

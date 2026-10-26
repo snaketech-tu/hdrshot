@@ -5,10 +5,11 @@
 use super::*;
 
 /// The input formats, named on the empty window's drop area.
-const FORMATS: [&str; 7] = [
+const FORMATS: [&str; 8] = [
     "JPEG XR",
     "HDR JPEG",
     "HEIC",
+    "HDR AVIF",
     "OpenEXR",
     "Radiance HDR",
     "JPEG XL",

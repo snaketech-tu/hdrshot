@@ -20,3 +20,10 @@ categories = ["multimedia::images", "command-line-utilities"]
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# The AV1 decoder behind AVIF input is far too slow unoptimized or with its
+# debug checks, even for the small test images.
+[profile.dev.package.rav1d]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false

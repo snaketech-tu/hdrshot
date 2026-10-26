@@ -5,9 +5,10 @@ image tool. It reads HDR images and writes them as HDR PNG, AVIF, Ultra HDR
 JPEG or tone-mapped SDR PNG. Everything is pure Rust.
 
 Inputs: JPEG XR (`.jxr`, `.wdp`), OpenEXR (`.exr`), Radiance (`.hdr`), HDR PNG
-(PQ or HLG, signalled with cICP or an ICC profile), JPEG XL (`.jxl`), and phone
-HDR photos: JPEGs with a gain map (Ultra HDR, ISO 21496-1 or Apple's) and HEIC
-(iPhone gain maps, PQ and HLG).
+(PQ or HLG, signalled with cICP or an ICC profile), JPEG XL (`.jxl`), HDR AVIF
+(PQ, HLG or an ISO 21496-1 gain map, decoded with rav1d; not on WebAssembly),
+and phone HDR photos: JPEGs with a gain map (Ultra HDR, ISO 21496-1 or Apple's)
+and HEIC (iPhone gain maps, PQ and HLG).
 
 Outputs:
 

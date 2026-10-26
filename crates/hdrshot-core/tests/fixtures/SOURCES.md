@@ -15,3 +15,9 @@
 - `iphone_gainmap.heic` (renamed from `hdr-sample.heic`): from apple-hdr-heic
   (https://github.com/johncf/apple-hdr-heic, `tests/data`), MIT license,
   copyright 2024 John Charankattu. An iPhone HEIC with Apple's gain map.
+- `seine_gainmap.avif` (renamed from `seine_sdr_gainmap_srgb.avif`),
+  `pq_p3.avif` (renamed from `colors_hdr_p3.avif`) and `grid_alpha.avif`
+  (renamed from `color_grid_gainmap_different_grid.avif`): from the libavif
+  test data, as above. An SDR AVIF with an ISO 21496-1 gain map, a PQ AVIF
+  in Display P3, and a PQ AVIF made of a 4x3 grid of tiles with a 4x3 grid
+  of alpha tiles and a gain map to SDR.

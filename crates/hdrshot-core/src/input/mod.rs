@@ -3,10 +3,10 @@
 //! Every format is decoded to the same linear scRGB [`ScRgbImage`] that the
 //! JPEG XR path produces, so all outputs work unchanged for every input.
 //!
-//! Display-referred files (JPEG XR, HDR PNG, PQ or HLG JPEG XL and HEIF) carry
+//! Display-referred files (JPEG XR, HDR PNG, PQ or HLG JPEG XL, HEIF and AVIF) carry
 //! absolute brightness. Scene-referred files (OpenEXR, Radiance) only say how
 //! bright things are relative to each other, and gain map photos (phone
-//! JPEGs and HEICs) how bright they are relative to SDR white;
+//! JPEGs, HEICs and AVIFs) how bright they are relative to SDR white;
 //! [`InputOptions::white_nits`] sets the brightness of their 1.0 when the
 //! file doesn't.
 
@@ -16,8 +16,13 @@ use crate::color::SCRGB_WHITE_NITS;
 use crate::decode::ScRgbImage;
 use crate::{Error, Result};
 
+#[cfg(not(target_arch = "wasm32"))]
+mod av1;
+#[cfg(not(target_arch = "wasm32"))]
+mod avif;
 mod gainmap;
 mod heif;
+mod isobmff;
 mod jpeg;
 mod jxl;
 mod openexr;
@@ -36,9 +41,24 @@ pub enum InputFormat {
     Jpeg,
     /// HEIC, as iPhones and cameras save photos.
     Heif,
+    /// AVIF in PQ or HLG, or with a gain map. Not available in the browser
+    /// version, where its decoder doesn't build.
+    Avif,
 }
 
 impl InputFormat {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub const ALL: [Self; 8] = [
+        Self::Jxr,
+        Self::Exr,
+        Self::Radiance,
+        Self::Png,
+        Self::Jxl,
+        Self::Jpeg,
+        Self::Heif,
+        Self::Avif,
+    ];
+    #[cfg(target_arch = "wasm32")]
     pub const ALL: [Self; 7] = [
         Self::Jxr,
         Self::Exr,
@@ -59,6 +79,7 @@ impl InputFormat {
             Self::Jxl => &["jxl"],
             Self::Jpeg => &["jpg", "jpeg"],
             Self::Heif => &["heic", "heif", "hif"],
+            Self::Avif => &["avif"],
         }
     }
 
@@ -72,6 +93,7 @@ impl InputFormat {
             Self::Jxl => "JPEG XL",
             Self::Jpeg => "HDR JPEG",
             Self::Heif => "HEIC",
+            Self::Avif => "HDR AVIF",
         }
     }
 
@@ -100,6 +122,8 @@ impl InputFormat {
             Some(Self::Jpeg)
         } else if heif::sniff(bytes) {
             Some(Self::Heif)
+        } else if isobmff::brands(bytes).iter().any(|b| b == b"avif") {
+            Some(Self::Avif)
         } else {
             None
         }
@@ -113,20 +137,24 @@ pub fn is_supported(path: &Path) -> bool {
 
 /// Whether a folder scan or the watch folder should pick up `path`.
 ///
-/// PNGs and JPEGs are what hdrshot writes, so a folder of converted images
-/// holds them too. PNGs are left out; JPEGs are read up to their image data
-/// and included only if they look like phone HDR photos with a gain map and
-/// weren't written by hdrshot.
+/// PNGs, JPEGs and AVIFs are what hdrshot writes, so a folder of converted
+/// images holds them too. PNGs are left out. JPEGs are read up to their
+/// image data and included only if they look like phone HDR photos with a
+/// gain map and weren't written by hdrshot. AVIFs are included only with a
+/// gain map (the `tmap` brand), which hdrshot's AVIFs don't have.
 pub fn is_scan_input(path: &Path) -> bool {
+    use std::io::Read;
+    let head = |len: u64| {
+        let mut head = Vec::new();
+        std::fs::File::open(path)
+            .and_then(|f| f.take(len).read_to_end(&mut head))
+            .map(|_| head)
+    };
     match InputFormat::from_path(path) {
         None | Some(InputFormat::Png) => false,
-        Some(InputFormat::Jpeg) => {
-            use std::io::Read;
-            let mut head = Vec::new();
-            std::fs::File::open(path)
-                .and_then(|f| f.take(256 * 1024).read_to_end(&mut head))
-                .is_ok()
-                && jpeg::has_gain_map(&head)
+        Some(InputFormat::Jpeg) => head(256 * 1024).is_ok_and(|h| jpeg::has_gain_map(&h)),
+        Some(InputFormat::Avif) => {
+            head(256).is_ok_and(|h| isobmff::brands(&h).iter().any(|b| b == b"tmap"))
         }
         Some(_) => true,
     }
@@ -186,6 +214,12 @@ pub fn decode(bytes: &[u8], options: &InputOptions) -> Result<ScRgbImage> {
         Some(InputFormat::Jxl) => jxl::decode(bytes, options),
         Some(InputFormat::Jpeg) => jpeg::decode(bytes, options),
         Some(InputFormat::Heif) => heif::decode(bytes, options),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(InputFormat::Avif) => avif::decode(bytes, options),
+        #[cfg(target_arch = "wasm32")]
+        Some(InputFormat::Avif) => Err(Error::UnsupportedFormat(
+            "AVIF input isn't available in the browser version".into(),
+        )),
         None => Err(Error::UnknownFormat),
     }
 }
@@ -214,6 +248,12 @@ pub fn dimensions(path: &Path) -> Result<(u32, u32)> {
             // The boxes describing the image may come after the first bytes.
             heif::dimensions(&std::fs::read(path).ok()?)
         }),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(InputFormat::Avif) => {
+            avif::dimensions(&head).or_else(|| avif::dimensions(&std::fs::read(path).ok()?))
+        }
+        #[cfg(target_arch = "wasm32")]
+        Some(InputFormat::Avif) => None,
         None => return Err(Error::UnknownFormat),
     };
     match size {
