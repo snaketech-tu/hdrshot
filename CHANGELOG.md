@@ -25,6 +25,11 @@
 - `ScRgbImage` has `sdr_white`, the source's own SDR white, and
   `SdrOptions::for_image` applies it.
 
+### Fixed
+
+- Clicking the info icon next to Discord-compatible PNG in the output menu
+  closed the menu instead of showing the explanation.
+
 ## [2.2.0] - 2026-10-24
 
 ### Added
