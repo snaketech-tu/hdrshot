@@ -6,7 +6,7 @@ import { zip, MAX_ZIP_BYTES } from "./zip.js";
 
 const $ = (id) => document.getElementById(id);
 
-const EXTENSIONS = ["jxr", "wdp", "exr", "hdr", "jxl", "png"];
+const EXTENSIONS = ["jxr", "wdp", "exr", "hdr", "jxl", "png", "jpg", "jpeg", "heic", "heif", "hif"];
 const DEFAULTS = {
   mode: "both",
   hdr_format: 0,
@@ -258,8 +258,19 @@ function extension(name) {
   return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
 }
 
+/**
+ * Whether a JPEG found in a folder looks like a phone HDR photo: it has an
+ * MPF index or Ultra HDR XMP, and wasn't written by hdrshot. The same test
+ * as the desktop app's folder scan.
+ */
+async function hasGainMap(file) {
+  const head = new Uint8Array(await file.slice(0, 256 * 1024).arrayBuffer());
+  const text = new TextDecoder("latin1").decode(head);
+  return (text.includes("MPF\0") || text.includes("hdrgm:")) && !text.includes('x:xmptk="hdrshot"');
+}
+
 /** Adds `found`, each { file, inFolder }, and says what was left out. */
-function addFiles(found) {
+async function addFiles(found) {
   const known = new Set(items.map((i) => `${i.name}|${i.size}|${i.file.lastModified}`));
   let unsupported = 0;
   let folderPngs = 0;
@@ -271,9 +282,14 @@ function addFiles(found) {
       continue;
     }
     // A folder of captures often holds the PNGs made from them, so PNGs
-    // are only taken when added by name, as in the desktop app.
+    // are only taken when added by name, as in the desktop app. JPEGs are
+    // taken from folders only if they are phone HDR photos.
     if (ext === "png" && inFolder) {
       folderPngs++;
+      continue;
+    }
+    if ((ext === "jpg" || ext === "jpeg") && inFolder && !(await hasGainMap(file))) {
+      unsupported++;
       continue;
     }
     const key = `${file.name}|${file.size}|${file.lastModified}`;

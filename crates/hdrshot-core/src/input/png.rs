@@ -14,10 +14,10 @@ use crate::{Error, Result};
 /// Nominal peak of an HLG display, in nits (BT.2100).
 const HLG_PEAK_NITS: f32 = 1000.0;
 
-/// How the samples of an HDR PNG are encoded.
+/// How the samples of an HDR PNG or HEIF are encoded.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Signal {
-    primaries: Primaries,
+pub(super) struct Signal {
+    pub primaries: Primaries,
     hlg: bool,
     full_range: bool,
 }
@@ -26,15 +26,13 @@ impl Signal {
     /// The signal described by coding-independent code points (ITU-T
     /// H.273), if it's one that can be read: PQ or HLG, in BT.709, BT.2020
     /// or Display P3, as RGB.
-    fn from_cicp(primaries: u8, transfer: u8, matrix: u8, full_range: bool) -> Result<Self> {
+    pub fn from_cicp(primaries: u8, transfer: u8, matrix: u8, full_range: bool) -> Result<Self> {
         let primaries = match primaries {
             1 => Primaries::BT709,
             9 => Primaries::BT2020,
             12 => Primaries::DISPLAY_P3,
             other => {
-                return Err(Error::UnsupportedFormat(format!(
-                    "PNG color primaries {other}"
-                )));
+                return Err(Error::UnsupportedFormat(format!("color primaries {other}")));
             }
         };
         let hlg = match transfer {
@@ -44,7 +42,7 @@ impl Signal {
         };
         if matrix != 0 {
             return Err(Error::UnsupportedFormat(format!(
-                "PNG matrix coefficients {matrix}"
+                "matrix coefficients {matrix}"
             )));
         }
         Ok(Self {
@@ -52,6 +50,20 @@ impl Signal {
             hlg,
             full_range,
         })
+    }
+
+    /// Nits of a pixel's signal, normalized to 0..1.
+    pub fn to_nits(self, rgb: [f32; 3]) -> [f32; 3] {
+        if self.hlg {
+            let luma = luminance_weights(&self.primaries);
+            let scene = rgb.map(hlg_decode);
+            let y = scene[0] * luma[0] + scene[1] * luma[1] + scene[2] * luma[2];
+            // BT.2100 HLG OOTF with system gamma 1.2 for a 1000-nit display.
+            let gain = HLG_PEAK_NITS * y.max(0.0).powf(0.2);
+            scene.map(|c| c * gain)
+        } else {
+            rgb.map(pq_decode)
+        }
     }
 }
 
@@ -115,7 +127,6 @@ pub(super) fn decode(bytes: &[u8]) -> Result<ScRgbImage> {
     };
     let normalize = |v: f32| ((v - black) / (white - black)).clamp(0.0, 1.0);
 
-    let luma = luminance_weights(&signal.primaries);
     let pixels: Vec<[f32; 3]> = samples
         .par_chunks_exact(channels)
         .map(|p| {
@@ -124,15 +135,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<ScRgbImage> {
             } else {
                 [normalize(p[0]), normalize(p[1]), normalize(p[2])]
             };
-            if signal.hlg {
-                let scene = rgb.map(hlg_decode);
-                let y = scene[0] * luma[0] + scene[1] * luma[1] + scene[2] * luma[2];
-                // BT.2100 HLG OOTF with system gamma 1.2 for a 1000-nit display.
-                let gain = HLG_PEAK_NITS * y.max(0.0).powf(0.2);
-                scene.map(|c| c * gain)
-            } else {
-                rgb.map(pq_decode)
-            }
+            signal.to_nits(rgb)
         })
         .collect();
     let alpha = (channels % 2 == 0).then(|| {

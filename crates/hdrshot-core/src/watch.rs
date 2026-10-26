@@ -120,6 +120,11 @@ impl Tracker {
                 return true;
             }
             self.reported.insert(path.clone());
+            // A JPEG, now complete, may turn out to be one hdrshot wrote or
+            // one without a gain map.
+            if !crate::input::is_scan_input(path) {
+                return false;
+            }
             found(path.clone());
             false
         });
@@ -188,7 +193,8 @@ fn files_under(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Whether a new file at `path` is one to report.
+/// Whether a new file at `path` may be one to report: JPEGs are checked
+/// once written ([`crate::input::is_scan_input`]).
 fn is_watched(path: &Path) -> bool {
     let hidden = path
         .file_name()
@@ -235,7 +241,7 @@ mod tests {
         assert!(is_watched(Path::new("Captures/game.jxr")));
         assert!(is_watched(Path::new("Captures/render.EXR")));
         assert!(!is_watched(Path::new("Captures/game_hdr.png")));
-        assert!(!is_watched(Path::new("Captures/game_sdr.jpg")));
+        assert!(is_watched(Path::new("Captures/photo.jpg")));
         assert!(!is_watched(Path::new("Captures/.game_hdr.png.12-0.tmp")));
         assert!(!is_watched(Path::new("Captures/clip.mp4")));
     }
@@ -275,6 +281,7 @@ mod tests {
         file.write_all(b", second part").unwrap();
         drop(file);
         std::fs::write(dir.join("new_hdr.png"), b"output").unwrap();
+        std::fs::write(dir.join("new_sdr.jpg"), b"\xff\xd8\xff\xe0 plain").unwrap();
         std::fs::write(dir.join("old.jxr"), b"changed").unwrap();
 
         let deadline = Instant::now() + SETTLE * 5;

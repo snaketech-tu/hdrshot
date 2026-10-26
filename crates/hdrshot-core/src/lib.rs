@@ -1,7 +1,8 @@
 //! Conversion of HDR images to HDR and SDR PNG.
 //!
 //! Inputs are JPEG XR (`.jxr`, as made by Windows HDR screenshots), OpenEXR,
-//! Radiance `.hdr`, HDR PNG and JPEG XL; see [`input`]. Two outputs are supported:
+//! Radiance `.hdr`, HDR PNG, JPEG XL, and phone HDR photos (JPEG and HEIC
+//! with a gain map); see [`input`]. Two outputs are supported:
 //! - **HDR**: 16-bit PNG in Rec.2020 primaries with the PQ (SMPTE ST 2084)
 //!   transfer function, tagged with a `cICP` chunk and an ICC profile
 //!   `cicp` tag so HDR-aware viewers display it in HDR.
@@ -32,7 +33,7 @@ pub use decode::{ScRgbImage, decode, dimensions};
 pub use encode::{
     LightLevels, for_discord, light_levels, sdr_rgb8, write_hdr_png, write_sdr_jpeg, write_sdr_png,
 };
-pub use input::{InputFormat, InputOptions, is_supported};
+pub use input::{InputFormat, InputOptions, is_scan_input, is_supported};
 pub use ultrahdr::write_ultra_hdr;
 
 /// Which PNG files to produce for each input.
@@ -100,12 +101,29 @@ pub struct HdrOptions {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SdrOptions {
     /// HDR luminance, in nits, that becomes SDR white. Defaults to 80,
-    /// scRGB 1.0, which is how Windows shows these screenshots as SDR.
+    /// scRGB 1.0, which is how Windows shows these screenshots as SDR. For
+    /// gain map photos, the default means the photo's own SDR white
+    /// ([`SdrOptions::for_image`]).
     pub white_nits: f32,
     /// Luminance, in nits, that maps to the SDR maximum. `None` uses the
     /// image's 99.9th percentile, so a few tiny specular pixels don't
     /// darken the whole picture.
     pub peak_nits: Option<f32>,
+}
+
+impl SdrOptions {
+    /// These options for `image`: the default white becomes the image's
+    /// own SDR white if it has one, so a phone photo's SDR output looks
+    /// like the photo's SDR version. Other whites are kept.
+    pub fn for_image(&self, image: &ScRgbImage) -> Self {
+        match image.sdr_white {
+            Some(white) if self.white_nits == Self::default().white_nits => Self {
+                white_nits: white,
+                ..*self
+            },
+            _ => *self,
+        }
+    }
 }
 
 impl Default for SdrOptions {
@@ -236,7 +254,9 @@ pub enum Error {
     Decode(String),
     #[error("unsupported pixel format: {0}")]
     UnsupportedFormat(String),
-    #[error("not a supported image (JPEG XR, OpenEXR, Radiance HDR, HDR PNG or JPEG XL)")]
+    #[error(
+        "not a supported image (JPEG XR, OpenEXR, Radiance HDR, HDR PNG, JPEG XL, HDR JPEG or HEIC)"
+    )]
     UnknownFormat,
     #[error("not an HDR image: {0}")]
     NotHdr(String),
@@ -285,7 +305,9 @@ pub fn is_jxr(path: &Path) -> bool {
 /// those in its subfolders. Unreadable folders are left out.
 ///
 /// PNGs are not included, since a folder of converted images holds the
-/// PNGs made from them; pass HDR PNGs by name instead.
+/// PNGs made from them; pass HDR PNGs by name instead. JPEGs are included
+/// only if they are phone photos with a gain map (see
+/// [`input::is_scan_input`]).
 pub fn find_inputs(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     fn walk(dir: &Path, recursive: bool, seen: &mut HashSet<PathBuf>, out: &mut Vec<PathBuf>) {
         // A link back up the tree would otherwise be followed forever.
@@ -301,7 +323,7 @@ pub fn find_inputs(dir: &Path, recursive: bool) -> Vec<PathBuf> {
                 if recursive {
                     walk(&path, recursive, seen, out);
                 }
-            } else if InputFormat::from_path(&path).is_some_and(|f| f != InputFormat::Png) {
+            } else if input::is_scan_input(&path) {
                 out.push(path);
             }
         }

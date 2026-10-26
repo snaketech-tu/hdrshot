@@ -13,6 +13,17 @@
   and Copy for Discord.
 - `hdrshot-core` has `convert_bytes` and `convert_image`, which convert an
   image in memory and return the files instead of writing them.
+- Phone HDR photos as input: Ultra HDR JPEGs from Android phones, iPhone
+  HEIC photos and iPhone JPEGs, read in pure Rust. The whole gain map is
+  applied, so the result is as bright as the phone shows the photo on an
+  HDR screen, with SDR white at 203 nits; the SDR output keeps that white.
+  EXIF orientation is applied. PQ and HLG HEIF files from cameras work too.
+  Folder scans and the watch folder pick up HEICs, and JPEGs that carry a
+  gain map, but not the JPEGs hdrshot writes. Where Open .jxr files with
+  hdrshot is set up, hdrshot is also listed under Open with for `.heic`
+  files, and on Windows Convert with hdrshot is in their right-click menu.
+- `ScRgbImage` has `sdr_white`, the source's own SDR white, and
+  `SdrOptions::for_image` applies it.
 
 ## [2.2.0] - 2026-10-24
 

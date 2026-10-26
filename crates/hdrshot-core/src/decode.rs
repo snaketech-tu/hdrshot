@@ -24,6 +24,11 @@ pub struct ScRgbImage {
     /// Whether the source is HDR (float or fixed point) rather than 8-bit
     /// SDR.
     pub hdr: bool,
+    /// The brightness, in nits, of the source's own SDR white, for sources
+    /// that have one: gain map photos, which are an SDR picture made
+    /// brighter. SDR outputs use it unless asked for another white (see
+    /// [`crate::SdrOptions::for_image`]).
+    pub sdr_white: Option<f32>,
 }
 
 impl ScRgbImage {
@@ -35,6 +40,7 @@ impl ScRgbImage {
             pixels,
             alpha: None,
             hdr: true,
+            sdr_white: None,
         }
     }
 }
@@ -97,6 +103,7 @@ pub fn decode(bytes: &[u8]) -> Result<ScRgbImage> {
         pixels,
         alpha,
         hdr,
+        sdr_white: None,
     })
 }
 

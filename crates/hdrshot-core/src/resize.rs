@@ -68,6 +68,7 @@ pub fn resize(image: &ScRgbImage, width: u32, height: u32) -> ScRgbImage {
         pixels,
         alpha,
         hdr: image.hdr,
+        sdr_white: image.sdr_white,
     }
 }
 

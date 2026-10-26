@@ -5,7 +5,15 @@
 use super::*;
 
 /// The input formats, named on the empty window's drop area.
-const FORMATS: [&str; 5] = ["JPEG XR", "OpenEXR", "Radiance HDR", "JPEG XL", "HDR PNG"];
+const FORMATS: [&str; 7] = [
+    "JPEG XR",
+    "HDR JPEG",
+    "HEIC",
+    "OpenEXR",
+    "Radiance HDR",
+    "JPEG XL",
+    "HDR PNG",
+];
 
 /// Name of the tip under the empty drop area, kept in the settings once
 /// hidden.

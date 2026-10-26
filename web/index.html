@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>hdrshot: convert HDR screenshots in your browser</title>
-<meta name="description" content="Convert HDR screenshots (JXR from Game Bar and the NVIDIA app, OpenEXR, JPEG XL, HDR PNG) to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG. Runs in your browser; images are never uploaded.">
+<meta name="description" content="Convert HDR screenshots (JXR from Game Bar and the NVIDIA app, OpenEXR, JPEG XL, HDR PNG) and phone HDR photos (Ultra HDR JPEG, iPhone HEIC) to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG. Runs in your browser; images are never uploaded.">
 <meta name="color-scheme" content="light dark">
 <meta property="og:title" content="hdrshot in your browser">
 <meta property="og:description" content="Convert HDR screenshots to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG. Images are never uploaded.">
@@ -64,11 +64,11 @@
 
   <div class="drop" id="drop">
     <svg width="40" height="40" aria-hidden="true"><use href="#i-image"/></svg>
-    <h2>Drop HDR screenshots here</h2>
-    <p class="formats">JXR from Game Bar and the NVIDIA app, OpenEXR, Radiance .hdr, JPEG XL and HDR PNG. Folders work too.</p>
+    <h2>Drop HDR screenshots and photos here</h2>
+    <p class="formats">JXR from Game Bar and the NVIDIA app, phone HDR photos (Ultra HDR JPEG, iPhone HEIC and JPEG), OpenEXR, Radiance .hdr, JPEG XL and HDR PNG. Folders work too.</p>
     <button class="btn-accent" id="choose">Choose files</button>
   </div>
-  <input type="file" id="picker" multiple accept=".jxr,.wdp,.exr,.hdr,.jxl,.png" hidden>
+  <input type="file" id="picker" multiple accept=".jxr,.wdp,.exr,.hdr,.jxl,.png,.jpg,.jpeg,.heic,.heif,.hif" hidden>
 
   <div class="rows" id="rows" hidden></div>
 

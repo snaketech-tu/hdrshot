@@ -11,14 +11,15 @@ use hdrshot_core::{
 };
 use rayon::prelude::*;
 
-/// Convert HDR images (JPEG XR, OpenEXR, Radiance HDR, HDR PNG, JPEG XL)
-/// to HDR and/or SDR PNG files.
+/// Convert HDR images (JPEG XR, OpenEXR, Radiance HDR, HDR PNG, JPEG XL,
+/// and phone HDR photos: gain map JPEG and HEIC) to HDR and/or SDR PNG files.
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
     /// Input images or folders. Wildcards such as *.jxr also work in cmd and
-    /// PowerShell. Folders are searched for .jxr, .exr, .hdr and .jxl files; give
-    /// HDR PNGs by name.
+    /// PowerShell. Folders are searched for .jxr, .exr, .hdr, .jxl and .heic
+    /// files and for JPEGs with a gain map (phone HDR photos); give HDR PNGs
+    /// by name.
     #[arg(required_unless_present = "watch")]
     inputs: Vec<PathBuf>,
 
@@ -97,7 +98,8 @@ struct Args {
     #[arg(long, value_name = "NITS", value_parser = nits)]
     hdr_peak: Option<f32>,
 
-    /// HDR brightness, in nits, that becomes white in the SDR PNG.
+    /// HDR brightness, in nits, that becomes white in the SDR PNG. At the
+    /// default, phone photos keep their own SDR white.
     #[arg(long, value_name = "NITS", value_parser = nits,
           default_value_t = SdrOptions::default().white_nits)]
     sdr_white: f32,
@@ -109,7 +111,8 @@ struct Args {
 
     /// Brightness, in nits, of 1.0 in OpenEXR, Radiance and float JPEG XL
     /// files. By default the file's own value is used, or 80 nits if it has
-    /// none.
+    /// none. For phone photos (gain map JPEG and HEIC), the brightness of
+    /// SDR white, 203 nits by default.
     #[arg(long, value_name = "NITS", value_parser = nits)]
     input_white: Option<f32>,
 

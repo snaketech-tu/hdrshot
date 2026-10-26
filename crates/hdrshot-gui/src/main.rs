@@ -56,8 +56,9 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 /// Extensions offered in the open dialog, in both cases for platforms whose
 /// dialogs match them exactly.
-const INPUT_EXTENSIONS: [&str; 12] = [
-    "jxr", "wdp", "exr", "hdr", "png", "jxl", "JXR", "WDP", "EXR", "HDR", "PNG", "JXL",
+const INPUT_EXTENSIONS: [&str; 22] = [
+    "jxr", "wdp", "exr", "hdr", "png", "jxl", "jpg", "jpeg", "heic", "heif", "hif", "JXR", "WDP",
+    "EXR", "HDR", "PNG", "JXL", "JPG", "JPEG", "HEIC", "HEIF", "HIF",
 ];
 
 fn main() {
@@ -358,11 +359,11 @@ impl App {
             .button("Open .jxr files with hdrshot")
             .on_hover_text(if cfg!(windows) {
                 "Make hdrshot the app that opens .jxr files when you double-click them, \
-                 list it under Open with for .wdp, .exr, .jxl and .hdr files, and add \
+                 list it under Open with for .wdp, .exr, .jxl, .hdr and .heic files, and add \
                  Convert with hdrshot to their right-click menu"
             } else {
                 "Make hdrshot the app that opens .jxr files when you double-click them, \
-                 and list it under Open with for .wdp, .exr, .jxl and .hdr files"
+                 and list it under Open with for .wdp, .exr, .jxl, .hdr and .heic files"
             })
             .clicked()
         {

@@ -145,6 +145,13 @@ jobs:
                 <key>LSItemContentTypes</key>
                 <array><string>public.radiance</string></array>
               </dict>
+              <dict>
+                <key>CFBundleTypeName</key><string>HEIC image</string>
+                <key>CFBundleTypeRole</key><string>Viewer</string>
+                <key>LSHandlerRank</key><string>Alternate</string>
+                <key>LSItemContentTypes</key>
+                <array><string>public.heic</string><string>public.heif</string></array>
+              </dict>
             </array>
             <key>UTImportedTypeDeclarations</key>
             <array>

@@ -1,6 +1,6 @@
 {
     "version": "2.1.0",
-    "description": "HDR image tool: convert HDR screenshots (JXR, EXR, JXL, HDR PNG) to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG",
+    "description": "HDR image tool: convert HDR screenshots and phone HDR photos (JXR, EXR, JXL, HDR PNG, Ultra HDR JPEG, HEIC) to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG",
     "homepage": "https://github.com/snaketech-tu/hdrshot",
     "license": "Apache-2.0",
     "architecture": {
