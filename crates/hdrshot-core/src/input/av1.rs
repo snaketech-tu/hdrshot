@@ -3,9 +3,18 @@
 //! needed, and used through its dav1d-compatible C interface: that is the
 //! only interface it offers, so this module is the one place with `unsafe`
 //! code, kept to those calls.
+//!
+//! A panic inside that interface can't unwind out of it and would abort
+//! the whole program, and `rav1d` panics on some damaged files. So each
+//! image is decoded on a thread of its own, and a panic there is turned
+//! into an error for that file (see [`decode`]).
 
+use std::cell::Cell;
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
+use std::sync::Once;
+use std::sync::mpsc::{Sender, channel};
+use std::time::Duration;
 
 use rav1d::include::dav1d::data::Dav1dData;
 use rav1d::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
@@ -77,9 +86,61 @@ fn check(res: rav1d::Dav1dResult, what: &str) -> Result<()> {
     }
 }
 
+thread_local! {
+    /// On a decoding thread, where its result goes.
+    static RESULT: Cell<Option<Sender<Result<Planes>>>> = const { Cell::new(None) };
+}
+
+/// Longest time one image may take, far more than even a large photo
+/// needs, in case a damaged file sends the decoder into a loop.
+const TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Decodes `obus`, the AV1 data of one image, with its configuration OBUs
 /// first.
+///
+/// The decoding runs on a new thread. If `rav1d` panics there, a panic
+/// hook reports the file as damaged and parks the thread for good instead
+/// of letting the panic reach the C interface, where it would abort the
+/// program. The parked thread and its memory are lost, which is rare and
+/// far better than losing the app with every other file being converted.
+///
+/// The parked thread keeps the standard library's lock on the panic hook,
+/// so a program reading AVIFs must not call `std::panic::set_hook` or
+/// `take_hook` after a damaged one: it would wait forever. That includes
+/// the end of a `cargo test` run, so tests of this run hdrshot as a
+/// separate program.
 pub(super) fn decode(obus: &[u8]) -> Result<Planes> {
+    static HOOK: Once = Once::new();
+    HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| match RESULT.take() {
+            Some(result) => {
+                let _ = result.send(Err(Error::Decode("the AV1 data is damaged".into())));
+                loop {
+                    std::thread::park();
+                }
+            }
+            None => previous(info),
+        }));
+    });
+    let (tx, rx) = channel();
+    let obus = obus.to_vec();
+    std::thread::Builder::new()
+        .name("hdrshot-av1".into())
+        .spawn(move || {
+            RESULT.set(Some(tx));
+            let result = decode_here(&obus);
+            if let Some(tx) = RESULT.take() {
+                let _ = tx.send(result);
+            }
+        })
+        .map_err(|e| Error::Decode(format!("could not start the AV1 decoder: {e}")))?;
+    rx.recv_timeout(TIMEOUT)
+        .unwrap_or_else(|_| Err(Error::Decode("the AV1 decoder stopped responding".into())))
+}
+
+/// Decodes `obus` on this thread; see [`decode`].
+fn decode_here(obus: &[u8]) -> Result<Planes> {
     // SAFETY: each call gets pointers to live, initialized values of the
     // types it expects; the context, data and picture are released by the
     // guards above or by `dav1d_data_unref`.
@@ -87,9 +148,11 @@ pub(super) fn decode(obus: &[u8]) -> Result<Planes> {
         let mut settings = MaybeUninit::<Dav1dSettings>::uninit();
         dav1d_default_settings(NonNull::from(&mut settings).cast());
         let settings = settings.assume_init_mut();
-        // One thread per core, one frame at a time, and only the final
-        // layer of a layered image. Film grain is part of the picture.
-        settings.n_threads = 0;
+        // No worker threads, so that a panic on a damaged file always
+        // happens on this thread, where `decode` catches it; a 4K image
+        // still takes about a second. One frame at a time, and only the
+        // final layer of a layered image. Film grain is part of the picture.
+        settings.n_threads = 1;
         settings.max_frame_delay = 1;
         settings.all_layers = 0;
         settings.apply_grain = 1;
