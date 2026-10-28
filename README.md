@@ -113,6 +113,21 @@ install -Dm644 hdrshot.desktop -t ~/.local/share/applications
 cp -r icons/hicolor ~/.local/share/icons/
 ```
 
+### With Scoop
+
+On Windows, [Scoop](https://scoop.sh) installs both tools and keeps them up
+to date:
+
+```sh
+scoop bucket add snaketech https://github.com/snaketech-tu/scoop-bucket
+scoop install hdrshot
+```
+
+This adds the `hdrshot` command (the command-line tool), the `hdrshot-gui`
+command (the desktop app) and a Start menu shortcut. `scoop update hdrshot`
+updates both; the app's **Check for updates** shows that command instead of
+replacing the files itself.
+
 ### With Cargo
 
 With [Rust](https://rustup.rs) 1.99 or newer installed, both tools can also be built from
@@ -616,8 +631,9 @@ a folder of them:
 HDRSHOT_SAMPLES=/path/to/jxr/folder cargo test --release -p hdrshot-core --test samples
 ```
 
-Releases are built by GitHub Actions: pushing a `v*` tag builds all three
-platforms and publishes the release with notes from
+Releases are built by GitHub Actions: pushing a `v*` tag, or running the
+Release workflow with a tag name, builds all three platforms and publishes
+the release with notes from
 [CHANGELOG.md](https://github.com/snaketech-tu/hdrshot/blob/main/CHANGELOG.md).
 After each release, the browser version is published to GitHub Pages from
 the same commit.

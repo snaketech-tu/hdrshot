@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- A damaged AVIF no longer closes the desktop app or stops the command
+  line: it fails with an error like any other damaged image, and the other
+  files are converted. The AV1 decoder could crash the whole program on
+  such files, already when the app made the file's thumbnail.
+- The browser version no longer remembers the fine-tuning (SDR white, HDR
+  peak) and the resolution between visits. As in the desktop app, they start
+  at their defaults each time, so results match the original unless they
+  are changed for this visit.
+- The browser version says why AVIF files it was given are left out
+  (reading AVIF needs the desktop app) instead of calling them files hdrshot
+  can't convert.
+- The `.desktop` file in the Linux app archive lists HEIC and HEIF, as the
+  one the app writes itself already did.
+
+### Changed
+
+- The README describes installing with Scoop.
+
 ## [2.3.0] - 2026-10-26
 
 ### Added

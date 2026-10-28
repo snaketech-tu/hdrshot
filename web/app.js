@@ -51,7 +51,14 @@ const store = {
   },
 };
 
-let settings = { ...DEFAULTS, ...store.get("settings", {}) };
+// Only the choices of what to make and where to save are remembered. The
+// fine-tuning and the resolution start at their defaults on every visit, as
+// in the desktop app, so results match the original unless changed.
+const REMEMBERED = ["mode", "hdr_format", "for_discord", "sdr_jpeg", "save"];
+function remembered(values) {
+  return Object.fromEntries(REMEMBERED.filter((key) => key in values).map((key) => [key, values[key]]));
+}
+let settings = { ...DEFAULTS, ...remembered(store.get("settings", {})) };
 const canPickFolder = typeof window.showDirectoryPicker === "function";
 if (!canPickFolder) settings.save = "download";
 let folder = null;
@@ -273,10 +280,16 @@ async function hasGainMap(file) {
 async function addFiles(found) {
   const known = new Set(items.map((i) => `${i.name}|${i.size}|${i.file.lastModified}`));
   let unsupported = 0;
+  let avifs = 0;
   let folderPngs = 0;
   const added = [];
   for (const { file, inFolder } of found) {
     const ext = extension(file.name);
+    // AVIF input needs the desktop app: its decoder doesn't build here.
+    if (ext === "avif" && !inFolder) {
+      avifs++;
+      continue;
+    }
     if (!EXTENSIONS.includes(ext)) {
       unsupported++;
       continue;
@@ -300,6 +313,7 @@ async function addFiles(found) {
   added.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   const notes = [];
   if (unsupported) notes.push(`Left out ${plural(unsupported, "file")} that hdrshot can't convert.`);
+  if (avifs) notes.push(`Left out ${plural(avifs, "AVIF")}: reading AVIF files needs the desktop app.`);
   if (folderPngs) notes.push(`Left out ${plural(folderPngs, "PNG")} found in folders; add HDR PNGs by name.`);
   showMessage(notes.join(" "));
   for (const file of added) {
@@ -593,7 +607,7 @@ function renderSettings() {
 
 function changeSettings(changes) {
   settings = { ...settings, ...changes };
-  store.set("settings", settings);
+  store.set("settings", remembered(settings));
   renderSettings();
 }
 

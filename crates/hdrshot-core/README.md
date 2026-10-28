@@ -27,4 +27,10 @@ fn main() -> Result<(), hdrshot_core::Error> {
 }
 ```
 
+`rav1d` can panic on damaged AVIF files inside its C interface, which would
+abort the program, so hdrshot-core decodes each AVIF on a thread of its own
+and turns such a panic into an error. It installs a panic hook for this the
+first time it reads an AVIF; after a damaged one, don't replace the panic hook
+(`std::panic::set_hook` or `take_hook`), as that would wait forever.
+
 Licensed under Apache-2.0.

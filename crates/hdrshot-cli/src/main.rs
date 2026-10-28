@@ -12,8 +12,8 @@ use hdrshot_core::{
 use rayon::prelude::*;
 
 /// Convert HDR images (JPEG XR, OpenEXR, Radiance HDR, HDR PNG, JPEG XL, HDR
-/// AVIF, and phone HDR photos: gain map JPEG, HEIC and AVIF) to HDR and/or
-/// SDR PNG files.
+/// AVIF, and phone HDR photos: gain map JPEG, HEIC and AVIF) to HDR PNG,
+/// AVIF or Ultra HDR JPEG and tone-mapped SDR PNG or JPEG files.
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
