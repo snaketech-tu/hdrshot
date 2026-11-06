@@ -638,13 +638,59 @@ the release with notes from
 After each release, the browser version is published to GitHub Pages from
 the same commit.
 
+## Credits
+
+hdrshot is built on the work of many open source projects. Thanks to their
+authors and contributors, in particular:
+
+**Image formats**
+
+- [jxr](https://github.com/frames-sg/jxr): JPEG XR decoding
+- [exrs](https://github.com/johannesvollmer/exrs): OpenEXR decoding
+- [jxl-oxide](https://github.com/tirr-c/jxl-oxide): JPEG XL decoding
+- [heic-decoder](https://github.com/Multipad-cyber/heic-decoder-rust): HEIC decoding
+- [rav1d](https://github.com/memorysafety/rav1d), the Rust port of
+  [dav1d](https://code.videolan.org/videolan/dav1d): AV1 decoding for AVIF input
+- [rav1e](https://github.com/xiph/rav1e): AV1 encoding for AVIF output
+- [avif-serialize](https://github.com/kornelski/avif-serialize): AVIF container writing
+- [png](https://github.com/image-rs/image-png) and
+  [image](https://github.com/image-rs/image): PNG and Radiance HDR files
+- [zune-jpeg](https://github.com/etemesi254/zune-image) and
+  [jpeg-encoder](https://github.com/vstroebel/jpeg-encoder): JPEG decoding and encoding
+- [moxcms](https://github.com/awxkee/moxcms): color management for JPEG XL
+
+**Desktop app**
+
+- [egui](https://github.com/emilk/egui): user interface
+- [egui_software_backend](https://github.com/DGriffin91/egui_software_backend)
+  by DGriffin91: the CPU renderer, included in this repository in adapted form
+- [winit](https://github.com/rust-windowing/winit) and
+  [softbuffer](https://github.com/rust-windowing/softbuffer): window and drawing
+- [rfd](https://github.com/PolyMeilex/rfd): file dialogs
+- [arboard](https://github.com/1Password/arboard): clipboard
+- [notify](https://github.com/notify-rs/notify): watch folder
+- [trash](https://github.com/ArturKovacs/trash): Recycle Bin support
+- [ureq](https://github.com/algesten/ureq) and
+  [rustls](https://github.com/rustls/rustls): update check
+- [interprocess](https://github.com/kotauskas/interprocess): single instance
+- [serde](https://github.com/serde-rs/serde) and
+  [ron](https://github.com/ron-rs/ron): settings
+- The [Inter](https://rsms.me/inter/) typeface by Rasmus Andersson, under the
+  [SIL Open Font License 1.1](https://github.com/snaketech-tu/hdrshot/blob/main/crates/hdrshot-gui/assets/fonts/Inter-LICENSE.txt)
+
+**Command line and browser version**
+
+- [clap](https://github.com/clap-rs/clap): command-line options
+- [rayon](https://github.com/rayon-rs/rayon): parallel conversion
+- [wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen) and
+  [Binaryen](https://github.com/WebAssembly/binaryen): the WebAssembly build
+
+The full list of dependencies is in
+[Cargo.lock](https://github.com/snaketech-tu/hdrshot/blob/main/Cargo.lock).
+
 ## License
 
 [Apache-2.0](https://github.com/snaketech-tu/hdrshot/blob/main/LICENSE)
-
-The desktop app uses the [Inter](https://rsms.me/inter/) typeface by
-Rasmus Andersson, under the
-[SIL Open Font License 1.1](https://github.com/snaketech-tu/hdrshot/blob/main/crates/hdrshot-gui/assets/fonts/Inter-LICENSE.txt).
 
 Made by snake.tech. If hdrshot is useful to you, you can support it on
 [Ko-fi](https://ko-fi.com/snake_tech).
