@@ -34,6 +34,10 @@ hdrshot was called jxr2png up to version 1.2. Settings and the `.jxr` file
 association carry over, and version 1.2 updates to it from **Check for
 updates**.
 
+<p align="center">
+<img src="https://raw.githubusercontent.com/snaketech-tu/hdrshot/main/docs/images/conversions.svg" width="100%" alt="hdrshot reads JPEG XR, gain map JPEG, HEIC, OpenEXR, Radiance, HDR PNG, HDR AVIF and JPEG XL, and writes HDR PNG, HDR AVIF, Ultra HDR JPEG and SDR PNG or JPEG. Use it as a desktop app, on the command line, in the browser, from the right-click menu or as a watch folder.">
+</p>
+
 ## Features
 
 - **HDR PNG.** Rec.2020 PQ with the brightness of the original
