@@ -1,9 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [2.3.2] - 2026-11-06
 
 ### Changed
 
+- New app icon, in the desktop app, the Windows, macOS and Linux downloads
+  and the browser version.
+- The README shows which formats hdrshot reads and writes, and the ways to
+  use it, in a banner above the feature list.
 - Updated the libraries hdrshot is built with to their latest versions,
   among them the JPEG XR decoder (jxr 0.4; converted images are
   byte-identical to before), ureq, trash and notify, and the tools that
