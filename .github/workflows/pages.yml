@@ -25,7 +25,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  BINARYEN: version_123
+  BINARYEN: version_133
 
 jobs:
   build:
@@ -35,7 +35,7 @@ jobs:
        github.event.workflow_run.event != 'pull_request')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
@@ -53,7 +53,7 @@ jobs:
           echo "$RUNNER_TEMP/$bindgen" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/binaryen-$BINARYEN/bin" >> "$GITHUB_PATH"
       - run: web/build.sh
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: target/web
 
@@ -68,5 +68,5 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
         id: deployment
