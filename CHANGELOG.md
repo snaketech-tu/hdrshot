@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Updated the libraries hdrshot is built with to their latest versions,
+  among them the JPEG XR decoder (jxr 0.4; converted images are
+  byte-identical to before), ureq, trash and notify, and the tools that
+  build the browser version (wasm-bindgen 0.2.130, binaryen 133).
+
 ## [2.3.1] - 2026-10-28
 
 ### Fixed
