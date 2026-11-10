@@ -159,6 +159,16 @@ impl App {
             self.default_app_ui(ui);
             ui.end_row();
         }
+
+        theme::row_label(ui, "Feedback");
+        ui.horizontal(|ui| {
+            ui.hyperlink_to("Report a problem", report_url())
+                .on_hover_text("Opens a bug report on GitHub, with this version filled in");
+            ui.add_space(12.0);
+            ui.hyperlink_to("Ask a question", DISCUSSIONS_URL)
+                .on_hover_text("Opens hdrshot's Discussions on GitHub");
+        });
+        ui.end_row();
     }
 
     /// What to create, in which formats: rows of a two-column grid.
@@ -525,6 +535,22 @@ pub(crate) fn name_preview(input: &Path, options: &ConvertOptions) -> Vec<String
 }
 
 /// A two-column grid of labelled settings.
+const DISCUSSIONS_URL: &str = "https://github.com/snaketech-tu/hdrshot/discussions";
+
+/// A new bug report on GitHub, with the version, the desktop app and, where
+/// it is clear, the operating system already filled in.
+pub(crate) fn report_url() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "&os=macOS",
+        "linux" => "&os=Linux",
+        _ => "",
+    };
+    format!(
+        "https://github.com/snaketech-tu/hdrshot/issues/new?template=bug.yml&version={}&surface=Desktop%20app{os}",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
 fn settings_grid(ui: &mut egui::Ui, id: &str, add_rows: impl FnOnce(&mut egui::Ui)) {
     egui::Grid::new(id)
         .num_columns(2)
@@ -943,6 +969,16 @@ mod tests {
         s.save_to_folder = true;
         s.output_dir = Some(std::env::temp_dir().join("out"));
         assert_eq!(names(&s), ["hdr/Screenshot 1.avif"]);
+    }
+
+    #[test]
+    fn report_url_fills_in_the_version() {
+        let url = report_url();
+        assert!(
+            url.starts_with("https://github.com/snaketech-tu/hdrshot/issues/new?template=bug.yml&")
+        );
+        assert!(url.contains(&format!("version={}", env!("CARGO_PKG_VERSION"))));
+        assert!(!url.contains(' '));
     }
 
     #[test]

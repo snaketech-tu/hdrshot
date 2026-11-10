@@ -32,6 +32,10 @@ jobs:
       # page's scripts.
       - run: cargo clippy -p hdrshot-web --target wasm32-unknown-unknown -- -D warnings
       - run: for f in web/*.js; do node --check "$f"; done
+      - run: node --test web/tests/*.test.mjs
+      # Known vulnerabilities (RustSec), licenses and crate sources, as set
+      # in deny.toml.
+      - uses: EmbarkStudios/cargo-deny-action@v2
 
   test:
     strategy:

@@ -1359,6 +1359,7 @@ dependencies = [
  "ctrlc",
  "hdrshot-core",
  "rayon",
+ "serde_json",
  "trash",
  "wild",
 ]
@@ -1416,6 +1417,7 @@ dependencies = [
  "ring",
  "ron",
  "serde",
+ "serde_json",
  "softbuffer",
  "trash",
  "ureq",

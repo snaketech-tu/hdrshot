@@ -1,0 +1,60 @@
+name: Bug report
+description: Something doesn't work, or an image comes out wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. The details below help find the cause quickly.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead? Error messages help, word for word.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: hdrshot version
+      description: Shown in the desktop app's title bar, or by `hdrshot --version`.
+      placeholder: "2.3.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - Desktop app
+        - Command line
+        - Browser version
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Where the image came from
+      description: For example Game Bar, the NVIDIA app, Xbox, a phone (which one), or another program.
+  - type: input
+    id: output
+    attributes:
+      label: Output format and viewer
+      description: For example HDR PNG viewed in Windows Photos, or AVIF in Chrome. Only if the problem is about how a result looks.
+  - type: textarea
+    id: files
+    attributes:
+      label: Files
+      description: If you can, attach the original image (zip it first, GitHub doesn't accept .jxr) or link to it, and a screenshot of the problem.
