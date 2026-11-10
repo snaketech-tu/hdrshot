@@ -4,8 +4,8 @@
 
 # hdrshot
 
-**HDR image tool. Converts HDR screenshots, phone HDR photos and other HDR
-images to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG.**
+**Converts HDR screenshots, phone HDR photos and other HDR images to HDR
+PNG, AVIF, Ultra HDR JPEG and SDR PNG.**
 
 [![Release](https://img.shields.io/github/v/release/snaketech-tu/hdrshot?style=flat-square&color=0e7fc0)](https://github.com/snaketech-tu/hdrshot/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/snaketech-tu/hdrshot/total?style=flat-square&color=0e7fc0&cacheSeconds=3600)](https://github.com/snaketech-tu/hdrshot/releases)
@@ -25,10 +25,10 @@ images to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG.**
 </div>
 
 Windows Game Bar, the NVIDIA app and Xbox save HDR screenshots as JPEG XR,
-a format few applications can open. hdrshot converts them, and other HDR images, to
-formats that can be viewed and shared: HDR PNG, AVIF or Ultra HDR JPEG for
-screens and apps that support HDR, and SDR PNG for everything else, without
-changing how the picture looks.
+a format few applications can open. hdrshot converts them, and other HDR
+images, to HDR PNG, AVIF or Ultra HDR JPEG for screens and apps that support
+HDR, and to SDR PNG for everything else. The HDR result keeps the original
+brightness.
 
 <p align="center">
 <img src="https://raw.githubusercontent.com/snaketech-tu/hdrshot/main/docs/images/before-after.jpg" width="100%" alt="One screenshot split in two: on the left, dark and gray, as an app without HDR support shows the HDR file; on the right, with warm torchlight and clear detail, as hdrshot converts it.">
@@ -44,16 +44,15 @@ changing how the picture looks.
 - **HDR PNG.** Rec.2020 PQ with the brightness of the original
   screenshot, shown in HDR by Windows Photos, Chrome, Edge and HDR image
   viewers.
-- **HDR AVIF.** Optionally the same HDR picture as a 10-bit AVIF, about a
+- **HDR AVIF.** The same HDR picture as a 10-bit AVIF, about a
   twentieth of the PNG's size, shown in HDR by Chrome, Edge and Firefox.
 - **Ultra HDR JPEG.** Or as a JPEG with a gain map: every app shows the
   SDR picture, and Chrome, Edge, Android and Instagram brighten it to HDR.
 - **SDR PNG or JPEG.** Tone-mapped the way Windows shows the
   screenshot on an SDR screen, with highlights that roll off smoothly and
   colors that keep their hue.
-- **Faithful by default.** Brightness, peak and white level all
-  come from the screenshot itself. Tuning options are available but
-  not required.
+- **No settings needed.** Brightness, peak and white level come from the
+  screenshot itself. Tuning is optional.
 - **Drag and drop.** Drop files or whole folders, pick HDR, SDR or both,
   press Convert.
 - **Copy for Discord.** One click puts the image on the clipboard in a
@@ -66,16 +65,16 @@ changing how the picture looks.
 - **Other HDR inputs.** Also reads OpenEXR (`.exr`), Radiance (`.hdr`),
   HDR PNG, HDR AVIF (including AVIFs with a gain map) and JPEG XL (`.jxl`)
   files, for game photo modes, renders, photo exports and re-tone-mapping.
-- **Watch folder.** Optionally converts each new screenshot saved to a
+- **Watch folder.** Converts each new screenshot saved to a
   folder, such as the Game Bar or NVIDIA app captures folder, as soon as it
   is written. On Windows it can keep doing so from the tray, starting with
   Windows if you like.
-- **Double-click or right-click to convert.** Optionally opens `.jxr` files
+- **Double-click or right-click to convert.** Can open `.jxr` files
   with hdrshot on Windows and Linux, is listed under **Open with** for the
   other formats it reads, and on Windows adds **Convert with hdrshot** to
   their right-click menu.
-- **Parallel conversion.** Uses all CPU cores, written in pure Rust with no
-  external libraries.
+- **Pure Rust.** Converts on all CPU cores, and the image code needs no C
+  libraries.
 
 ## Download
 
@@ -174,17 +173,13 @@ updates**.
    too. Files opened while the app is running, for example several
    screenshots picked with **Open with**, go to the window that is already
    open.
-2. Check the row of buttons under the list, which sums up the settings:
-   what to create (for example **HDR PNG + SDR PNG**), where to save, the
-   largest size, and what happens after converting. Click one to change it:
-   **HDR + SDR**, **HDR only** or **SDR only**, the HDR format (**PNG**,
-   **AVIF** or **Ultra HDR JPEG**), the SDR format (**PNG** or **JPEG**),
-   and whether to save next to each image, into one of the last three
-   folders used, or into a new one.
-3. Press **Convert**. It converts the files not converted yet and shows
-   the progress and the time left. When it is done, a summary above the
-   settings shows how many images were saved, their size and anything that
-   went wrong, with **Open folder** and **Retry failed**.
+2. The row of buttons under the list shows the current settings: what to
+   create (for example **HDR PNG + SDR PNG**), where to save, the largest
+   size and what happens after converting. Click one to change it, for
+   example to **HDR only**, **AVIF** or another folder.
+3. Press **Convert**. The app shows the progress and the time left, then a
+   summary of what was saved and what failed, with **Open folder** and
+   **Retry failed**.
 
 All settings are also on the **Settings** page, opened with the button at
 the top right; Esc or the back button returns to the list. The window opens
@@ -225,10 +220,9 @@ All options, the JSON output, exit codes and shell completions are in
 
 ## Sharing on Discord
 
-Discord does not show every HDR file the way an HDR viewer does, so the
-**Copy for Discord** button, dragging an image out of the desktop app's
-list and `--copy` do not always give the saved file unchanged. The saved
-files are never modified.
+Discord shows some HDR files wrong, so **Copy for Discord**, dragging an
+image out of the desktop app's list and `--copy` can give Discord a
+different file than the one saved. The saved files are never changed.
 
 | Saved HDR format | What Discord does with it | What gets copied |
 | --- | --- | --- |
@@ -270,7 +264,7 @@ See [CONTRIBUTING.md](https://github.com/snaketech-tu/hdrshot/blob/main/CONTRIBU
 
 ## Feedback
 
-Found a problem, or missing a feature? Please
+To report a problem or ask for a feature,
 [open an issue](https://github.com/snaketech-tu/hdrshot/issues/new/choose).
 Questions and ideas are welcome in
 [Discussions](https://github.com/snaketech-tu/hdrshot/discussions). To report a
@@ -279,8 +273,8 @@ security problem privately, see
 
 ## Credits
 
-hdrshot is built on the work of many open source projects. Thanks to their
-authors and contributors, in particular:
+hdrshot uses these open source projects, among others. Thanks to their
+authors and contributors.
 
 **Image formats**
 
