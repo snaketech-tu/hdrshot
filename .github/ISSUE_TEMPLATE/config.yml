@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea to discuss
+    url: https://github.com/snaketech-tu/hdrshot/discussions
+    about: Ask a question or share an idea in Discussions.
+  - name: Security problem
+    url: https://github.com/snaketech-tu/hdrshot/security/advisories/new
+    about: Report a vulnerability privately instead of in a public issue.

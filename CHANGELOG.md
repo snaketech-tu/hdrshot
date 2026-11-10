@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Report a problem** and **Ask a question** links on the desktop app's
+  Settings page, and **Report a problem** in the browser version's footer.
+  The bug report opens with the app version already filled in.
+- Forms for bug reports and feature requests on GitHub, a security policy
+  (`SECURITY.md`) with a private way to report vulnerabilities, and
+  contribution notes (`CONTRIBUTING.md`).
+- Every release file now has a signed build attestation, so a download can
+  be checked with `gh attestation verify <file> --repo snaketech-tu/hdrshot`.
+- The command-line archives for macOS and Linux include the command-line
+  reference as `CLI.md`.
+
+### Changed
+
+- The README is about half as long. The complete desktop app options, the
+  command-line reference and the technical details moved to
+  `docs/desktop-app.md`, `docs/cli.md` and `docs/how-it-works.md`.
+
 ## [2.3.2] - 2026-11-06
 
 ### Changed

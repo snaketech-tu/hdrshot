@@ -133,6 +133,12 @@ fn check_since(current: &str) -> Result<Checked, String> {
     let releases: Vec<ApiRelease> = get(RELEASES_URL, "application/vnd.github+json")
         .and_then(|mut response| response.body_mut().read_json())
         .map_err(|e| format!("Couldn't reach GitHub: {e}"))?;
+    Ok(newer_releases(releases, current, ASSET))
+}
+
+/// The releases newer than `current`, newest first, each with the download
+/// named `asset` and the release's checksum list, if it has them.
+fn newer_releases(releases: Vec<ApiRelease>, current: &str, asset: Option<&str>) -> Checked {
     let current = parse_version(current);
     let mut newer: Vec<_> = releases
         .into_iter()
@@ -142,16 +148,16 @@ fn check_since(current: &str) -> Result<Checked, String> {
         .collect();
     newer.sort_by_key(|(version, _)| std::cmp::Reverse(*version));
     if newer.is_empty() {
-        return Ok(Checked::UpToDate);
+        return Checked::UpToDate;
     }
-    Ok(Checked::Newer(
+    Checked::Newer(
         newer
             .into_iter()
             .map(|(_, r)| Release {
                 version: r.tag_name.trim_start_matches('v').to_owned(),
                 notes: r.body.unwrap_or_default(),
                 page: r.html_url,
-                download: ASSET.and_then(|asset| {
+                download: asset.and_then(|asset| {
                     let checksums = r
                         .assets
                         .iter()
@@ -168,7 +174,7 @@ fn check_since(current: &str) -> Result<Checked, String> {
                 }),
             })
             .collect(),
-    ))
+    )
 }
 
 /// `1.2.3` or `v1.2.3` as numbers; `None` for anything else.
@@ -452,6 +458,118 @@ mod tests {
         assert_eq!(managed_by(Path::new(scoop)), Some("scoop update hdrshot"));
         let download = r"C:\Users\A\Downloads\hdrshot.exe";
         assert_eq!(managed_by(Path::new(download)), None);
+    }
+
+    /// A release as GitHub's API lists it, with every file `release.yml`
+    /// uploads.
+    fn api_release(tag: &str, draft: bool, prerelease: bool) -> serde_json::Value {
+        let names = [
+            "hdrshot.exe",
+            "hdrshot-cli.exe",
+            "hdrshot-gui.exe",
+            "hdrshot-gui-macos.dmg",
+            "hdrshot-cli-macos.tar.gz",
+            "hdrshot-gui-linux-x64.tar.gz",
+            "hdrshot-cli-linux-x64.tar.gz",
+            "SHA256SUMS.txt",
+        ];
+        serde_json::json!({
+            "tag_name": tag,
+            "body": format!("Notes for {tag}"),
+            "html_url": format!("https://github.com/snaketech-tu/hdrshot/releases/tag/{tag}"),
+            "draft": draft,
+            "prerelease": prerelease,
+            "assets": names.iter().map(|name| serde_json::json!({
+                "name": name,
+                "browser_download_url": format!("https://github.com/snaketech-tu/hdrshot/releases/download/{tag}/{name}"),
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    fn releases(list: &[serde_json::Value]) -> Vec<ApiRelease> {
+        serde_json::from_value(serde_json::Value::Array(list.to_vec())).unwrap()
+    }
+
+    fn newer(list: &[serde_json::Value], current: &str, asset: Option<&str>) -> Vec<Release> {
+        match newer_releases(releases(list), current, asset) {
+            Checked::Newer(releases) => releases,
+            Checked::UpToDate => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn each_platform_gets_its_own_download() {
+        let list = [api_release("v9.0.0", false, false)];
+        for (asset, name) in [
+            (Some("hdrshot.exe"), "hdrshot.exe"),
+            (Some("hdrshot-gui-macos.dmg"), "hdrshot-gui-macos.dmg"),
+            (
+                Some("hdrshot-gui-linux-x64.tar.gz"),
+                "hdrshot-gui-linux-x64.tar.gz",
+            ),
+        ] {
+            let found = newer(&list, "2.3.2", asset);
+            let download = found[0].download.as_ref().expect("a download");
+            assert_eq!(download.name, name);
+            assert!(download.url.ends_with(&format!("/v9.0.0/{name}")));
+            assert!(
+                download
+                    .checksums
+                    .as_deref()
+                    .is_some_and(|url| url.ends_with("/v9.0.0/SHA256SUMS.txt"))
+            );
+        }
+        // Platforms without a build are told about the release, with no
+        // download.
+        assert!(newer(&list, "2.3.2", None)[0].download.is_none());
+    }
+
+    #[test]
+    fn this_build_looks_for_a_released_file() {
+        // The names the release workflow uploads; renaming one there must
+        // not leave the Update button looking for a file that is gone.
+        let workflow = include_str!("../../../.github/workflows/release.yml");
+        if let Some(asset) = ASSET {
+            assert!(workflow.contains(asset), "release.yml doesn't make {asset}");
+            assert!(
+                newer(&[api_release("v9.0.0", false, false)], "2.3.2", Some(asset))[0]
+                    .download
+                    .is_some()
+            );
+        }
+        assert!(workflow.contains(CHECKSUMS));
+        // Versions up to 2.1.0 update from this name.
+        assert!(workflow.contains("hdrshot-gui.exe"));
+    }
+
+    #[test]
+    fn newer_releases_newest_first() {
+        let list = [
+            api_release("v2.3.1", false, false),
+            api_release("v2.10.0", false, false),
+            api_release("v2.4.0", false, false),
+            api_release("v3.0.0", true, false),
+            api_release("v3.0.0-rc.1", false, true),
+            api_release("v2.3.2", false, false),
+            api_release("nightly", false, false),
+        ];
+        let found = newer(&list, "2.3.2", Some("hdrshot.exe"));
+        let versions: Vec<_> = found.iter().map(|r| r.version.as_str()).collect();
+        assert_eq!(versions, ["2.10.0", "2.4.0"]);
+        assert_eq!(found[0].notes, "Notes for v2.10.0");
+        assert!(found[0].page.ends_with("/tag/v2.10.0"));
+        assert!(matches!(
+            newer_releases(releases(&list), "2.10.0", Some("hdrshot.exe")),
+            Checked::UpToDate
+        ));
+    }
+
+    #[test]
+    fn release_without_the_file_has_no_download() {
+        let mut release = api_release("v9.0.0", false, false);
+        release["assets"] = serde_json::json!([]);
+        let found = newer(&[release], "2.3.2", Some("hdrshot.exe"));
+        assert!(found[0].download.is_none());
     }
 
     #[test]
