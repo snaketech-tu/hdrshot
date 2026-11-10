@@ -7,17 +7,15 @@ All options of the desktop app. The basics are in the
   is copied to the clipboard as a file, so pasting it into Discord, a
   browser upload or a folder gives the full file. Each converted image also
   has its own **Copy for Discord** button. The copy leaves out the `cICP`
-  chunk, which makes Discord turn HDR images yellow; the saved file keeps it
-  for Windows Photos and HDR viewers. When the copy is larger than
+  chunk, which makes Discord turn HDR images yellow (see
+  [Sharing on Discord](../README.md#sharing-on-discord)). When the copy is larger than
   Discord's 10 MB upload limit, the app offers **Copy a smaller version**,
   which copies it at 1440p, or 1080p or 720p if needed, so it fits. The
   saved PNGs stay at full size. The button shows when you hover a row, and
   stays on the image converted last. With AVIF or Ultra HDR JPEG as the HDR
-  format, the copy is an HDR PNG made for Discord, since Discord shows
-  AVIF too bright and Ultra HDR JPEGs in SDR only. For the last image of a
-  batch, which is copied automatically, the app makes it while converting;
-  for the others, **Copy for Discord** makes it, which takes a second or
-  two.
+  format, the copy is an HDR PNG made for Discord. For the last image of a
+  batch the app makes it while converting; for the others, **Copy for
+  Discord** makes it, which takes a second or two.
 - **Drag out** (Windows). Drag a converted image from the list into
   Discord, a browser upload or a folder to drop the same file that **Copy
   for Discord** gives; with several rows selected, all of them go. When an

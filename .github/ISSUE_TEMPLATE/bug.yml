@@ -2,10 +2,6 @@ name: Bug report
 description: Something doesn't work, or an image comes out wrong.
 labels: [bug]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Thanks for taking the time to report this. The details below help find the cause quickly.
   - type: textarea
     id: what
     attributes:
@@ -18,7 +14,7 @@ body:
     attributes:
       label: hdrshot version
       description: Shown in the desktop app's title bar, or by `hdrshot --version`.
-      placeholder: "2.3.2"
+      placeholder: "2.3.3"
     validations:
       required: true
   - type: dropdown

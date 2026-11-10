@@ -7,7 +7,7 @@ privately through
 [GitHub's private vulnerability reporting](https://github.com/snaketech-tu/hdrshot/security/advisories/new)
 instead. You'll get an answer within a week.
 
-Problems of interest include an image file that makes hdrshot run code,
+This covers, for example, an image file that makes hdrshot run code,
 write outside the chosen folder or crash in a way that affects other
 files, and anything that weakens the update check, such as a way to make
 the app install a file that isn't from an official release.
