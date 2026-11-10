@@ -26,4 +26,5 @@ cp crates/hdrshot-gui/assets/fonts/Inter-Regular.ttf \
   crates/hdrshot-gui/assets/fonts/Inter-LICENSE.txt "$out/fonts/"
 cp packaging/linux/icons/hicolor/64x64/apps/hdrshot.png "$out/icon-64.png"
 cp packaging/linux/icons/hicolor/256x256/apps/hdrshot.png "$out/icon-256.png"
+cp docs/images/before-after.jpg "$out/"
 ls -l "$out/pkg"

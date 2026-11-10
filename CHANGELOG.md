@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.3.3] - 2026-11-10
 
 ### Added
 
@@ -14,6 +14,17 @@
   be checked with `gh attestation verify <file> --repo snaketech-tu/hdrshot`.
 - The command-line archives for macOS and Linux include the command-line
   reference as `CLI.md`.
+
+- The browser version's page explains what it is for below the converter:
+  what `.jxr` files are, why HDR screenshots can look washed out, how to
+  share them on Discord, with a before and after picture and download
+  links for the desktop app. The README shows the same picture.
+
+### Fixed
+
+- The browser version's note on sharing in Discord said to drop the
+  downloaded HDR PNG into the chat, which shows wrong colors unless
+  **Discord-compatible PNG** was on. It now says to turn that on first.
 
 ### Changed
 

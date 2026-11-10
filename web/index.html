@@ -3,12 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>hdrshot: convert HDR screenshots in your browser</title>
-<meta name="description" content="Convert HDR screenshots (JXR from Game Bar and the NVIDIA app, OpenEXR, JPEG XL, HDR PNG) and phone HDR photos (Ultra HDR JPEG, iPhone HEIC) to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG. Runs in your browser; images are never uploaded.">
+<title>hdrshot: convert JXR HDR screenshots to PNG, free and in your browser</title>
+<meta name="description" content="Open and share HDR screenshots from Windows Game Bar, the NVIDIA app and Xbox. Convert .jxr (JPEG XR) files and phone HDR photos to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG or JPEG that look right everywhere. Free, open source, and images are never uploaded.">
+<link rel="canonical" href="https://snaketech-tu.github.io/hdrshot/">
 <meta name="color-scheme" content="light dark">
-<meta property="og:title" content="hdrshot in your browser">
-<meta property="og:description" content="Convert HDR screenshots to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG. Images are never uploaded.">
-<meta property="og:image" content="https://snaketech-tu.github.io/hdrshot/icon-256.png">
+<meta property="og:title" content="hdrshot: convert JXR HDR screenshots to PNG">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://snaketech-tu.github.io/hdrshot/">
+<meta property="og:description" content="Convert HDR screenshots from Game Bar and the NVIDIA app to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG, with the brightness of the original. Free, and images are never uploaded.">
+<meta property="og:image" content="https://snaketech-tu.github.io/hdrshot/before-after.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"hdrshot","applicationCategory":"MultimediaApplication","operatingSystem":"Windows, macOS, Linux, Web","description":"Converts HDR screenshots (JPEG XR from Game Bar, the NVIDIA app and Xbox) and phone HDR photos to HDR PNG, AVIF, Ultra HDR JPEG and SDR PNG or JPEG.","url":"https://snaketech-tu.github.io/hdrshot/","downloadUrl":"https://github.com/snaketech-tu/hdrshot/releases/latest","license":"https://www.apache.org/licenses/LICENSE-2.0","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
+</script>
 <link rel="icon" type="image/png" href="icon-64.png">
 <link rel="stylesheet" href="style.css">
 <link rel="modulepreload" href="pkg/hdrshot_web.js">
@@ -117,6 +124,46 @@
     <span class="hint" id="hint"></span>
     <button class="btn-accent btn-big num" id="convert" disabled>Convert</button>
   </div>
+
+  <section class="about" aria-labelledby="about-title">
+    <h2 id="about-title">Open and share HDR screenshots from Game Bar and the NVIDIA app</h2>
+    <p class="lead">With HDR on, Windows Game Bar, the NVIDIA app and Xbox save screenshots as <code>.jxr</code> files. Few apps open them, and many show HDR images dark and gray. hdrshot converts them to an HDR PNG, AVIF or Ultra HDR JPEG with the original brightness, and to an SDR PNG or JPEG that looks right on every screen and in every app.</p>
+    <figure class="compare">
+      <img src="before-after.jpg" width="1376" height="576" loading="lazy" decoding="async" alt="One screenshot split in two: on the left, dark and gray, as an app without HDR support shows the HDR file; on the right, with warm torchlight and clear detail, as hdrshot converts it.">
+      <figcaption><span>HDR file in an app without HDR support</span><span>Converted by hdrshot</span></figcaption>
+    </figure>
+
+    <div class="faq">
+      <div>
+        <h3>What is a .jxr file?</h3>
+        <p>JPEG XR, an image format by Microsoft that can store HDR. Windows Game Bar (Win+Alt+PrtScn), the NVIDIA app and Xbox use it for screenshots taken while HDR is on, so the full brightness is kept. Windows Photos can show them, but most other apps, websites and chats can't.</p>
+      </div>
+      <div>
+        <h3>Why do my HDR screenshots look washed out?</h3>
+        <p>An HDR image holds brightness far above normal white. An app that doesn't read the HDR information shows those values as if they were ordinary colors, so the picture comes out dark and gray, or overexposed. hdrshot's SDR image maps the brightness the way Windows does on an SDR screen, and its HDR image carries the tags HDR viewers need.</p>
+      </div>
+      <div>
+        <h3>How do I share an HDR screenshot on Discord?</h3>
+        <p>Discord shows HDR PNGs in HDR, but turns the colors yellow when the PNG carries the tag Windows Photos needs. Turn on <strong>Discord-compatible PNG</strong> in the settings above, or use the desktop app's <strong>Copy for Discord</strong>, which copies the right version to the clipboard. For people without an HDR screen, share the SDR image.</p>
+      </div>
+      <div>
+        <h3>Are my images uploaded?</h3>
+        <p>No. This page converts on your computer with WebAssembly. Nothing leaves your browser.</p>
+      </div>
+    </div>
+
+    <div class="get">
+      <div>
+        <h3>Get the desktop app</h3>
+        <p>Free for Windows, macOS and Linux, and faster. It saves next to your originals, can convert each new screenshot as it is taken, and copies HDR images for Discord.</p>
+      </div>
+      <div class="get-actions">
+        <a class="btn btn-accent" href="https://github.com/snaketech-tu/hdrshot/releases/latest/download/hdrshot.exe">Download for Windows</a>
+        <a class="btn btn-plain" href="https://github.com/snaketech-tu/hdrshot/releases/latest" target="_blank" rel="noopener">macOS and Linux</a>
+      </div>
+      <p class="install">With <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a> on Windows: <code>scoop bucket add snaketech https://github.com/snaketech-tu/scoop-bucket</code>, then <code>scoop install hdrshot</code>.</p>
+    </div>
+  </section>
 
   <footer>
     <span class="made">Made with <svg width="13" height="13" role="img" aria-label="love"><use href="#i-heart"/></svg> by snake.tech</span>
