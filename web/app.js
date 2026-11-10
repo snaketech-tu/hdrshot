@@ -544,6 +544,11 @@ function update() {
     $("zip").hidden = Boolean(saved);
     $("zip-label").textContent = files.length === 1 ? `Download ${files[0].kind.name}` : "Download all as .zip";
     $("discord-note").hidden = !files.some((f) => f.kind === HDR_KINDS[0]);
+    // Discord turns HDR PNGs with a cICP chunk yellow, so the saved PNG only
+    // works there when it was made Discord-compatible.
+    $("discord-note").textContent = settings.for_discord
+      ? "To share in Discord, drop the downloaded HDR PNG into the chat. Browsers cannot copy HDR images to the clipboard."
+      : "To share in Discord, turn on Discord-compatible PNG in the settings before converting, then drop the downloaded HDR PNG into the chat. Without it, Discord shows the colors wrong. Browsers cannot copy HDR images to the clipboard.";
   }
 
   const button = $("convert");

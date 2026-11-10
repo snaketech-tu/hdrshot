@@ -31,6 +31,11 @@ screens and apps that support HDR, and SDR PNG for everything else, without
 changing how the picture looks.
 
 <p align="center">
+<img src="https://raw.githubusercontent.com/snaketech-tu/hdrshot/main/docs/images/before-after.jpg" width="100%" alt="One screenshot split in two: on the left, dark and gray, as an app without HDR support shows the HDR file; on the right, with warm torchlight and clear detail, as hdrshot converts it.">
+<br><sub>Left: an HDR screenshot in an app without HDR support. Right: converted by hdrshot.</sub>
+</p>
+
+<p align="center">
 <img src="https://raw.githubusercontent.com/snaketech-tu/hdrshot/main/docs/images/conversions.svg" width="100%" alt="hdrshot reads JPEG XR, gain map JPEG, HEIC, OpenEXR, Radiance, HDR PNG, HDR AVIF and JPEG XL, and writes HDR PNG, HDR AVIF, Ultra HDR JPEG and SDR PNG or JPEG. Use it as a desktop app, on the command line, in the browser, from the right-click menu or as a watch folder.">
 </p>
 
