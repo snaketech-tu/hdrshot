@@ -21,7 +21,7 @@ half = "2.7.1"
 interprocess = "2.4.6"
 hdrshot-core = { version = "2.3.3", path = "../hdrshot-core" }
 png = "0.18.1"
-rfd = "0.17.2"
+rfd = "0.18.0"
 ring = "0.17.14"
 ron = "0.12.2"
 serde = { version = "1.0.229", features = ["derive"] }
